@@ -28,9 +28,11 @@ Plus an **optional live fetch** of your real plan limits (see
 - **5-hour window** — tokens used in the rolling 5h session window, an estimated cost,
   a usage meter against a configurable soft budget, and a countdown to when the window
   first starts to free up.
-- **Per-model burn** (5h) — compares each model by share of window tokens, tokens per
-  turn, a burn multiplier vs the lightest model, estimated cost, and "~N turns left if
-  you used only this model." Shows which model depletes your session fastest.
+- **Per-model burn** (5h) — compares each model by share, per-turn weight, a burn
+  multiplier vs the lightest model, and "~N turns left if you used only this model."
+  Switch the basis in Settings between **total tokens** (rate-limit pressure; default),
+  **fresh tokens** (new work, no cache reads), or **cost** — total tokens makes models
+  look similar (cache reads dominate), while cost exposes the real gap (e.g. Opus ~2.8×).
 - **Today** — tokens, estimated cost, request count, sessions, and tool calls (computed
   live from the session logs).
 - **14-day trend** — a sparkline of daily token totals.
