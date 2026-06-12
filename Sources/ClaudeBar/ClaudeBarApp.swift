@@ -1,0 +1,31 @@
+import SwiftUI
+import AppKit
+
+struct ClaudeBarApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    @StateObject private var store = UsageStore()
+
+    var body: some Scene {
+        MenuBarExtra {
+            MenuContentView(store: store)
+        } label: {
+            // Icon + the chosen at-a-glance metric.
+            HStack(spacing: 3) {
+                Image(systemName: "sparkle")
+                Text(store.barText).monospacedDigit()
+            }
+        }
+        .menuBarExtraStyle(.window)
+
+        Settings {
+            SettingsView(store: store)
+        }
+    }
+}
+
+/// Run as a menu-bar-only accessory app (no Dock icon, no main window).
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.accessory)
+    }
+}
