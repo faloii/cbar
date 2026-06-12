@@ -41,6 +41,20 @@ enum CLI {
 
     private final class LimitsBox: @unchecked Sendable { var value: LimitsSnapshot? }
 
+    /// Short human-readable burn-rate note for the CLI, or nil to print nothing.
+    private static func projectionNote(_ p: Projection, now: Date) -> String? {
+        func rate() -> String { p.ratePerHour >= 10 ? "\(Int(p.ratePerHour.rounded()))%/h" : String(format: "%.1f%%/h", p.ratePerHour) }
+        switch p.verdict {
+        case .measuring: return "↗ measuring rate…"
+        case .idle:      return "↗ not burning"
+        case .safe:      return "↗ \(rate()) · lasts past reset"
+        case .atRisk:
+            let full = p.timeToFull.map { Fmt.countdown(to: now.addingTimeInterval($0), from: now) } ?? "?"
+            let gap = p.blockedBy.map { Fmt.countdown(to: now.addingTimeInterval($0), from: now) } ?? "?"
+            return "↗ \(rate()) · full in \(full) — \(gap) before reset ⚠"
+        }
+    }
+
     private static func printText(_ s: UsageSnapshot, _ limits: LimitsSnapshot?) {
         func line(_ l: String, _ v: String) { print("  \(l.padding(toLength: 16, withPad: " ", startingAt: 0)) \(v)") }
 
@@ -48,16 +62,20 @@ enum CLI {
 
         if let l = limits {
             print("Plan limits\(l.stale ? " (cached)" : ""):")
-            func limit(_ name: String, _ w: LimitWindow?) {
+            let now = s.generatedAt
+            func limit(_ name: String, _ w: LimitWindow?, _ proj: Projection?) {
                 guard let w else { return }
                 var v = String(format: "%.0f%%", w.utilization)
-                if let r = w.resetsAt { v += "  (resets in \(Fmt.countdown(to: r, from: s.generatedAt)))" }
+                if let r = w.resetsAt { v += "  (resets in \(Fmt.countdown(to: r, from: now)))" }
                 line(name, v)
+                if let p = proj, let note = projectionNote(p, now: now) { line("", note) }
             }
             if l.hasData {
-                limit("Session 5h", l.session5h)
-                limit("Weekly 7d", l.weekly7d)
-                limit("Weekly Opus", l.weeklyOpus)
+                let sp = Projection.compute(points: UsageHistory.sessionPoints(), resetsAt: l.session5h?.resetsAt, now: now)
+                let wp = Projection.compute(points: UsageHistory.weeklyPoints(), resetsAt: l.weekly7d?.resetsAt, now: now)
+                limit("Session 5h", l.session5h, sp)
+                limit("Weekly 7d", l.weekly7d, wp)
+                limit("Weekly Opus", l.weeklyOpus, nil)
             } else {
                 line("(unavailable)", l.error ?? "no data")
             }

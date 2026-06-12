@@ -68,6 +68,48 @@ final class TokenCountsTests: XCTestCase {
     }
 }
 
+final class ProjectionTests: XCTestCase {
+    let t = Date(timeIntervalSince1970: 1_000_000)
+    func mins(_ m: Double) -> Date { t.addingTimeInterval(m * 60) }
+
+    func testMeasuringWithOnePoint() {
+        let p = Projection.compute(points: [(t, 50)], resetsAt: t.addingTimeInterval(4 * 3600), now: t)
+        XCTAssertEqual(p.verdict, .measuring)
+    }
+
+    func testIdleWhenFlat() {
+        let p = Projection.compute(points: [(mins(-30), 50), (t, 50)], resetsAt: t.addingTimeInterval(4 * 3600), now: t)
+        XCTAssertEqual(p.verdict, .idle)
+        XCTAssertNil(p.timeToFull)
+    }
+
+    func testSafeWhenResetBeatsExhaustion() {
+        // 52→56 over 30m = 8%/h; 44 remaining → ~5.5h to full > 4h reset → safe.
+        let p = Projection.compute(points: [(mins(-30), 52), (t, 56)], resetsAt: t.addingTimeInterval(4 * 3600), now: t)
+        XCTAssertEqual(p.verdict, .safe)
+        XCTAssertEqual(p.ratePerHour, 8, accuracy: 0.01)
+        XCTAssertNil(p.blockedBy)
+    }
+
+    func testAtRiskWhenBurningFast() {
+        // 60→78 over 30m = 36%/h; 22 remaining → ~37m to full ≪ 4h reset → at risk.
+        let p = Projection.compute(points: [(mins(-30), 60), (t, 78)], resetsAt: t.addingTimeInterval(4 * 3600), now: t)
+        XCTAssertEqual(p.verdict, .atRisk)
+        XCTAssertEqual(p.ratePerHour, 36, accuracy: 0.01)
+        XCTAssertNotNil(p.timeToFull)
+        XCTAssertGreaterThan(p.blockedBy ?? 0, 0)
+    }
+
+    func testResetBoundaryIgnoresPreDropSamples() {
+        // A reset (95→10) means the slope must come from the post-reset rise (10→20),
+        // not the overall negative trend — i.e. a positive burn, not idle.
+        let pts: [(Date, Double)] = [(mins(-40), 90), (mins(-20), 95), (mins(-15), 10), (mins(-5), 20)]
+        let p = Projection.compute(points: pts, resetsAt: t.addingTimeInterval(5 * 3600), now: t)
+        XCTAssertEqual(p.verdict, .atRisk)
+        XCTAssertGreaterThan(p.ratePerHour, 30)
+    }
+}
+
 final class OAuthUsageParseTests: XCTestCase {
     func testParsesISOWindows() {
         let json = """

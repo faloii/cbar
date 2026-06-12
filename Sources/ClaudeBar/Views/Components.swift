@@ -65,12 +65,14 @@ struct StatRow: View {
     }
 }
 
-/// A plan-limit row: "Session (5h)  42%  ·  resets in 2h 13m" + meter.
+/// A plan-limit row: "Session (5h)  42%  ·  resets in 2h 13m" + meter + a burn-rate
+/// projection subline ("▲ 12%/h · lasts past reset" / "… full in 50m — 3h before reset").
 struct LimitRow: View {
     let title: String
     let subtitle: String
     let window: LimitWindow
     let now: Date
+    var projection: Projection? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -86,7 +88,38 @@ struct LimitRow: View {
                     .font(.callout.weight(.semibold)).monospacedDigit()
             }
             MeterBar(fraction: window.fraction)
+            projectionLine
         }
+    }
+
+    @ViewBuilder private var projectionLine: some View {
+        if let p = projection {
+            switch p.verdict {
+            case .measuring:
+                line("measuring rate…", .secondary, "hourglass")
+            case .idle:
+                line("not burning", .secondary, "pause")
+            case .safe:
+                line("\(rateText(p.ratePerHour)) · lasts past reset", .green, "checkmark.circle")
+            case .atRisk:
+                let full = p.timeToFull.map { Fmt.countdown(to: now.addingTimeInterval($0), from: now) } ?? "?"
+                let gap = p.blockedBy.map { Fmt.countdown(to: now.addingTimeInterval($0), from: now) } ?? "?"
+                line("\(rateText(p.ratePerHour)) · full in \(full) — \(gap) before reset", .orange, "exclamationmark.triangle.fill")
+            }
+        }
+    }
+
+    private func rateText(_ rate: Double) -> String {
+        rate >= 10 ? "▲ \(Int(rate.rounded()))%/h" : String(format: "▲ %.1f%%/h", rate)
+    }
+
+    private func line(_ text: String, _ color: Color, _ icon: String) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+            Text(text)
+        }
+        .font(.caption2)
+        .foregroundStyle(color)
     }
 }
 

@@ -26,6 +26,8 @@ enum BarMetric: String, CaseIterable, Identifiable {
 final class UsageStore: ObservableObject {
     @Published private(set) var snapshot = UsageSnapshot.empty
     @Published private(set) var limits: LimitsSnapshot?
+    @Published private(set) var sessionProjection: Projection?
+    @Published private(set) var weeklyProjection: Projection?
     @Published private(set) var isRefreshing = false
 
     @AppStorage("refreshIntervalSeconds") var refreshInterval: Double = 60 {
@@ -72,9 +74,19 @@ final class UsageStore: ObservableObject {
             let lim: LimitsSnapshot? = live ? await client.loadLimits(force: force) : nil
             self.snapshot = snap
             if live { self.limits = lim } else { self.limits = nil }
+            self.recomputeProjections()
             self.maybeNotify()
             self.isRefreshing = false
         }
+    }
+
+    private func recomputeProjections() {
+        guard enableLiveLimits else { sessionProjection = nil; weeklyProjection = nil; return }
+        let now = Date()
+        sessionProjection = Projection.compute(points: UsageHistory.sessionPoints(),
+                                               resetsAt: limits?.session5h?.resetsAt, now: now)
+        weeklyProjection = Projection.compute(points: UsageHistory.weeklyPoints(),
+                                              resetsAt: limits?.weekly7d?.resetsAt, now: now)
     }
 
     /// Fire a macOS notification once when a limit first crosses the threshold.

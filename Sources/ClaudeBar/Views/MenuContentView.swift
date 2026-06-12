@@ -66,10 +66,12 @@ struct MenuContentView: View {
 
             if let l = store.limits, l.hasData {
                 if let w = l.session5h {
-                    LimitRow(title: "Session", subtitle: "5h", window: w, now: snap.generatedAt)
+                    LimitRow(title: "Session", subtitle: "5h", window: w, now: snap.generatedAt,
+                             projection: store.sessionProjection)
                 }
                 if let w = l.weekly7d {
-                    LimitRow(title: "Weekly", subtitle: "7d", window: w, now: snap.generatedAt)
+                    LimitRow(title: "Weekly", subtitle: "7d", window: w, now: snap.generatedAt,
+                             projection: store.weeklyProjection)
                 }
                 if let w = l.weeklyOpus {
                     LimitRow(title: "Weekly", subtitle: "Opus", window: w, now: snap.generatedAt)

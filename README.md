@@ -21,6 +21,10 @@ Plus an **optional live fetch** of your real plan limits (see
 - **Plan limits** (live) — your real **Session (5h)** and **Weekly (7d)** usage as
   percentages with reset countdowns, exactly like Claude Code's `/usage`. Falls back to
   a cached value (flagged) if a refresh fails.
+- **Burn-rate projection** — tracks your usage over time and tells you whether you'll
+  hit the cap *before* the window resets: `▲ 22%/h · full in 1h32m — 2h22m before reset`
+  when you're on track to run dry, or `▲ 8%/h · lasts past reset` when you're fine. Lets
+  you slow down or switch to a lighter model before getting blocked.
 - **5-hour window** — tokens used in the rolling 5h session window, an estimated cost,
   a usage meter against a configurable soft budget, and a countdown to when the window
   first starts to free up.
@@ -146,8 +150,8 @@ Sources/ClaudeBar/
   main.swift               # entry: GUI vs --print CLI
   ClaudeBarApp.swift       # MenuBarExtra + accessory app
   CLI.swift                # --print / --json reporter
-  Models/   Usage.swift, Pricing.swift, Limits.swift
-  Services/ ClaudeDataReader.swift, OAuthUsageClient.swift, UsageStore.swift, LoginItem.swift, Notifier.swift
+  Models/   Usage.swift, Pricing.swift, Limits.swift, Projection.swift
+  Services/ ClaudeDataReader.swift, OAuthUsageClient.swift, UsageStore.swift, LoginItem.swift, Notifier.swift, UsageHistory.swift
   Views/    MenuContentView.swift, SettingsView.swift, Components.swift
   Util/     Formatters.swift
 Tests/ClaudeBarTests/   unit tests

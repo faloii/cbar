@@ -40,6 +40,10 @@ struct OAuthUsageClient: Sendable {
         do {
             let fresh = try await fetchRemote()
             writeCache(fresh)
+            // One time-series point per real network fetch (gated by the TTL above).
+            UsageHistory.append(session: fresh.session5h?.utilization,
+                                weekly: fresh.weekly7d?.utilization,
+                                at: fresh.fetchedAt)
             return fresh
         } catch {
             let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
