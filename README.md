@@ -28,8 +28,11 @@ Plus an **optional live fetch** of your real plan limits (see
 - **5-hour window** — tokens used in the rolling 5h session window, an estimated cost,
   a usage meter against a configurable soft budget, and a countdown to when the window
   first starts to free up.
-- **Today** — tokens, estimated cost, request count, sessions, tool calls, and a
-  per-model token breakdown (all computed live from the session logs).
+- **Per-model burn** (5h) — compares each model by share of window tokens, tokens per
+  turn, a burn multiplier vs the lightest model, estimated cost, and "~N turns left if
+  you used only this model." Shows which model depletes your session fastest.
+- **Today** — tokens, estimated cost, request count, sessions, and tool calls (computed
+  live from the session logs).
 - **14-day trend** — a sparkline of daily token totals.
 - **All time** — total sessions, total messages, and your first-session date.
 
