@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build & test (macOS)
+    # macOS 15 ships Xcode 16 / Swift 6, required by Package.swift (tools 6.0).
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Build (debug)
+        run: swift build -v
+
+      - name: Test
+        run: swift test -v
+
+      - name: Build release binary
+        run: swift build -c release

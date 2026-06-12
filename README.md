@@ -61,6 +61,9 @@ swift test
 Covers the pure logic: token/cost formatting, model-name display, pricing, and the
 `/api/oauth/usage` response parser.
 
+CI (`.github/workflows/ci.yml`) runs `swift build` + `swift test` on macOS on every
+push to `main` and on pull requests.
+
 ## CLI
 
 The same binary doubles as a no-GUI reporter — handy for scripts or a quick check:
