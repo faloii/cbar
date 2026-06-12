@@ -89,6 +89,22 @@ enum CLI {
             line("Frees up in", Fmt.countdown(to: reset, from: s.generatedAt))
         }
 
+        let burn = ModelBurn.rows(window: s.windowByModel,
+                                  totalWindowTokens: s.windowTokens.total,
+                                  sessionUtil: limits?.session5h?.utilization)
+        if !burn.isEmpty {
+            print("\nPer-model burn (last 5h):")
+            for r in burn {
+                var v = String(format: "%3d%%  %@/turn  %.1f×  ~%@",
+                               Int((r.shareFraction * 100).rounded()),
+                               Fmt.tokens(Int(r.tokensPerRequest)),
+                               r.burnMultiplier,
+                               Fmt.usd(r.cost))
+                if let h = r.headroomTurns { v += "  ~\(Int(h.rounded())) turns left" }
+                line(r.model, v)
+            }
+        }
+
         print("\nToday:")
         line("Tokens", Fmt.tokens(s.todayTokens.total))
         line("Est. cost", "~" + Fmt.usd(s.todayCost))
@@ -136,6 +152,19 @@ enum CLI {
                 "sessions": s.totalSessions,
                 "messages": s.totalMessages,
             ],
+            "perModelBurn": ModelBurn.rows(window: s.windowByModel,
+                                           totalWindowTokens: s.windowTokens.total,
+                                           sessionUtil: limits?.session5h?.utilization).map { r in
+                [
+                    "model": r.model,
+                    "tokens": r.tokens,
+                    "share": r.shareFraction,
+                    "tokensPerTurn": r.tokensPerRequest,
+                    "burnMultiplier": r.burnMultiplier,
+                    "costEstimate": r.cost,
+                    "headroomTurns": r.headroomTurns as Any,
+                ]
+            },
         ]
         if let l = limits {
             obj["planLimits"] = [

@@ -15,6 +15,10 @@ struct MenuContentView: View {
             }
             Divider()
             windowSection
+            if !store.modelBurnRows.isEmpty {
+                Divider()
+                perModelSection
+            }
             Divider()
             todaySection
             if !snap.dailyTokenHistory.isEmpty {
@@ -84,6 +88,18 @@ struct MenuContentView: View {
         }
     }
 
+    private var perModelSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLabel(text: "Per-model burn · 5h")
+            ForEach(store.modelBurnRows) { ModelBurnRowView(row: $0) }
+            if store.modelBurnRows.contains(where: { $0.headroomTurns != nil }) {
+                Text("× = tokens/turn vs lightest · “turns left” assumes only that model")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
     private var windowSection: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
@@ -120,19 +136,6 @@ struct MenuContentView: View {
             StatRow(label: "Requests", value: Fmt.int(snap.todayRequests))
             StatRow(label: "Sessions", value: Fmt.int(snap.todaySessions))
             StatRow(label: "Tool calls", value: Fmt.int(snap.todayToolCalls))
-
-            if !snap.todayByModel.isEmpty {
-                VStack(alignment: .leading, spacing: 3) {
-                    ForEach(snap.todayByModel) { m in
-                        HStack {
-                            Text(m.model).font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            Text(Fmt.tokens(m.tokens.total)).font(.caption).monospacedDigit()
-                        }
-                    }
-                }
-                .padding(.top, 2)
-            }
         }
     }
 

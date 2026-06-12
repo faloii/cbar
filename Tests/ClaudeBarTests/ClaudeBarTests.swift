@@ -110,6 +110,43 @@ final class ProjectionTests: XCTestCase {
     }
 }
 
+final class ModelBurnTests: XCTestCase {
+    private func model(_ name: String, total: Int, requests: Int, cost: Double = 0) -> ModelWindowUsage {
+        ModelWindowUsage(model: name, tokens: TokenCounts(cacheRead: total), cost: cost, requests: requests)
+    }
+
+    func testShareMultiplierAndHeadroom() {
+        // Opus 800k/8 = 100k/turn; Fable 200k/4 = 50k/turn → Opus is 2× the lightest.
+        let window = [model("Opus", total: 800_000, requests: 8),
+                      model("Fable", total: 200_000, requests: 4)]
+        let rows = ModelBurn.rows(window: window, totalWindowTokens: 1_000_000, sessionUtil: 50)
+
+        let opus = rows.first { $0.model == "Opus" }!
+        let fable = rows.first { $0.model == "Fable" }!
+
+        XCTAssertEqual(rows.first?.model, "Opus") // sorted by tokens desc
+        XCTAssertEqual(opus.shareFraction, 0.8, accuracy: 0.001)
+        XCTAssertEqual(fable.shareFraction, 0.2, accuracy: 0.001)
+        XCTAssertEqual(opus.tokensPerRequest, 100_000, accuracy: 1)
+        XCTAssertEqual(opus.burnMultiplier, 2.0, accuracy: 0.001)
+        XCTAssertEqual(fable.burnMultiplier, 1.0, accuracy: 0.001)
+
+        // util 50% → remaining ≈ total (1M). Opus: 1M/100k = 10 turns; Fable: 1M/50k = 20.
+        XCTAssertEqual(opus.headroomTurns ?? 0, 10, accuracy: 0.1)
+        XCTAssertEqual(fable.headroomTurns ?? 0, 20, accuracy: 0.1)
+    }
+
+    func testNoHeadroomWithoutUtilization() {
+        let rows = ModelBurn.rows(window: [model("Opus", total: 100, requests: 1)],
+                                  totalWindowTokens: 100, sessionUtil: nil)
+        XCTAssertNil(rows.first?.headroomTurns)
+    }
+
+    func testEmptyWindow() {
+        XCTAssertTrue(ModelBurn.rows(window: [], totalWindowTokens: 0, sessionUtil: 50).isEmpty)
+    }
+}
+
 final class OAuthUsageParseTests: XCTestCase {
     func testParsesISOWindows() {
         let json = """

@@ -62,6 +62,7 @@ struct ClaudeDataReader {
         var windowTokens = TokenCounts()
         var windowCost = 0.0
         var oldestInWindow: Date?
+        var winByModel: [String: ModelWindowUsage] = [:]
 
         var todayTokens = TokenCounts()
         var todayCost = 0.0
@@ -87,6 +88,12 @@ struct ClaudeDataReader {
                 if oldestInWindow == nil || r.timestamp < oldestInWindow! {
                     oldestInWindow = r.timestamp
                 }
+                let key = ModelName.display(r.model)
+                var mw = winByModel[key] ?? ModelWindowUsage(model: key, tokens: TokenCounts(), cost: 0, requests: 0)
+                mw.tokens += tokens
+                mw.cost += cost
+                mw.requests += 1
+                winByModel[key] = mw
             }
 
             if isToday {
@@ -104,6 +111,9 @@ struct ClaudeDataReader {
         snap.windowTokens = windowTokens
         snap.windowCost = windowCost
         snap.windowResetAt = oldestInWindow.map { $0.addingTimeInterval(Self.windowDuration) }
+        snap.windowByModel = winByModel.values
+            .filter { $0.tokens.total > 0 }
+            .sorted { $0.tokens.total > $1.tokens.total }
 
         snap.todayTokens = todayTokens
         snap.todayCost = todayCost

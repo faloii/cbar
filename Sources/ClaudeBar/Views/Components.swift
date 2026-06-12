@@ -123,6 +123,39 @@ struct LimitRow: View {
     }
 }
 
+/// One row of the per-model burn comparison: share bar + tokens/turn + cost +
+/// burn multiplier, with optional "turns left if only this model".
+struct ModelBurnRowView: View {
+    let row: ModelBurnRow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Text(row.model).font(.callout.weight(.medium))
+                Spacer()
+                Text(String(format: "%.1f×", row.burnMultiplier))
+                    .font(.caption).monospacedDigit()
+                    .foregroundStyle(row.burnMultiplier >= 2 ? .orange : .secondary)
+                    .help("Tokens per turn vs the lightest model you used")
+                Text("\(Int((row.shareFraction * 100).rounded()))%")
+                    .font(.callout.weight(.semibold)).monospacedDigit()
+                    .frame(width: 38, alignment: .trailing)
+            }
+            MeterBar(fraction: row.shareFraction)
+            HStack(spacing: 5) {
+                Text("\(Fmt.tokens(Int(row.tokensPerRequest)))/turn")
+                Text("·")
+                Text("~\(Fmt.usd(row.cost))")
+                if let h = row.headroomTurns {
+                    Text("·")
+                    Text("~\(Int(h.rounded())) turns left").foregroundStyle(row.burnMultiplier >= 2 ? .orange : .secondary)
+                }
+            }
+            .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+}
+
 /// Section header.
 struct SectionLabel: View {
     let text: String

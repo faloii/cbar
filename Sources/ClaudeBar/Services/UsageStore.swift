@@ -146,6 +146,13 @@ final class UsageStore: ObservableObject {
         return min(1, Double(snapshot.windowTokens.total) / Double(fiveHourTokenBudget))
     }
 
+    /// Per-model burn comparison for the current 5-hour window.
+    var modelBurnRows: [ModelBurnRow] {
+        ModelBurn.rows(window: snapshot.windowByModel,
+                       totalWindowTokens: snapshot.windowTokens.total,
+                       sessionUtil: limits?.session5h?.utilization)
+    }
+
     /// Highest of the live session/weekly utilizations, or nil if unavailable.
     var maxLimitUtilization: Double? {
         let vals = [limits?.session5h?.utilization, limits?.weekly7d?.utilization].compactMap { $0 }

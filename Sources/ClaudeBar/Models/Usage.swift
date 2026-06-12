@@ -28,6 +28,15 @@ struct ModelUsage: Identifiable {
     var cost: Double
 }
 
+/// Per-model usage within the 5-hour window, including request count (for burn math).
+struct ModelWindowUsage: Identifiable {
+    var id: String { model }
+    let model: String
+    var tokens: TokenCounts
+    var cost: Double
+    var requests: Int
+}
+
 /// Everything the UI needs for one refresh.
 struct UsageSnapshot {
     var generatedAt = Date()
@@ -35,6 +44,7 @@ struct UsageSnapshot {
     // Rolling 5-hour window (Claude's session-limit window).
     var windowTokens = TokenCounts()
     var windowCost = 0.0
+    var windowByModel: [ModelWindowUsage] = []
     /// When the oldest request in the current window ages past 5h — i.e. when
     /// the window first starts to free up. `nil` when the window is empty.
     var windowResetAt: Date?
