@@ -41,6 +41,11 @@ enum CLI {
 
     private final class LimitsBox: @unchecked Sendable { var value: LimitsSnapshot? }
 
+    /// The per-model burn basis saved by the GUI (defaults to total tokens).
+    private static func savedBurnBasis() -> BurnBasis {
+        BurnBasis(rawValue: UserDefaults.standard.string(forKey: "burnBasis") ?? "") ?? .totalTokens
+    }
+
     /// Short human-readable burn-rate note for the CLI, or nil to print nothing.
     private static func projectionNote(_ p: Projection, now: Date) -> String? {
         func rate() -> String { p.ratePerHour >= 10 ? "\(Int(p.ratePerHour.rounded()))%/h" : String(format: "%.1f%%/h", p.ratePerHour) }
@@ -89,17 +94,18 @@ enum CLI {
             line("Frees up in", Fmt.countdown(to: reset, from: s.generatedAt))
         }
 
+        let basis = savedBurnBasis()
         let burn = ModelBurn.rows(window: s.windowByModel,
-                                  totalWindowTokens: s.windowTokens.total,
-                                  sessionUtil: limits?.session5h?.utilization)
+                                  sessionUtil: limits?.session5h?.utilization,
+                                  basis: basis)
         if !burn.isEmpty {
-            print("\nPer-model burn (last 5h):")
+            print("\nPer-model burn (last 5h, by \(basis.shortLabel)):")
             for r in burn {
-                var v = String(format: "%3d%%  %@/turn  %.1f×  ~%@",
+                var v = String(format: "%3d%%  %@  %.1f×",
                                Int((r.shareFraction * 100).rounded()),
-                               Fmt.tokens(Int(r.tokensPerRequest)),
-                               r.burnMultiplier,
-                               Fmt.usd(r.cost))
+                               basis.formatPerTurn(r.perTurnWeight),
+                               r.burnMultiplier)
+                if basis != .cost { v += "  ~\(Fmt.usd(r.cost))" }
                 if let h = r.headroomTurns { v += "  ~\(Int(h.rounded())) turns left" }
                 line(r.model, v)
             }
@@ -153,18 +159,19 @@ enum CLI {
                 "messages": s.totalMessages,
             ],
             "perModelBurn": ModelBurn.rows(window: s.windowByModel,
-                                           totalWindowTokens: s.windowTokens.total,
-                                           sessionUtil: limits?.session5h?.utilization).map { r in
+                                           sessionUtil: limits?.session5h?.utilization,
+                                           basis: savedBurnBasis()).map { r in
                 [
                     "model": r.model,
                     "tokens": r.tokens,
                     "share": r.shareFraction,
-                    "tokensPerTurn": r.tokensPerRequest,
+                    "perTurnWeight": r.perTurnWeight,
                     "burnMultiplier": r.burnMultiplier,
                     "costEstimate": r.cost,
                     "headroomTurns": r.headroomTurns as Any,
                 ]
             },
+            "burnBasis": savedBurnBasis().rawValue,
         ]
         if let l = limits {
             obj["planLimits"] = [

@@ -34,6 +34,16 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Per-model burn") {
+                Picker("Compare by", selection: Binding(
+                    get: { store.burnBasis },
+                    set: { store.burnBasis = $0 })) {
+                    ForEach(BurnBasis.allCases) { Text($0.label).tag($0) }
+                }
+                Text("Total tokens ≈ rate-limit pressure (cache reads dominate, so models look similar). Cost shows the real per-model gap; fresh tokens = new work only.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Alerts") {
                 HStack {
                     Text("Warn at")

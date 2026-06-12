@@ -10,6 +10,9 @@ struct TokenCounts: Equatable {
     /// Tokens that count toward the headline "billable" number we show in the bar.
     var total: Int { input + output + cacheWrite + cacheRead }
 
+    /// "New work" tokens — everything except cache reads (which re-read prior context).
+    var fresh: Int { input + output + cacheWrite }
+
     static func + (lhs: TokenCounts, rhs: TokenCounts) -> TokenCounts {
         TokenCounts(input: lhs.input + rhs.input,
                     output: lhs.output + rhs.output,

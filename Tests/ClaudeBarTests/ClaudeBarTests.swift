@@ -115,19 +115,18 @@ final class ModelBurnTests: XCTestCase {
         ModelWindowUsage(model: name, tokens: TokenCounts(cacheRead: total), cost: cost, requests: requests)
     }
 
-    func testShareMultiplierAndHeadroom() {
+    func testTotalTokenBasis() {
         // Opus 800k/8 = 100k/turn; Fable 200k/4 = 50k/turn → Opus is 2× the lightest.
         let window = [model("Opus", total: 800_000, requests: 8),
                       model("Fable", total: 200_000, requests: 4)]
-        let rows = ModelBurn.rows(window: window, totalWindowTokens: 1_000_000, sessionUtil: 50)
+        let rows = ModelBurn.rows(window: window, sessionUtil: 50, basis: .totalTokens)
 
         let opus = rows.first { $0.model == "Opus" }!
         let fable = rows.first { $0.model == "Fable" }!
 
-        XCTAssertEqual(rows.first?.model, "Opus") // sorted by tokens desc
+        XCTAssertEqual(rows.first?.model, "Opus") // sorted by weight desc
         XCTAssertEqual(opus.shareFraction, 0.8, accuracy: 0.001)
-        XCTAssertEqual(fable.shareFraction, 0.2, accuracy: 0.001)
-        XCTAssertEqual(opus.tokensPerRequest, 100_000, accuracy: 1)
+        XCTAssertEqual(opus.perTurnWeight, 100_000, accuracy: 1)
         XCTAssertEqual(opus.burnMultiplier, 2.0, accuracy: 0.001)
         XCTAssertEqual(fable.burnMultiplier, 1.0, accuracy: 0.001)
 
@@ -136,14 +135,36 @@ final class ModelBurnTests: XCTestCase {
         XCTAssertEqual(fable.headroomTurns ?? 0, 20, accuracy: 0.1)
     }
 
+    func testCostBasisChangesShareAndMultiplier() {
+        // Equal tokens, but Opus costs far more → cost basis reorders & re-weights.
+        let window = [model("Opus", total: 500_000, requests: 5, cost: 300),
+                      model("Fable", total: 500_000, requests: 5, cost: 60)]
+        let rows = ModelBurn.rows(window: window, sessionUtil: nil, basis: .cost)
+
+        let opus = rows.first { $0.model == "Opus" }!
+        let fable = rows.first { $0.model == "Fable" }!
+        XCTAssertEqual(rows.first?.model, "Opus")                 // higher cost share first
+        XCTAssertEqual(opus.shareFraction, 300.0 / 360.0, accuracy: 0.001)
+        XCTAssertEqual(opus.perTurnWeight, 60, accuracy: 0.001)   // $300 / 5 turns
+        XCTAssertEqual(opus.burnMultiplier, 5.0, accuracy: 0.001) // $60/turn vs $12/turn
+    }
+
+    func testFreshTokenBasisExcludesCacheReads() {
+        let m = ModelWindowUsage(model: "Opus",
+                                 tokens: TokenCounts(input: 10, output: 20, cacheWrite: 30, cacheRead: 940),
+                                 cost: 0, requests: 1)
+        let rows = ModelBurn.rows(window: [m], sessionUtil: nil, basis: .freshTokens)
+        XCTAssertEqual(rows.first!.perTurnWeight, 60, accuracy: 0.001) // 10+20+30, cacheRead excluded
+    }
+
     func testNoHeadroomWithoutUtilization() {
         let rows = ModelBurn.rows(window: [model("Opus", total: 100, requests: 1)],
-                                  totalWindowTokens: 100, sessionUtil: nil)
+                                  sessionUtil: nil, basis: .totalTokens)
         XCTAssertNil(rows.first?.headroomTurns)
     }
 
     func testEmptyWindow() {
-        XCTAssertTrue(ModelBurn.rows(window: [], totalWindowTokens: 0, sessionUtil: 50).isEmpty)
+        XCTAssertTrue(ModelBurn.rows(window: [], sessionUtil: 50, basis: .totalTokens).isEmpty)
     }
 }
 

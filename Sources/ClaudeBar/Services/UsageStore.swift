@@ -37,6 +37,11 @@ final class UsageStore: ObservableObject {
     @AppStorage("enableLiveLimits") var enableLiveLimits: Bool = true {
         didSet { refresh(force: true) }
     }
+    @AppStorage("burnBasis") private var burnBasisRaw: String = BurnBasis.totalTokens.rawValue
+    var burnBasis: BurnBasis {
+        get { BurnBasis(rawValue: burnBasisRaw) ?? .totalTokens }
+        set { burnBasisRaw = newValue.rawValue }
+    }
     @AppStorage("warnThreshold") var warnThreshold: Int = 80
     @AppStorage("notifyOnWarning") var notifyOnWarning: Bool = false {
         didSet { if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() } }
@@ -149,8 +154,8 @@ final class UsageStore: ObservableObject {
     /// Per-model burn comparison for the current 5-hour window.
     var modelBurnRows: [ModelBurnRow] {
         ModelBurn.rows(window: snapshot.windowByModel,
-                       totalWindowTokens: snapshot.windowTokens.total,
-                       sessionUtil: limits?.session5h?.utilization)
+                       sessionUtil: limits?.session5h?.utilization,
+                       basis: burnBasis)
     }
 
     /// Highest of the live session/weekly utilizations, or nil if unavailable.

@@ -127,6 +127,7 @@ struct LimitRow: View {
 /// burn multiplier, with optional "turns left if only this model".
 struct ModelBurnRowView: View {
     let row: ModelBurnRow
+    let basis: BurnBasis
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -136,16 +137,18 @@ struct ModelBurnRowView: View {
                 Text(String(format: "%.1f×", row.burnMultiplier))
                     .font(.caption).monospacedDigit()
                     .foregroundStyle(row.burnMultiplier >= 2 ? .orange : .secondary)
-                    .help("Tokens per turn vs the lightest model you used")
+                    .help("Per-turn \(basis.shortLabel) vs the lightest model you used")
                 Text("\(Int((row.shareFraction * 100).rounded()))%")
                     .font(.callout.weight(.semibold)).monospacedDigit()
                     .frame(width: 38, alignment: .trailing)
             }
             MeterBar(fraction: row.shareFraction)
             HStack(spacing: 5) {
-                Text("\(Fmt.tokens(Int(row.tokensPerRequest)))/turn")
-                Text("·")
-                Text("~\(Fmt.usd(row.cost))")
+                Text(basis.formatPerTurn(row.perTurnWeight))
+                if basis != .cost {
+                    Text("·")
+                    Text("~\(Fmt.usd(row.cost))")
+                }
                 if let h = row.headroomTurns {
                     Text("·")
                     Text("~\(Int(h.rounded())) turns left").foregroundStyle(row.burnMultiplier >= 2 ? .orange : .secondary)

@@ -90,13 +90,15 @@ struct MenuContentView: View {
 
     private var perModelSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SectionLabel(text: "Per-model burn · 5h")
-            ForEach(store.modelBurnRows) { ModelBurnRowView(row: $0) }
-            if store.modelBurnRows.contains(where: { $0.headroomTurns != nil }) {
-                Text("× = tokens/turn vs lightest · “turns left” assumes only that model")
-                    .font(.caption2).foregroundStyle(.tertiary)
-                    .fixedSize(horizontal: false, vertical: true)
+            HStack {
+                SectionLabel(text: "Per-model burn · 5h")
+                Spacer()
+                Text(store.burnBasis.shortLabel).font(.caption2).foregroundStyle(.tertiary)
             }
+            ForEach(store.modelBurnRows) { ModelBurnRowView(row: $0, basis: store.burnBasis) }
+            Text("× = per-turn \(store.burnBasis.shortLabel) vs lightest · “turns left” = session limit")
+                .font(.caption2).foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
