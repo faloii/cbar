@@ -4,12 +4,13 @@ import Combine
 
 /// What the menu-bar label shows at a glance.
 enum BarMetric: String, CaseIterable, Identifiable {
-    case sessionLimit, weeklyLimit, windowTokens, windowCost, todayTokens, todayCost
+    case sessionLimit, weeklyLimit, bothLimits, windowTokens, windowCost, todayTokens, todayCost
     var id: String { rawValue }
     var label: String {
         switch self {
         case .sessionLimit: return "Session limit %"
         case .weeklyLimit:  return "Weekly limit %"
+        case .bothLimits:   return "Session + weekly %"
         case .windowTokens: return "5h tokens"
         case .windowCost:   return "5h cost"
         case .todayTokens:  return "Today tokens"
@@ -17,7 +18,7 @@ enum BarMetric: String, CaseIterable, Identifiable {
         }
     }
     /// Whether this metric needs the live `/usage` data.
-    var needsLiveLimits: Bool { self == .sessionLimit || self == .weeklyLimit }
+    var needsLiveLimits: Bool { self == .sessionLimit || self == .weeklyLimit || self == .bothLimits }
 }
 
 /// Owns the current snapshot, the refresh timer, and user settings.
@@ -34,7 +35,15 @@ final class UsageStore: ObservableObject {
     @AppStorage("enableLiveLimits") var enableLiveLimits: Bool = true {
         didSet { refresh(force: true) }
     }
+    @AppStorage("warnThreshold") var warnThreshold: Int = 80
+    @AppStorage("notifyOnWarning") var notifyOnWarning: Bool = false {
+        didSet { if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() } }
+    }
     @AppStorage("barMetric") private var barMetricRaw: String = BarMetric.sessionLimit.rawValue
+
+    // Rising-edge tracking so a notification fires once per threshold crossing.
+    private var notifiedSession = false
+    private var notifiedWeekly = false
 
     var barMetric: BarMetric {
         get { BarMetric(rawValue: barMetricRaw) ?? .windowTokens }
@@ -63,8 +72,29 @@ final class UsageStore: ObservableObject {
             let lim: LimitsSnapshot? = live ? await client.loadLimits(force: force) : nil
             self.snapshot = snap
             if live { self.limits = lim } else { self.limits = nil }
+            self.maybeNotify()
             self.isRefreshing = false
         }
+    }
+
+    /// Fire a macOS notification once when a limit first crosses the threshold.
+    private func maybeNotify() {
+        guard notifyOnWarning else { return }
+        let t = Double(warnThreshold)
+
+        func check(_ window: LimitWindow?, name: String, flag: inout Bool) {
+            guard let u = window?.utilization else { return }
+            if u >= t, !flag {
+                flag = true
+                Notifier.notify(title: "\(name) limit at \(Int(u.rounded()))%",
+                                body: "You've passed \(warnThreshold)% of your \(name.lowercased()) limit.",
+                                id: "limit-\(name)")
+            } else if u < t {
+                flag = false
+            }
+        }
+        check(limits?.session5h, name: "Session", flag: &notifiedSession)
+        check(limits?.weekly7d, name: "Weekly", flag: &notifiedWeekly)
     }
 
     private func restartTimer() {
@@ -86,6 +116,11 @@ final class UsageStore: ObservableObject {
         case .weeklyLimit:
             if let u = limits?.weekly7d?.utilization { return "\(Int(u.rounded()))%" }
             return enableLiveLimits ? "—" : Fmt.tokens(s.windowTokens.total)
+        case .bothLimits:
+            let sPart = limits?.session5h.map { "S \(Int($0.utilization.rounded()))%" }
+            let wPart = limits?.weekly7d.map { "W \(Int($0.utilization.rounded()))%" }
+            let joined = [sPart, wPart].compactMap { $0 }.joined(separator: " · ")
+            return joined.isEmpty ? (enableLiveLimits ? "—" : Fmt.tokens(s.windowTokens.total)) : joined
         case .windowTokens: return Fmt.tokens(s.windowTokens.total)
         case .windowCost:   return Fmt.usd(s.windowCost)
         case .todayTokens:  return Fmt.tokens(s.todayTokens.total)
@@ -97,5 +132,17 @@ final class UsageStore: ObservableObject {
     var windowFraction: Double {
         guard fiveHourTokenBudget > 0 else { return 0 }
         return min(1, Double(snapshot.windowTokens.total) / Double(fiveHourTokenBudget))
+    }
+
+    /// Highest of the live session/weekly utilizations, or nil if unavailable.
+    var maxLimitUtilization: Double? {
+        let vals = [limits?.session5h?.utilization, limits?.weekly7d?.utilization].compactMap { $0 }
+        return vals.max()
+    }
+
+    /// True when a live limit has crossed the warning threshold — drives the
+    /// menu-bar warning icon/color.
+    var isOverThreshold: Bool {
+        (maxLimitUtilization ?? 0) >= Double(warnThreshold)
     }
 }

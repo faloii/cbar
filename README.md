@@ -15,7 +15,9 @@ Plus an **optional live fetch** of your real plan limits (see
 ## What it shows
 
 - **Menu-bar label** — a sparkle + one at-a-glance number. Defaults to your **Session
-  (5h) limit %**; switchable to weekly limit %, 5h tokens/cost, or today's tokens/cost.
+  (5h) limit %**; switchable to weekly %, both (`S 60% · W 88%`), 5h tokens/cost, or
+  today's tokens/cost. Turns into an orange ⚠︎ when a limit crosses your warning
+  threshold, with an optional macOS notification.
 - **Plan limits** (live) — your real **Session (5h)** and **Weekly (7d)** usage as
   percentages with reset countdowns, exactly like Claude Code's `/usage`. Falls back to
   a cached value (flagged) if a refresh fails.
@@ -145,7 +147,7 @@ Sources/ClaudeBar/
   ClaudeBarApp.swift       # MenuBarExtra + accessory app
   CLI.swift                # --print / --json reporter
   Models/   Usage.swift, Pricing.swift, Limits.swift
-  Services/ ClaudeDataReader.swift, OAuthUsageClient.swift, UsageStore.swift, LoginItem.swift
+  Services/ ClaudeDataReader.swift, OAuthUsageClient.swift, UsageStore.swift, LoginItem.swift, Notifier.swift
   Views/    MenuContentView.swift, SettingsView.swift, Components.swift
   Util/     Formatters.swift
 Tests/ClaudeBarTests/   unit tests

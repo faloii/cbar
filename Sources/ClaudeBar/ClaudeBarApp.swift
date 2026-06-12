@@ -9,9 +9,11 @@ struct ClaudeBarApp: App {
         MenuBarExtra {
             MenuContentView(store: store)
         } label: {
-            // Icon + the chosen at-a-glance metric.
+            // Icon + the chosen at-a-glance metric. Turns into an orange warning
+            // glyph once a live limit crosses the warning threshold.
             HStack(spacing: 3) {
-                Image(systemName: "sparkle")
+                Image(systemName: store.isOverThreshold ? "exclamationmark.triangle.fill" : "sparkle")
+                    .foregroundStyle(store.isOverThreshold ? Color.orange : Color.primary)
                 Text(store.barText).monospacedDigit()
             }
         }

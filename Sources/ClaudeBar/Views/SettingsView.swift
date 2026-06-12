@@ -34,6 +34,21 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Alerts") {
+                HStack {
+                    Text("Warn at")
+                    Slider(value: Binding(
+                        get: { Double(store.warnThreshold) },
+                        set: { store.warnThreshold = Int($0) }), in: 50...100, step: 5)
+                    Text("\(store.warnThreshold)%")
+                        .monospacedDigit().frame(width: 44, alignment: .trailing)
+                }
+                Toggle("Notify when a limit crosses the threshold", isOn: $store.notifyOnWarning)
+                    .disabled(!store.enableLiveLimits)
+                Text("The menu-bar icon turns into an orange ⚠︎ when your session or weekly limit passes this threshold.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Refresh") {
                 Picker("Interval", selection: $store.refreshInterval) {
                     Text("30 sec").tag(30.0)
