@@ -3,7 +3,6 @@ import SwiftUI
 /// The popover shown when the menu-bar icon is clicked.
 struct MenuContentView: View {
     @ObservedObject var store: UsageStore
-    @Environment(\.openSettings) private var openSettings
 
     private var snap: UsageSnapshot { store.snapshot }
 
@@ -158,7 +157,7 @@ struct MenuContentView: View {
             Text("Updated \(Fmt.time(snap.generatedAt))")
                 .font(.caption2).foregroundStyle(.tertiary)
             Spacer()
-            Button("Settings…") { openSettings() }
+            Button("Settings…") { SettingsOpener.open() }
                 .buttonStyle(.borderless).font(.caption)
             Button("Quit") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.borderless).font(.caption)
