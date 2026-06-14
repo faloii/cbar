@@ -49,8 +49,30 @@ ${ICON_KEY}
 </plist>
 PLIST
 
-echo "==> Ad-hoc signing"
-codesign --force --deep --sign - "$APP"
+# Sign with a STABLE identity so the macOS Keychain "Always Allow" grant for
+# reading Claude Code's credentials survives rebuilds. Ad-hoc signatures change
+# every build (the requirement is just the cdhash), which makes the keychain
+# re-prompt every launch. Prefer Developer ID, then Apple Development.
+echo "==> Signing"
+SIGN_ID="${CLAUDEBAR_SIGN_IDENTITY:-}"
+if [ -z "$SIGN_ID" ]; then
+    for pref in "Developer ID Application" "Apple Development"; do
+        # `|| true`: grep exits 1 when a preferred type is absent, which would
+        # otherwise trip `set -e`/`pipefail` and abort the script mid-sign.
+        SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null \
+            | grep -Eo "\"${pref}[^\"]*\"" | head -1 | tr -d '"' || true)
+        [ -n "$SIGN_ID" ] && break
+    done
+fi
+if [ -n "$SIGN_ID" ]; then
+    echo "    identity: $SIGN_ID"
+    codesign --force --identifier "$BUNDLE_ID" --sign "$SIGN_ID" "$APP"
+    echo "    → stable signature; approve the Keychain prompt once with “Always Allow”."
+else
+    echo "    no stable identity found — falling back to ad-hoc"
+    echo "    (the Keychain will re-prompt after every rebuild; create a signing identity to stop that)"
+    codesign --force --identifier "$BUNDLE_ID" --sign - "$APP"
+fi
 
 echo "==> Done: ${APP}"
 echo "    Install:  cp -r \"${APP}\" /Applications/"
