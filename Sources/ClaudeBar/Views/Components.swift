@@ -1,13 +1,54 @@
 import SwiftUI
 
-/// Horizontal usage meter with a colored fill that shifts toward red as it fills.
+extension Color {
+    /// Brand coral, matching the app icon.
+    static let brand = Color(red: 0.85, green: 0.45, blue: 0.30)
+    static let brandTop = Color(red: 0.93, green: 0.59, blue: 0.45)
+}
+
+/// A rounded, subtly-filled panel that groups one section's content.
+struct Card<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) { content }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(11)
+            .background(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .fill(Color.primary.opacity(0.05))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 11, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+            )
+    }
+}
+
+/// Section header: a tinted SF Symbol + uppercase title.
+struct CardHeader: View {
+    let icon: String
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.caption2.weight(.semibold)).foregroundStyle(Color.brand)
+            Text(title.uppercased())
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .kerning(0.4)
+        }
+    }
+}
+
+/// Horizontal usage meter with a gradient fill that shifts toward red as it fills.
 struct MeterBar: View {
     let fraction: Double   // 0...1
 
     private var color: Color {
         switch fraction {
         case ..<0.6:  return .green
-        case ..<0.85: return .yellow
+        case ..<0.85: return Color(red: 0.95, green: 0.7, blue: 0.2)
         default:      return .red
         }
     }
@@ -15,16 +56,18 @@ struct MeterBar: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.primary.opacity(0.10))
-                Capsule().fill(color)
-                    .frame(width: max(3, geo.size.width * fraction))
+                Capsule().fill(Color.primary.opacity(0.09))
+                Capsule()
+                    .fill(LinearGradient(colors: [color.opacity(0.75), color],
+                                         startPoint: .leading, endPoint: .trailing))
+                    .frame(width: max(4, geo.size.width * fraction))
             }
         }
-        .frame(height: 6)
+        .frame(height: 7)
     }
 }
 
-/// Minimal sparkline for the daily token history.
+/// Minimal sparkline (line + soft area fill) for the daily token history.
 struct Sparkline: View {
     let values: [Int]
 
@@ -32,17 +75,30 @@ struct Sparkline: View {
         GeometryReader { geo in
             let maxV = max(values.max() ?? 1, 1)
             let n = max(values.count - 1, 1)
-            Path { p in
-                for (i, v) in values.enumerated() {
-                    let x = geo.size.width * CGFloat(i) / CGFloat(n)
-                    let y = geo.size.height * (1 - CGFloat(v) / CGFloat(maxV))
-                    if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
-                    else { p.addLine(to: CGPoint(x: x, y: y)) }
-                }
+            let pts = values.enumerated().map { i, v in
+                CGPoint(x: geo.size.width * CGFloat(i) / CGFloat(n),
+                        y: geo.size.height * (1 - CGFloat(v) / CGFloat(maxV)))
             }
-            .stroke(Color.accentColor, style: .init(lineWidth: 1.5, lineJoin: .round))
+            ZStack {
+                Path { p in
+                    guard let first = pts.first else { return }
+                    p.move(to: CGPoint(x: first.x, y: geo.size.height))
+                    p.addLine(to: first)
+                    for pt in pts.dropFirst() { p.addLine(to: pt) }
+                    p.addLine(to: CGPoint(x: pts.last!.x, y: geo.size.height))
+                    p.closeSubpath()
+                }
+                .fill(LinearGradient(colors: [Color.brand.opacity(0.28), Color.brand.opacity(0.02)],
+                                     startPoint: .top, endPoint: .bottom))
+                Path { p in
+                    guard let first = pts.first else { return }
+                    p.move(to: first)
+                    for pt in pts.dropFirst() { p.addLine(to: pt) }
+                }
+                .stroke(Color.brand, style: .init(lineWidth: 1.5, lineJoin: .round))
+            }
         }
-        .frame(height: 28)
+        .frame(height: 30)
     }
 }
 
@@ -184,13 +240,3 @@ struct ModelBurnRowView: View {
     }
 }
 
-/// Section header.
-struct SectionLabel: View {
-    let text: String
-    var body: some View {
-        Text(text.uppercased())
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(.secondary)
-            .kerning(0.5)
-    }
-}
