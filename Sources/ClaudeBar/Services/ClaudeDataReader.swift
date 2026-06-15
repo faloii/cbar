@@ -41,14 +41,31 @@ struct ClaudeDataReader {
             snap.firstSessionDate = DateParse.iso(first)
         }
 
-        // 14-day token-total history for the sparkline.
+        // Per-model lifetime blended rates (for daily cost estimation).
+        var modelUsage: [String: TokenCounts] = [:]
+        if let mu = root["modelUsage"] as? [String: [String: Any]] {
+            for (model, v) in mu {
+                modelUsage[model] = TokenCounts(
+                    input: v["inputTokens"] as? Int ?? 0,
+                    output: v["outputTokens"] as? Int ?? 0,
+                    cacheWrite: v["cacheCreationInputTokens"] as? Int ?? 0,
+                    cacheRead: v["cacheReadInputTokens"] as? Int ?? 0
+                )
+            }
+        }
+        let (rates, fallback) = CostEstimator.blendedRates(modelUsage)
+
+        // Per-day token totals + estimated cost (for the trend chart).
         if let daily = root["dailyModelTokens"] as? [[String: Any]] {
-            let totals: [(String, Int)] = daily.compactMap { entry in
+            let history: [DailyCost] = daily.compactMap { entry in
                 guard let date = entry["date"] as? String,
                       let byModel = entry["tokensByModel"] as? [String: Int] else { return nil }
-                return (date, byModel.values.reduce(0, +))
+                return DailyCost(date: date,
+                                 tokens: byModel.values.reduce(0, +),
+                                 cost: CostEstimator.dailyCost(tokensByModel: byModel, rates: rates, fallback: fallback))
             }
-            snap.dailyTokenHistory = Array(totals.suffix(14).map(\.1))
+            snap.dailyCostHistory = Array(history.suffix(30))
+            snap.dailyTokenHistory = Array(history.suffix(14).map(\.tokens))
         }
     }
 

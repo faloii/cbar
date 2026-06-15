@@ -168,6 +168,30 @@ final class ModelBurnTests: XCTestCase {
     }
 }
 
+final class CostEstimatorTests: XCTestCase {
+    func testBlendedRateMatchesPricing() {
+        // 1M Opus output → $75 → blended $75/1M = 0.000075 $/token.
+        let usage = ["claude-opus-4-8": TokenCounts(output: 1_000_000)]
+        let (rates, fallback) = CostEstimator.blendedRates(usage)
+        XCTAssertEqual(rates["claude-opus-4-8"] ?? 0, 75.0 / 1_000_000, accuracy: 1e-12)
+        XCTAssertEqual(fallback, 75.0 / 1_000_000, accuracy: 1e-12)
+    }
+
+    func testDailyCostUsesPerModelRatesAndFallback() {
+        let rates = ["claude-opus-4-8": 0.00007, "claude-sonnet-4-6": 0.00001]
+        // Opus 1M*0.00007=70 + Sonnet 2M*0.00001=20 + unknown 1M*fallback(0.0001)=100 → 190.
+        let day = ["claude-opus-4-8": 1_000_000, "claude-sonnet-4-6": 2_000_000, "mystery": 1_000_000]
+        let cost = CostEstimator.dailyCost(tokensByModel: day, rates: rates, fallback: 0.0001)
+        XCTAssertEqual(cost, 190, accuracy: 1e-6)
+    }
+
+    func testEmptyUsageGivesZeroFallback() {
+        let (rates, fallback) = CostEstimator.blendedRates([:])
+        XCTAssertTrue(rates.isEmpty)
+        XCTAssertEqual(fallback, 0)
+    }
+}
+
 final class OAuthUsageParseTests: XCTestCase {
     func testParsesISOWindows() {
         let json = """

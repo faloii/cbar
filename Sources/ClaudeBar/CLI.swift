@@ -121,6 +121,16 @@ enum CLI {
             line("  " + m.model, Fmt.tokens(m.tokens.total) + "  ~" + Fmt.usd(m.cost))
         }
 
+        let recent = s.dailyCostHistory.suffix(7)
+        if !recent.isEmpty {
+            let total = recent.reduce(0) { $0 + $1.cost }
+            print("\nDaily cost (est., last \(recent.count)):")
+            for d in recent {
+                line(d.date, "~\(Fmt.usd(d.cost))  \(Fmt.tokens(d.tokens))")
+            }
+            line("total", "~" + Fmt.usd(total))
+        }
+
         print("\nAll time:")
         line("Sessions", Fmt.int(s.totalSessions))
         line("Messages", Fmt.int(s.totalMessages))
@@ -158,6 +168,7 @@ enum CLI {
                 "sessions": s.totalSessions,
                 "messages": s.totalMessages,
             ],
+            "dailyCost": s.dailyCostHistory.map { ["date": $0.date, "tokens": $0.tokens, "costEstimate": $0.cost] },
             "perModelBurn": ModelBurn.rows(window: s.windowByModel,
                                            sessionUtil: limits?.session5h?.utilization,
                                            basis: savedBurnBasis()).map { r in

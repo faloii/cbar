@@ -46,6 +46,30 @@ struct Sparkline: View {
     }
 }
 
+/// Small bar chart of daily cost; the most recent day is highlighted.
+struct DailyCostBars: View {
+    let days: [DailyCost]
+
+    var body: some View {
+        let maxV = max(days.map(\.cost).max() ?? 0, 0.0001)
+        GeometryReader { geo in
+            let gap: CGFloat = 2
+            let n = max(days.count, 1)
+            let w = max(2, (geo.size.width - gap * CGFloat(n - 1)) / CGFloat(n))
+            HStack(alignment: .bottom, spacing: gap) {
+                ForEach(Array(days.enumerated()), id: \.element.id) { i, d in
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color.accentColor.opacity(i == days.count - 1 ? 1.0 : 0.45))
+                        .frame(width: w, height: max(2, geo.size.height * CGFloat(d.cost / maxV)))
+                        .help("\(d.date): ~\(Fmt.usd(d.cost)) · \(Fmt.tokens(d.tokens))")
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+        }
+        .frame(height: 30)
+    }
+}
+
 /// One "label … value" row.
 struct StatRow: View {
     let label: String

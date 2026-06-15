@@ -70,5 +70,16 @@ struct UsageSnapshot {
     /// 14-day token history (oldest → newest) for the sparkline.
     var dailyTokenHistory: [Int] = []
 
+    /// Per-day tokens + estimated cost (oldest → newest), up to ~30 days.
+    var dailyCostHistory: [DailyCost] = []
+
     static let empty = UsageSnapshot()
+}
+
+/// One day's token total and estimated cost.
+struct DailyCost: Identifiable {
+    var id: String { date }
+    let date: String     // "yyyy-MM-dd"
+    let tokens: Int
+    let cost: Double
 }

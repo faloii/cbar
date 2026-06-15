@@ -142,9 +142,25 @@ struct MenuContentView: View {
     }
 
     private var trendSection: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            SectionLabel(text: "Tokens / day (14d)")
-            Sparkline(values: snap.dailyTokenHistory)
+        let costDays = Array(snap.dailyCostHistory.suffix(14))
+        let total = costDays.reduce(0) { $0 + $1.cost }
+        let avg = costDays.isEmpty ? 0 : total / Double(costDays.count)
+        return VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                SectionLabel(text: "Tokens / day (14d)")
+                Sparkline(values: snap.dailyTokenHistory)
+            }
+            if !costDays.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        SectionLabel(text: "Cost / day · est.")
+                        Spacer()
+                        Text("14d ~\(Fmt.usd(total)) · ~\(Fmt.usd(avg))/day")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    DailyCostBars(days: costDays)
+                }
+            }
         }
     }
 
