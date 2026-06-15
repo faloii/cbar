@@ -124,29 +124,16 @@ struct MenuContentView: View {
     }
 
     @ViewBuilder private var windowSection: some View {
-        HStack {
-            CardHeader(icon: "hourglass", title: "5시간 윈도우")
+        CardHeader(icon: "clock", title: "최근 5시간")
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text(Fmt.tokens(snap.windowTokens.total))
+                .font(.system(size: 24, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+            Text("토큰").foregroundStyle(.secondary).font(.callout)
             Spacer()
-            if let reset = snap.windowResetAt {
-                Label(Fmt.countdown(to: reset, from: snap.generatedAt), systemImage: "clock")
-                    .font(.caption2).foregroundStyle(.secondary)
-                    .help("가장 오래된 요청이 \(Fmt.countdown(to: reset, from: snap.generatedAt)) 후 윈도우에서 빠집니다")
-            }
-        }
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text(Fmt.tokens(snap.windowTokens.total))
-                    .font(.system(size: 30, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                Text("토큰").foregroundStyle(.secondary).font(.callout)
-                Spacer()
-                Text("~\(Fmt.usd(snap.windowCost))")
-                    .font(.callout).foregroundStyle(.secondary).monospacedDigit()
-                    .help("추정 비용")
-            }
-            MeterBar(fraction: store.windowFraction)
-            Text("예산 \(Fmt.tokens(store.fiveHourTokenBudget)) 중 \(Int(store.windowFraction * 100))%")
-                .font(.caption2).foregroundStyle(.tertiary)
+            Text("~\(Fmt.usd(snap.windowCost))")
+                .font(.callout).foregroundStyle(.secondary).monospacedDigit()
+                .help("추정 비용")
         }
     }
 

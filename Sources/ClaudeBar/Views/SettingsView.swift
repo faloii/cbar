@@ -4,12 +4,6 @@ struct SettingsView: View {
     @ObservedObject var store: UsageStore
     @State private var launchAtLogin = LoginItem.isEnabled
 
-    // Edit budget in millions for a friendlier control.
-    private var budgetMillions: Binding<Double> {
-        Binding(get: { Double(store.fiveHourTokenBudget) / 1_000_000 },
-                set: { store.fiveHourTokenBudget = Int($0 * 1_000_000) })
-    }
-
     var body: some View {
         Form {
             Section("플랜 한도 (라이브)") {
@@ -71,16 +65,6 @@ struct SettingsView: View {
                     Text("5분").tag(300.0)
                     Text("15분").tag(900.0)
                 }
-            }
-
-            Section("5시간 윈도우 미터") {
-                HStack {
-                    Slider(value: budgetMillions, in: 10...500, step: 10)
-                    Text("\(Int(budgetMillions.wrappedValue))M")
-                        .monospacedDigit().frame(width: 44, alignment: .trailing)
-                }
-                Text("미터가 채워지는 기준 소프트 예산. Claude는 정확한 5시간 토큰 상한을 공개하지 않으므로, 본인 플랜 체감에 맞춰 설정하세요.")
-                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section {

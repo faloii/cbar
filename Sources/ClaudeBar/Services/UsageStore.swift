@@ -55,9 +55,6 @@ final class UsageStore: ObservableObject {
     }
     // `@AppStorage` inside an ObservableObject doesn't auto-publish to observing
     // views, so settings that other views render from explicitly send objectWillChange.
-    @AppStorage("fiveHourTokenBudget") var fiveHourTokenBudget: Int = 100_000_000 {
-        didSet { objectWillChange.send() }
-    }
     @AppStorage("enableLiveLimits") var enableLiveLimits: Bool = true {
         didSet { refresh(force: true) }
     }
@@ -180,12 +177,6 @@ final class UsageStore: ObservableObject {
         case .todayTokens:  return Fmt.tokens(s.todayTokens.total)
         case .todayCost:    return Fmt.usd(s.todayCost)
         }
-    }
-
-    /// 0...1 fill of the 5-hour window meter against the configured budget.
-    var windowFraction: Double {
-        guard fiveHourTokenBudget > 0 else { return 0 }
-        return min(1, Double(snapshot.windowTokens.total) / Double(fiveHourTokenBudget))
     }
 
     /// Dynamic, situational advice from the current projections + per-model burn.
