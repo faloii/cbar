@@ -35,7 +35,8 @@ Plus an **optional live fetch** of your real plan limits (see
   look similar (cache reads dominate), while cost exposes the real gap (e.g. Opus ~2.8×).
 - **Today** — tokens, estimated cost, request count, sessions, and tool calls (computed
   live from the session logs).
-- **14-day trend** — a sparkline of daily token totals.
+- **14-day trend** — a sparkline of daily token totals plus a **daily cost** bar chart
+  (estimated, with a 14-day total and daily average; per-bar tooltips).
 - **All time** — total sessions, total messages, and your first-session date.
 
 > Costs are **estimates** from public list prices. Override per-model rates by creating
@@ -155,7 +156,7 @@ Sources/ClaudeBar/
   main.swift               # entry: GUI vs --print CLI
   ClaudeBarApp.swift       # MenuBarExtra + accessory app
   CLI.swift                # --print / --json reporter
-  Models/   Usage.swift, Pricing.swift, Limits.swift, Projection.swift
+  Models/   Usage.swift, Pricing.swift, Limits.swift, Projection.swift, ModelBurn.swift, CostEstimator.swift
   Services/ ClaudeDataReader.swift, OAuthUsageClient.swift, UsageStore.swift, LoginItem.swift, Notifier.swift, UsageHistory.swift
   Views/    MenuContentView.swift, SettingsView.swift, Components.swift
   Util/     Formatters.swift
