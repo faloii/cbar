@@ -21,27 +21,10 @@ struct ClaudeBarApp: App {
     }
 }
 
-/// Run as a menu-bar-only accessory app (no Dock icon, no main window) and own the
-/// Settings window directly — the SwiftUI `Settings` scene + `showSettingsWindow:`
-/// selector is unreliable to open from a MenuBarExtra accessory app.
+/// Run as a menu-bar-only accessory app (no Dock icon, no main window).
+/// The Settings window is managed by `SettingsWindowController`.
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var settingsWindow: NSWindow?
-
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-    }
-
-    @MainActor func showSettings() {
-        if settingsWindow == nil {
-            let hosting = NSHostingController(rootView: SettingsView(store: .shared))
-            let window = NSWindow(contentViewController: hosting)
-            window.title = "ClaudeBar 설정"
-            window.styleMask = [.titled, .closable]
-            window.isReleasedWhenClosed = false
-            window.center()
-            settingsWindow = window
-        }
-        NSApp.activate(ignoringOtherApps: true)
-        settingsWindow?.makeKeyAndOrderFront(nil)
     }
 }
