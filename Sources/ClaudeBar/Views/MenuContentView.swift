@@ -15,7 +15,7 @@ struct MenuContentView: View {
             if !store.modelBurnRows.isEmpty { Card { perModelSection } }
             Card { todaySection }
             if !snap.dailyTokenHistory.isEmpty { Card { trendSection } }
-            Card { lifetimeSection }
+            if !snap.dailyCostHistory.isEmpty { Card { costSummarySection } }
             footer
         }
         .padding(14)
@@ -184,14 +184,13 @@ struct MenuContentView: View {
         }
     }
 
-    @ViewBuilder private var lifetimeSection: some View {
-        CardHeader(icon: "infinity", title: "전체 기간")
+    @ViewBuilder private var costSummarySection: some View {
+        let last7 = snap.dailyCostHistory.suffix(7).reduce(0) { $0 + $1.cost }
+        let last30 = snap.dailyCostHistory.reduce(0) { $0 + $1.cost }
+        CardHeader(icon: "dollarsign.circle", title: "기간 비용 · 추정")
         VStack(spacing: 5) {
-            StatRow(label: "세션", value: Fmt.int(snap.totalSessions))
-            StatRow(label: "메시지", value: Fmt.int(snap.totalMessages))
-            if let first = snap.firstSessionDate {
-                StatRow(label: "시작일", value: Fmt.shortDate(first))
-            }
+            StatRow(label: "최근 7일", value: "~\(Fmt.usd(last7))")
+            StatRow(label: "최근 30일", value: "~\(Fmt.usd(last30))")
         }
     }
 }
