@@ -9,6 +9,7 @@ struct MenuContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
+            if store.enableLiveLimits, !store.adviceTips.isEmpty { Card { adviceSection } }
             if store.enableLiveLimits { Card { limitsSection } }
             Card { windowSection }
             if !store.modelBurnRows.isEmpty { Card { perModelSection } }
@@ -66,6 +67,31 @@ struct MenuContentView: View {
     }
 
     // MARK: Sections (Card supplies the surrounding VStack + spacing)
+
+    @ViewBuilder private var adviceSection: some View {
+        CardHeader(icon: "lightbulb", title: "조언")
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(store.adviceTips) { tip in
+                HStack(alignment: .top, spacing: 7) {
+                    Image(systemName: tip.icon)
+                        .font(.caption).foregroundStyle(adviceColor(tip.level))
+                        .frame(width: 14)
+                    Text(tip.text)
+                        .font(.caption)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func adviceColor(_ level: AdviceTip.Level) -> Color {
+        switch level {
+        case .good:     return .green
+        case .info:     return Color.brand
+        case .warn:     return .orange
+        case .critical: return .red
+        }
+    }
 
     @ViewBuilder private var limitsSection: some View {
         HStack {

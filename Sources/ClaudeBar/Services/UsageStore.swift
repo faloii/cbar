@@ -188,6 +188,16 @@ final class UsageStore: ObservableObject {
         return min(1, Double(snapshot.windowTokens.total) / Double(fiveHourTokenBudget))
     }
 
+    /// Dynamic, situational advice from the current projections + per-model burn.
+    var adviceTips: [AdviceTip] {
+        Advice.compute(session: sessionProjection, weekly: weeklyProjection,
+                       sessionUtil: limits?.session5h?.utilization,
+                       weeklyUtil: limits?.weekly7d?.utilization,
+                       models: snapshot.windowByModel,
+                       warnThreshold: warnThreshold,
+                       now: snapshot.generatedAt)
+    }
+
     /// Per-model burn comparison for the current 5-hour window.
     var modelBurnRows: [ModelBurnRow] {
         ModelBurn.rows(window: snapshot.windowByModel,

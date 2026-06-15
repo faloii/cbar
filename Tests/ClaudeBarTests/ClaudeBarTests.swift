@@ -192,6 +192,52 @@ final class CostEstimatorTests: XCTestCase {
     }
 }
 
+final class AdviceTests: XCTestCase {
+    let now = Date(timeIntervalSince1970: 1_000_000)
+    private func model(_ name: String, total: Int, requests: Int, cost: Double) -> ModelWindowUsage {
+        ModelWindowUsage(model: name, tokens: TokenCounts(cacheRead: total), cost: cost, requests: requests)
+    }
+
+    func testReductionPercent() {
+        // full in 900s, reset in 3600s → cut 75% to last to reset.
+        let p = Projection(ratePerHour: 40, timeToFull: 900, secondsToReset: 3600, verdict: .atRisk)
+        XCTAssertEqual(Advice.reductionPercent(p), 75)
+    }
+
+    func testAtRiskGivesCriticalPacingTip() {
+        let p = Projection(ratePerHour: 40, timeToFull: 1800, secondsToReset: 7200, verdict: .atRisk)
+        let tips = Advice.compute(session: p, weekly: nil, sessionUtil: 70, weeklyUtil: nil,
+                                  models: [], warnThreshold: 80, now: now)
+        XCTAssertEqual(tips.first?.kind, .sessionPacing)
+        XCTAssertEqual(tips.first?.level, .critical)
+    }
+
+    func testCostHeavyModelTip() {
+        let models = [model("Opus 4.8", total: 500_000, requests: 5, cost: 300),
+                      model("Sonnet 4.6", total: 500_000, requests: 5, cost: 30)]
+        let tips = Advice.compute(session: nil, weekly: nil, sessionUtil: 20, weeklyUtil: 20,
+                                  models: models, warnThreshold: 80, now: now)
+        XCTAssertTrue(tips.contains { $0.kind == .costModel })
+    }
+
+    func testHealthyWhenAllCalm() {
+        let safe = Projection(ratePerHour: 5, timeToFull: 36000, secondsToReset: 3600, verdict: .safe)
+        let tips = Advice.compute(session: safe, weekly: nil, sessionUtil: 20, weeklyUtil: 20,
+                                  models: [], warnThreshold: 80, now: now)
+        XCTAssertEqual(tips.map(\.kind), [.healthy])
+    }
+
+    func testCapsAtThreeTips() {
+        let atRisk = Projection(ratePerHour: 40, timeToFull: 600, secondsToReset: 7200, verdict: .atRisk)
+        let models = [model("Opus 4.8", total: 500_000, requests: 5, cost: 300),
+                      model("Sonnet 4.6", total: 500_000, requests: 5, cost: 30)]
+        let tips = Advice.compute(session: atRisk, weekly: nil, sessionUtil: 95, weeklyUtil: 92,
+                                  models: models, warnThreshold: 80, now: now)
+        XCTAssertLessThanOrEqual(tips.count, 3)
+        XCTAssertEqual(tips.first?.kind, .sessionPacing)   // critical first
+    }
+}
+
 final class OAuthUsageParseTests: XCTestCase {
     func testParsesISOWindows() {
         let json = """

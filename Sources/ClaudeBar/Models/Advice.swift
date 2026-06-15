@@ -1,0 +1,85 @@
+import Foundation
+
+/// One piece of dynamic, situational guidance shown in the popover.
+struct AdviceTip: Identifiable, Equatable {
+    enum Kind { case sessionPacing, weeklyDefer, costModel, watch, healthy }
+    enum Level { case good, info, warn, critical }
+
+    let kind: Kind
+    let level: Level
+    let icon: String
+    let text: String
+    var id: String { "\(kind)" }   // at most one tip per kind
+}
+
+/// Turns the live projections + per-model burn into actionable advice.
+///
+/// Honest about levers: the session/weekly limit is token-based, so when you're
+/// about to run out the fix is to *slow down or pause* (model choice barely moves
+/// the token total — cache reads dominate). Switching a pricey model only changes
+/// *cost*, so that advice is framed as a cost saving.
+enum Advice {
+    /// How much to cut the current rate to last until reset (%), for an at-risk session.
+    static func reductionPercent(_ p: Projection) -> Int {
+        guard p.verdict == .atRisk, let full = p.timeToFull, let reset = p.secondsToReset,
+              reset > 0, full >= 0 else { return 0 }
+        return min(95, max(1, Int(((1 - full / reset) * 100).rounded())))
+    }
+
+    static func compute(session: Projection?, weekly: Projection?,
+                        sessionUtil: Double?, weeklyUtil: Double?,
+                        models: [ModelWindowUsage], warnThreshold: Int, now: Date) -> [AdviceTip] {
+        var tips: [AdviceTip] = []
+        func dur(_ t: TimeInterval?) -> String {
+            t.map { Fmt.countdown(to: now.addingTimeInterval($0), from: now) } ?? "?"
+        }
+
+        // 1) Session pacing — the limit lever.
+        if let s = session, s.verdict == .atRisk {
+            tips.append(AdviceTip(
+                kind: .sessionPacing, level: .critical, icon: "speedometer",
+                text: "세션 한도 임박 — 이 속도면 \(dur(s.timeToFull)) 후 소진(리셋 \(dur(s.blockedBy)) 전). "
+                    + "속도를 약 \(reductionPercent(s))% 낮추거나 잠시 쉬었다 가세요."))
+        }
+
+        // 2) Weekly — defer big work.
+        if let wu = weeklyUtil, wu >= Double(warnThreshold) {
+            tips.append(AdviceTip(
+                kind: .weeklyDefer, level: .warn, icon: "calendar",
+                text: "주간 한도 \(Int(wu.rounded()))% — \(dur(weekly?.secondsToReset)) 후 리셋. "
+                    + "큰 작업은 리셋 후로 미루면 안전합니다."))
+        }
+
+        // 3) Cost-heavy model — the cost lever.
+        let active = models.filter { $0.requests > 0 && $0.cost > 0 }
+        let totalCost = active.reduce(0.0) { $0 + $1.cost }
+        if active.count >= 2, totalCost > 0.01 {
+            func costPerTurn(_ m: ModelWindowUsage) -> Double { m.cost / Double(m.requests) }
+            if let top = active.max(by: { $0.cost < $1.cost }),
+               let light = active.min(by: { costPerTurn($0) < costPerTurn($1) }),
+               top.model != light.model, costPerTurn(light) > 0 {
+                let share = top.cost / totalCost
+                let mult = costPerTurn(top) / costPerTurn(light)
+                if share >= 0.55, mult >= 1.8 {
+                    tips.append(AdviceTip(
+                        kind: .costModel, level: .info, icon: "arrow.left.arrow.right",
+                        text: "비용의 \(Int((share * 100).rounded()))%가 \(top.model)에 집중 — "
+                            + "루틴 작업을 \(light.model)로 바꾸면 턴당 비용이 ~\(String(format: "%.1f", mult))× 절감됩니다."))
+                }
+            }
+        }
+
+        // 4) Nothing urgent → a watch note or reassurance.
+        if tips.isEmpty {
+            if let su = sessionUtil, su >= Double(warnThreshold) {
+                tips.append(AdviceTip(kind: .watch, level: .info, icon: "eye",
+                    text: "세션 \(Int(su.rounded()))% 사용 중 — 추세를 잠시 지켜보세요."))
+            } else if let s = session, s.verdict == .safe || s.verdict == .idle {
+                tips.append(AdviceTip(kind: .healthy, level: .good, icon: "checkmark.circle.fill",
+                    text: "지금 페이스 괜찮아요 — 리셋까지 여유 있습니다."))
+            }
+        }
+
+        return Array(tips.prefix(3))
+    }
+}
