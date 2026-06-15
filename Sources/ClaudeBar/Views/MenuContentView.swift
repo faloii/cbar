@@ -125,16 +125,16 @@ struct MenuContentView: View {
 
     @ViewBuilder private var windowSection: some View {
         CardHeader(icon: "clock", title: "최근 5시간")
-        HStack(alignment: .firstTextBaseline, spacing: 5) {
-            Text(Fmt.tokens(snap.windowTokens.total))
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text("~\(Fmt.usd(snap.windowCost))")
                 .font(.system(size: 24, weight: .semibold, design: .rounded))
                 .monospacedDigit()
-            Text("토큰").foregroundStyle(.secondary).font(.callout)
             Spacer()
-            Text("~\(Fmt.usd(snap.windowCost))")
+            Text("\(Fmt.tokens(snap.windowTokens.total)) 토큰")
                 .font(.callout).foregroundStyle(.secondary).monospacedDigit()
-                .help("추정 비용")
         }
+        Text("정가 기준 추정 · 구독이면 실제 청구는 없음")
+            .font(.caption2).foregroundStyle(.tertiary)
     }
 
     @ViewBuilder private var perModelSection: some View {
@@ -154,8 +154,8 @@ struct MenuContentView: View {
     @ViewBuilder private var todaySection: some View {
         CardHeader(icon: "calendar", title: "오늘")
         VStack(spacing: 5) {
-            StatRow(label: "토큰", value: Fmt.tokens(snap.todayTokens.total),
-                    secondary: "~\(Fmt.usd(snap.todayCost))")
+            StatRow(label: "비용", value: "~\(Fmt.usd(snap.todayCost))")
+            StatRow(label: "토큰", value: Fmt.tokens(snap.todayTokens.total))
             StatRow(label: "요청", value: Fmt.int(snap.todayRequests))
             StatRow(label: "세션", value: Fmt.int(snap.todaySessions))
             StatRow(label: "도구 호출", value: Fmt.int(snap.todayToolCalls))
@@ -167,10 +167,6 @@ struct MenuContentView: View {
         let total = costDays.reduce(0) { $0 + $1.cost }
         let avg = costDays.isEmpty ? 0 : total / Double(costDays.count)
         CardHeader(icon: "chart.xyaxis.line", title: "추세 · 14일")
-        VStack(alignment: .leading, spacing: 4) {
-            Text("일별 토큰").font(.caption2).foregroundStyle(.secondary)
-            Sparkline(values: snap.dailyTokenHistory)
-        }
         if !costDays.isEmpty {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
@@ -181,6 +177,10 @@ struct MenuContentView: View {
                 }
                 DailyCostBars(days: costDays)
             }
+        }
+        VStack(alignment: .leading, spacing: 4) {
+            Text("일별 토큰").font(.caption2).foregroundStyle(.secondary)
+            Sparkline(values: snap.dailyTokenHistory)
         }
     }
 
