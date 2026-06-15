@@ -4,6 +4,9 @@ extension Color {
     /// Brand coral, matching the app icon.
     static let brand = Color(red: 0.85, green: 0.45, blue: 0.30)
     static let brandTop = Color(red: 0.93, green: 0.59, blue: 0.45)
+    /// Warm charcoal popover background — the app uses a fixed dark theme so it
+    /// looks the same (and as designed) in both light and dark system modes.
+    static let popoverBG = Color(red: 0.137, green: 0.129, blue: 0.118)
 }
 
 /// A rounded, subtly-filled panel that groups one section's content.
@@ -161,7 +164,7 @@ struct LimitRow: View {
                 Text(subtitle).font(.caption2).foregroundStyle(.tertiary)
                 Spacer()
                 if let reset = window.resetsAt {
-                    Text("resets in \(Fmt.countdown(to: reset, from: now))")
+                    Text("\(Fmt.countdown(to: reset, from: now)) 후 리셋")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 Text("\(Int(window.utilization.rounded()))%")
