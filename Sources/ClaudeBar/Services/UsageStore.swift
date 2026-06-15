@@ -44,6 +44,8 @@ enum BarMetric: String, CaseIterable, Identifiable {
 /// Owns the current snapshot, the refresh timer, and user settings.
 @MainActor
 final class UsageStore: ObservableObject {
+    static let shared = UsageStore()
+
     @Published private(set) var snapshot = UsageSnapshot.empty
     @Published private(set) var limits: LimitsSnapshot?
     @Published private(set) var sessionProjection: Projection?
