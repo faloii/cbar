@@ -12,6 +12,8 @@ By default it reads **local data** (no network) for token/cost stats:
 Plus an **optional live fetch** of your real plan limits (see
 [Live plan limits](#live-plan-limits)). Honors `CLAUDE_CONFIG_DIR`.
 
+> The app UI is in **Korean**; the `--print`/`--json` CLI output stays in English.
+
 ## What it shows
 
 - **Menu-bar label** — a sparkle + one at-a-glance number. Defaults to your **Session
