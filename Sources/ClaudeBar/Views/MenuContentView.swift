@@ -19,8 +19,9 @@ struct MenuContentView: View {
             footer
         }
         .padding(14)
-        .frame(width: 320)
+        .frame(width: 350)
         .tint(Color.brand)
+        .dynamicTypeSize(.xLarge)   // bump all text-style fonts one step up for readability
         .preferredColorScheme(store.appearance.colorScheme)   // System / Light / Dark
     }
 
@@ -40,7 +41,7 @@ struct MenuContentView: View {
             Spacer()
             Button { store.refresh() } label: {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .rotationEffect(.degrees(store.isRefreshing ? 360 : 0))
                     .animation(store.isRefreshing ? .linear(duration: 0.8).repeatForever(autoreverses: false) : .default,
                                value: store.isRefreshing)
@@ -135,7 +136,7 @@ struct MenuContentView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text(Fmt.tokens(snap.windowTokens.total))
-                    .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    .font(.system(size: 30, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                 Text("토큰").foregroundStyle(.secondary).font(.callout)
                 Spacer()
