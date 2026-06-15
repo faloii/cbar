@@ -19,9 +19,8 @@ struct MenuContentView: View {
         }
         .padding(14)
         .frame(width: 320)
-        .background(Color.popoverBG)
-        .environment(\.colorScheme, .dark)   // fixed dark theme regardless of system mode
         .tint(Color.brand)
+        .preferredColorScheme(store.appearance.colorScheme)   // System / Light / Dark
     }
 
     // MARK: Header / footer

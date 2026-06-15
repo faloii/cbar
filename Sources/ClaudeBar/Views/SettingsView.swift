@@ -19,6 +19,11 @@ struct SettingsView: View {
             }
 
             Section("일반") {
+                Picker("테마", selection: Binding(
+                    get: { store.appearance },
+                    set: { store.appearance = $0 })) {
+                    ForEach(Appearance.allCases) { Text($0.label).tag($0) }
+                }
                 Toggle("로그인 시 자동 실행", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, on in
                         // 등록 실패(예: 번들 아닌 실행) 시 토글을 되돌립니다.

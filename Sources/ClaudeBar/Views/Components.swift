@@ -4,9 +4,6 @@ extension Color {
     /// Brand coral, matching the app icon.
     static let brand = Color(red: 0.85, green: 0.45, blue: 0.30)
     static let brandTop = Color(red: 0.93, green: 0.59, blue: 0.45)
-    /// Warm charcoal popover background — the app uses a fixed dark theme so it
-    /// looks the same (and as designed) in both light and dark system modes.
-    static let popoverBG = Color(red: 0.137, green: 0.129, blue: 0.118)
 }
 
 /// A rounded, subtly-filled panel that groups one section's content.
@@ -19,11 +16,11 @@ struct Card<Content: View>: View {
             .padding(11)
             .background(
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .fill(Color.primary.opacity(0.05))
+                    .fill(Color.primary.opacity(0.06))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 11, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
             )
     }
 }

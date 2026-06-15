@@ -2,6 +2,26 @@ import Foundation
 import SwiftUI
 import Combine
 
+/// Popover appearance — follow the system, or pin light/dark.
+enum Appearance: String, CaseIterable, Identifiable {
+    case system, light, dark
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .system: return "시스템"
+        case .light:  return "라이트"
+        case .dark:   return "다크"
+        }
+    }
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light:  return .light
+        case .dark:   return .dark
+        }
+    }
+}
+
 /// What the menu-bar label shows at a glance.
 enum BarMetric: String, CaseIterable, Identifiable {
     case sessionLimit, weeklyLimit, bothLimits, windowTokens, windowCost, todayTokens, todayCost
@@ -56,6 +76,13 @@ final class UsageStore: ObservableObject {
     }
     @AppStorage("barMetric") private var barMetricRaw: String = BarMetric.sessionLimit.rawValue {
         didSet { objectWillChange.send() }
+    }
+    @AppStorage("appearance") private var appearanceRaw: String = Appearance.system.rawValue {
+        didSet { objectWillChange.send() }
+    }
+    var appearance: Appearance {
+        get { Appearance(rawValue: appearanceRaw) ?? .system }
+        set { appearanceRaw = newValue.rawValue }
     }
 
     // Rising-edge tracking so a notification fires once per threshold crossing.
