@@ -60,7 +60,10 @@ struct OAuthUsageClient: Sendable {
 
     private func fetchRemote() async throws -> LimitsSnapshot {
         guard let creds = ClaudeCredentials.load() else { throw FetchError.noCredentials }
-        if let exp = creds.expiresAt, exp < Date() { throw FetchError.tokenExpired }
+        if let exp = creds.expiresAt, exp < Date() {
+            ClaudeCredentials.invalidate()
+            throw FetchError.tokenExpired
+        }
 
         var req = URLRequest(url: Self.endpoint)
         req.httpMethod = "GET"
@@ -74,7 +77,7 @@ struct OAuthUsageClient: Sendable {
         guard let http = resp as? HTTPURLResponse else { throw FetchError.badResponse }
         switch http.statusCode {
         case 200:  return Self.parse(data)
-        case 401:  throw FetchError.unauthorized
+        case 401:  ClaudeCredentials.invalidate(); throw FetchError.unauthorized
         case 429:  throw FetchError.rateLimited
         default:   throw FetchError.http(http.statusCode)
         }
@@ -150,8 +153,27 @@ struct ClaudeCredentials {
     let accessToken: String
     let expiresAt: Date?
 
+    // In-memory cache so the Keychain is touched at most once per launch (and again
+    // only after expiry / a 401) instead of on every fetch — this is what stops the
+    // Keychain access prompt from reappearing every few minutes.
+    private static let lock = NSLock()
+    private static var cached: ClaudeCredentials?
+
     static func load() -> ClaudeCredentials? {
-        fromFile() ?? fromKeychain()
+        lock.lock(); defer { lock.unlock() }
+        if let c = cached {
+            // Reuse while still valid (treat a missing expiry as long-lived).
+            let stillValid = c.expiresAt.map { $0 > Date().addingTimeInterval(60) } ?? true
+            if stillValid { return c }
+        }
+        let fresh = fromFile() ?? fromKeychain()
+        if let fresh { cached = fresh }
+        return fresh
+    }
+
+    /// Drop the cached token so the next `load()` re-reads the Keychain.
+    static func invalidate() {
+        lock.lock(); cached = nil; lock.unlock()
     }
 
     private static func parse(_ data: Data) -> ClaudeCredentials? {
