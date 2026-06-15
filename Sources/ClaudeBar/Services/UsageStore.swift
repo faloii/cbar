@@ -8,13 +8,13 @@ enum BarMetric: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .sessionLimit: return "Session limit %"
-        case .weeklyLimit:  return "Weekly limit %"
-        case .bothLimits:   return "Session + weekly %"
-        case .windowTokens: return "5h tokens"
-        case .windowCost:   return "5h cost"
-        case .todayTokens:  return "Today tokens"
-        case .todayCost:    return "Today cost"
+        case .sessionLimit: return "세션 한도 %"
+        case .weeklyLimit:  return "주간 한도 %"
+        case .bothLimits:   return "세션 + 주간 %"
+        case .windowTokens: return "5시간 토큰"
+        case .windowCost:   return "5시간 비용"
+        case .todayTokens:  return "오늘 토큰"
+        case .todayCost:    return "오늘 비용"
         }
     }
     /// Whether this metric needs the live `/usage` data.
@@ -33,20 +33,30 @@ final class UsageStore: ObservableObject {
     @AppStorage("refreshIntervalSeconds") var refreshInterval: Double = 60 {
         didSet { restartTimer() }
     }
-    @AppStorage("fiveHourTokenBudget") var fiveHourTokenBudget: Int = 100_000_000
+    // `@AppStorage` inside an ObservableObject doesn't auto-publish to observing
+    // views, so settings that other views render from explicitly send objectWillChange.
+    @AppStorage("fiveHourTokenBudget") var fiveHourTokenBudget: Int = 100_000_000 {
+        didSet { objectWillChange.send() }
+    }
     @AppStorage("enableLiveLimits") var enableLiveLimits: Bool = true {
         didSet { refresh(force: true) }
     }
-    @AppStorage("burnBasis") private var burnBasisRaw: String = BurnBasis.totalTokens.rawValue
+    @AppStorage("burnBasis") private var burnBasisRaw: String = BurnBasis.totalTokens.rawValue {
+        didSet { objectWillChange.send() }
+    }
     var burnBasis: BurnBasis {
         get { BurnBasis(rawValue: burnBasisRaw) ?? .totalTokens }
         set { burnBasisRaw = newValue.rawValue }
     }
-    @AppStorage("warnThreshold") var warnThreshold: Int = 80
+    @AppStorage("warnThreshold") var warnThreshold: Int = 80 {
+        didSet { objectWillChange.send() }
+    }
     @AppStorage("notifyOnWarning") var notifyOnWarning: Bool = false {
         didSet { if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() } }
     }
-    @AppStorage("barMetric") private var barMetricRaw: String = BarMetric.sessionLimit.rawValue
+    @AppStorage("barMetric") private var barMetricRaw: String = BarMetric.sessionLimit.rawValue {
+        didSet { objectWillChange.send() }
+    }
 
     // Rising-edge tracking so a notification fires once per threshold crossing.
     private var notifiedSession = false
@@ -99,19 +109,19 @@ final class UsageStore: ObservableObject {
         guard notifyOnWarning else { return }
         let t = Double(warnThreshold)
 
-        func check(_ window: LimitWindow?, name: String, flag: inout Bool) {
+        func check(_ window: LimitWindow?, name: String, key: String, flag: inout Bool) {
             guard let u = window?.utilization else { return }
             if u >= t, !flag {
                 flag = true
-                Notifier.notify(title: "\(name) limit at \(Int(u.rounded()))%",
-                                body: "You've passed \(warnThreshold)% of your \(name.lowercased()) limit.",
-                                id: "limit-\(name)")
+                Notifier.notify(title: "\(name) 한도 \(Int(u.rounded()))%",
+                                body: "\(name) 한도의 \(warnThreshold)%를 넘었습니다.",
+                                id: "limit-\(key)")
             } else if u < t {
                 flag = false
             }
         }
-        check(limits?.session5h, name: "Session", flag: &notifiedSession)
-        check(limits?.weekly7d, name: "Weekly", flag: &notifiedWeekly)
+        check(limits?.session5h, name: "세션", key: "session", flag: &notifiedSession)
+        check(limits?.weekly7d, name: "주간", key: "weekly", flag: &notifiedWeekly)
     }
 
     private func restartTimer() {

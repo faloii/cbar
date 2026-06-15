@@ -22,14 +22,14 @@ struct ClaudeDataReader {
     /// Build a fresh snapshot. Safe to call off the main thread.
     func load(now: Date = Date()) -> UsageSnapshot {
         var snap = UsageSnapshot(generatedAt: now)
-        applyStatsCache(to: &snap, now: now)
+        applyStatsCache(to: &snap)
         applySessionLogs(to: &snap, now: now)
         return snap
     }
 
     // MARK: - stats-cache.json
 
-    private func applyStatsCache(to snap: inout UsageSnapshot, now: Date) {
+    private func applyStatsCache(to snap: inout UsageSnapshot) {
         let url = Self.configDir.appendingPathComponent("stats-cache.json")
         guard let data = try? Data(contentsOf: url),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -230,16 +230,6 @@ enum DateParse {
     static func iso(_ s: String) -> Date? {
         iso8601.date(from: s) ?? iso8601NoFrac.date(from: s)
     }
-
-    private static let dayFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
-
-    /// Local-calendar day key like Claude's stats cache uses ("2026-06-12").
-    static func dayKey(_ date: Date) -> String { dayFormatter.string(from: date) }
 }
 
 enum ModelName {

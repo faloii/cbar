@@ -51,7 +51,7 @@ struct MenuContentView: View {
                                value: store.isRefreshing)
             }
             .buttonStyle(.borderless)
-            .help("Refresh now")
+            .help("새로고침")
         }
     }
 
@@ -59,29 +59,29 @@ struct MenuContentView: View {
     private var limitsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                SectionLabel(text: "Plan Limits")
+                SectionLabel(text: "플랜 한도")
                 Spacer()
                 if let l = store.limits, l.stale {
                     Image(systemName: "wifi.exclamationmark")
                         .font(.caption2).foregroundStyle(.orange)
-                        .help("Showing cached values — last refresh failed")
+                        .help("캐시된 값 표시 중 — 마지막 새로고침 실패")
                 }
             }
 
             if let l = store.limits, l.hasData {
                 if let w = l.session5h {
-                    LimitRow(title: "Session", subtitle: "5h", window: w, now: snap.generatedAt,
+                    LimitRow(title: "세션", subtitle: "5시간", window: w, now: snap.generatedAt,
                              projection: store.sessionProjection)
                 }
                 if let w = l.weekly7d {
-                    LimitRow(title: "Weekly", subtitle: "7d", window: w, now: snap.generatedAt,
+                    LimitRow(title: "주간", subtitle: "7일", window: w, now: snap.generatedAt,
                              projection: store.weeklyProjection)
                 }
                 if let w = l.weeklyOpus {
-                    LimitRow(title: "Weekly", subtitle: "Opus", window: w, now: snap.generatedAt)
+                    LimitRow(title: "주간", subtitle: "Opus", window: w, now: snap.generatedAt)
                 }
             } else {
-                Text(store.limits?.error ?? "Loading live limits…")
+                Text(store.limits?.error ?? "한도 불러오는 중…")
                     .font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -91,12 +91,12 @@ struct MenuContentView: View {
     private var perModelSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                SectionLabel(text: "Per-model burn · 5h")
+                SectionLabel(text: "모델별 소진 · 5시간")
                 Spacer()
                 Text(store.burnBasis.shortLabel).font(.caption2).foregroundStyle(.tertiary)
             }
             ForEach(store.modelBurnRows) { ModelBurnRowView(row: $0, basis: store.burnBasis) }
-            Text("× = per-turn \(store.burnBasis.shortLabel) vs lightest · “turns left” = session limit")
+            Text("× = 턴당 \(store.burnBasis.shortLabel) (최저 모델 대비) · “남은 턴” = 세션 한도 기준")
                 .font(.caption2).foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -105,39 +105,39 @@ struct MenuContentView: View {
     private var windowSection: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack {
-                SectionLabel(text: "5-Hour Window")
+                SectionLabel(text: "5시간 윈도우")
                 Spacer()
                 if let reset = snap.windowResetAt {
                     Label(Fmt.countdown(to: reset, from: snap.generatedAt),
                           systemImage: "clock")
                         .font(.caption2).foregroundStyle(.secondary)
-                        .help("Oldest request leaves the window in \(Fmt.countdown(to: reset, from: snap.generatedAt))")
+                        .help("가장 오래된 요청이 \(Fmt.countdown(to: reset, from: snap.generatedAt)) 후 윈도우에서 빠집니다")
                 }
             }
             HStack(alignment: .firstTextBaseline) {
                 Text(Fmt.tokens(snap.windowTokens.total))
                     .font(.system(size: 24, weight: .semibold, design: .rounded))
                     .monospacedDigit()
-                Text("tokens").foregroundStyle(.secondary).font(.callout)
+                Text("토큰").foregroundStyle(.secondary).font(.callout)
                 Spacer()
                 Text("~\(Fmt.usd(snap.windowCost))")
                     .foregroundStyle(.secondary).monospacedDigit()
-                    .help("Estimated cost")
+                    .help("추정 비용")
             }
             MeterBar(fraction: store.windowFraction)
-            Text("\(Int(store.windowFraction * 100))% of \(Fmt.tokens(store.fiveHourTokenBudget)) budget")
+            Text("예산 \(Fmt.tokens(store.fiveHourTokenBudget)) 중 \(Int(store.windowFraction * 100))%")
                 .font(.caption2).foregroundStyle(.tertiary)
         }
     }
 
     private var todaySection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            SectionLabel(text: "Today")
-            StatRow(label: "Tokens", value: Fmt.tokens(snap.todayTokens.total),
+            SectionLabel(text: "오늘")
+            StatRow(label: "토큰", value: Fmt.tokens(snap.todayTokens.total),
                     secondary: "~\(Fmt.usd(snap.todayCost))")
-            StatRow(label: "Requests", value: Fmt.int(snap.todayRequests))
-            StatRow(label: "Sessions", value: Fmt.int(snap.todaySessions))
-            StatRow(label: "Tool calls", value: Fmt.int(snap.todayToolCalls))
+            StatRow(label: "요청", value: Fmt.int(snap.todayRequests))
+            StatRow(label: "세션", value: Fmt.int(snap.todaySessions))
+            StatRow(label: "도구 호출", value: Fmt.int(snap.todayToolCalls))
         }
     }
 
@@ -147,15 +147,15 @@ struct MenuContentView: View {
         let avg = costDays.isEmpty ? 0 : total / Double(costDays.count)
         return VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 4) {
-                SectionLabel(text: "Tokens / day (14d)")
+                SectionLabel(text: "일별 토큰 (14일)")
                 Sparkline(values: snap.dailyTokenHistory)
             }
             if !costDays.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack {
-                        SectionLabel(text: "Cost / day · est.")
+                        SectionLabel(text: "일별 비용 · 추정")
                         Spacer()
-                        Text("14d ~\(Fmt.usd(total)) · ~\(Fmt.usd(avg))/day")
+                        Text("14일 ~\(Fmt.usd(total)) · ~\(Fmt.usd(avg))/일")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
                     DailyCostBars(days: costDays)
@@ -166,23 +166,23 @@ struct MenuContentView: View {
 
     private var lifetimeSection: some View {
         VStack(alignment: .leading, spacing: 6) {
-            SectionLabel(text: "All time")
-            StatRow(label: "Sessions", value: Fmt.int(snap.totalSessions))
-            StatRow(label: "Messages", value: Fmt.int(snap.totalMessages))
+            SectionLabel(text: "전체 기간")
+            StatRow(label: "세션", value: Fmt.int(snap.totalSessions))
+            StatRow(label: "메시지", value: Fmt.int(snap.totalMessages))
             if let first = snap.firstSessionDate {
-                StatRow(label: "Since", value: Fmt.shortDate(first))
+                StatRow(label: "시작일", value: Fmt.shortDate(first))
             }
         }
     }
 
     private var footer: some View {
         HStack {
-            Text("Updated \(Fmt.time(snap.generatedAt))")
+            Text("업데이트 \(Fmt.time(snap.generatedAt))")
                 .font(.caption2).foregroundStyle(.tertiary)
             Spacer()
-            Button("Settings…") { SettingsOpener.open() }
+            Button("설정…") { SettingsOpener.open() }
                 .buttonStyle(.borderless).font(.caption)
-            Button("Quit") { NSApplication.shared.terminate(nil) }
+            Button("종료") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.borderless).font(.caption)
         }
     }

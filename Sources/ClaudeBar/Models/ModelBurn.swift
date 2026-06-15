@@ -10,17 +10,17 @@ enum BurnBasis: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .totalTokens: return "Total tokens (limit)"
-        case .freshTokens: return "Fresh tokens (no cache)"
-        case .cost:        return "Cost"
+        case .totalTokens: return "총 토큰 (한도)"
+        case .freshTokens: return "신규 토큰 (캐시 제외)"
+        case .cost:        return "비용"
         }
     }
 
     var shortLabel: String {
         switch self {
-        case .totalTokens: return "total tokens"
-        case .freshTokens: return "fresh tokens"
-        case .cost:        return "cost"
+        case .totalTokens: return "총 토큰"
+        case .freshTokens: return "신규 토큰"
+        case .cost:        return "비용"
         }
     }
 
@@ -36,8 +36,8 @@ enum BurnBasis: String, CaseIterable, Identifiable {
     /// Format a per-turn weight value for display ("3.1k/turn" or "$0.42/turn").
     func formatPerTurn(_ v: Double) -> String {
         switch self {
-        case .cost: return Fmt.usd(v) + "/turn"
-        default:    return Fmt.tokens(Int(v.rounded())) + "/turn"
+        case .cost: return Fmt.usd(v) + "/턴"
+        default:    return Fmt.tokens(Int(v.rounded())) + "/턴"
         }
     }
 }

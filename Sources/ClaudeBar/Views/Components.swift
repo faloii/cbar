@@ -61,7 +61,7 @@ struct DailyCostBars: View {
                     RoundedRectangle(cornerRadius: 1)
                         .fill(Color.accentColor.opacity(i == days.count - 1 ? 1.0 : 0.45))
                         .frame(width: w, height: max(2, geo.size.height * CGFloat(d.cost / maxV)))
-                        .help("\(d.date): ~\(Fmt.usd(d.cost)) · \(Fmt.tokens(d.tokens))")
+                        .help("\(d.date): ~\(Fmt.usd(d.cost)) · \(Fmt.tokens(d.tokens)) 토큰")
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -120,15 +120,15 @@ struct LimitRow: View {
         if let p = projection {
             switch p.verdict {
             case .measuring:
-                line("measuring rate…", .secondary, "hourglass")
+                line("측정 중…", .secondary, "hourglass")
             case .idle:
-                line("not burning", .secondary, "pause")
+                line("사용 없음", .secondary, "pause")
             case .safe:
-                line("\(rateText(p.ratePerHour)) · lasts past reset", .green, "checkmark.circle")
+                line("\(rateText(p.ratePerHour)) · 리셋까지 충분", .green, "checkmark.circle")
             case .atRisk:
                 let full = p.timeToFull.map { Fmt.countdown(to: now.addingTimeInterval($0), from: now) } ?? "?"
                 let gap = p.blockedBy.map { Fmt.countdown(to: now.addingTimeInterval($0), from: now) } ?? "?"
-                line("\(rateText(p.ratePerHour)) · full in \(full) — \(gap) before reset", .orange, "exclamationmark.triangle.fill")
+                line("\(rateText(p.ratePerHour)) · \(full) 후 소진 — 리셋보다 \(gap) 빠름", .orange, "exclamationmark.triangle.fill")
             }
         }
     }
@@ -161,7 +161,7 @@ struct ModelBurnRowView: View {
                 Text(String(format: "%.1f×", row.burnMultiplier))
                     .font(.caption).monospacedDigit()
                     .foregroundStyle(row.burnMultiplier >= 2 ? .orange : .secondary)
-                    .help("Per-turn \(basis.shortLabel) vs the lightest model you used")
+                    .help("사용한 모델 중 최저 대비 턴당 \(basis.shortLabel)")
                 Text("\(Int((row.shareFraction * 100).rounded()))%")
                     .font(.callout.weight(.semibold)).monospacedDigit()
                     .frame(width: 38, alignment: .trailing)
@@ -175,7 +175,8 @@ struct ModelBurnRowView: View {
                 }
                 if let h = row.headroomTurns {
                     Text("·")
-                    Text("~\(Int(h.rounded())) turns left").foregroundStyle(row.burnMultiplier >= 2 ? .orange : .secondary)
+                    Text("~\(h >= 1000 ? "999+" : "\(Int(h.rounded()))")턴 남음")
+                        .foregroundStyle(row.burnMultiplier >= 2 ? .orange : .secondary)
                 }
             }
             .font(.caption2).foregroundStyle(.secondary)

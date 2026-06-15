@@ -21,12 +21,12 @@ struct OAuthUsageClient: Sendable {
 
         var errorDescription: String? {
             switch self {
-            case .noCredentials: return "No Claude credentials found — sign in with Claude Code."
-            case .tokenExpired:  return "Token expired — open Claude Code to refresh."
-            case .unauthorized:  return "Unauthorized (401) — re-auth in Claude Code."
-            case .rateLimited:   return "Rate limited (429) — will retry later."
-            case .http(let c):   return "Server returned HTTP \(c)."
-            case .badResponse:   return "Unexpected response from usage endpoint."
+            case .noCredentials: return "Claude 자격증명을 찾을 수 없음 — Claude Code에서 로그인하세요."
+            case .tokenExpired:  return "토큰 만료 — Claude Code를 열어 갱신하세요."
+            case .unauthorized:  return "인증 실패(401) — Claude Code에서 재인증하세요."
+            case .rateLimited:   return "요청 제한(429) — 잠시 후 재시도합니다."
+            case .http(let c):   return "서버 응답 HTTP \(c)."
+            case .badResponse:   return "사용량 응답이 예상과 다릅니다."
             }
         }
     }

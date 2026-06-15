@@ -12,78 +12,78 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
-            Section("Plan limits (live)") {
-                Toggle("Show real session & weekly limits", isOn: $store.enableLiveLimits)
-                Text("Fetches your real Session (5h) and Weekly (7d) usage from Claude's usage endpoint using your Claude Code login. Requires network; the first fetch may ask permission to read your credentials from the Keychain. Cached for 3 min to avoid rate limits.")
+            Section("플랜 한도 (라이브)") {
+                Toggle("실제 세션·주간 한도 표시", isOn: $store.enableLiveLimits)
+                Text("Claude Code 로그인으로 Claude 사용량 엔드포인트에서 실제 세션(5시간)·주간(7일) 사용률을 가져옵니다. 네트워크가 필요하며, 첫 조회 시 키체인 자격증명 접근 권한을 한 번 묻습니다. 요청 제한을 피하려 3분간 캐시합니다.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("General") {
-                Toggle("Launch at login", isOn: $launchAtLogin)
+            Section("일반") {
+                Toggle("로그인 시 자동 실행", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, on in
-                        // If registration fails (e.g. running un-bundled), revert the toggle.
+                        // 등록 실패(예: 번들 아닌 실행) 시 토글을 되돌립니다.
                         if !LoginItem.setEnabled(on) { launchAtLogin = LoginItem.isEnabled }
                     }
             }
 
-            Section("Menu bar") {
-                Picker("Show", selection: Binding(
+            Section("메뉴바") {
+                Picker("표시", selection: Binding(
                     get: { store.barMetric },
                     set: { store.barMetric = $0 })) {
                     ForEach(BarMetric.allCases) { Text($0.label).tag($0) }
                 }
             }
 
-            Section("Per-model burn") {
-                Picker("Compare by", selection: Binding(
+            Section("모델별 소진") {
+                Picker("비교 기준", selection: Binding(
                     get: { store.burnBasis },
                     set: { store.burnBasis = $0 })) {
                     ForEach(BurnBasis.allCases) { Text($0.label).tag($0) }
                 }
-                Text("Total tokens ≈ rate-limit pressure (cache reads dominate, so models look similar). Cost shows the real per-model gap; fresh tokens = new work only.")
+                Text("총 토큰 ≈ 한도 압박(캐시 읽기가 지배적이라 모델이 비슷해 보임). 비용은 모델 간 실제 격차를 드러냄. 신규 토큰은 새 작업량만.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("Alerts") {
+            Section("알림") {
                 HStack {
-                    Text("Warn at")
+                    Text("경고 임계값")
                     Slider(value: Binding(
                         get: { Double(store.warnThreshold) },
                         set: { store.warnThreshold = Int($0) }), in: 50...100, step: 5)
                     Text("\(store.warnThreshold)%")
                         .monospacedDigit().frame(width: 44, alignment: .trailing)
                 }
-                Toggle("Notify when a limit crosses the threshold", isOn: $store.notifyOnWarning)
+                Toggle("한도가 임계값을 넘으면 알림", isOn: $store.notifyOnWarning)
                     .disabled(!store.enableLiveLimits)
-                Text("The menu-bar icon turns into an orange ⚠︎ when your session or weekly limit passes this threshold.")
+                Text("세션 또는 주간 한도가 이 임계값을 넘으면 메뉴바 아이콘이 주황 ⚠︎로 바뀝니다.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("Refresh") {
-                Picker("Interval", selection: $store.refreshInterval) {
-                    Text("30 sec").tag(30.0)
-                    Text("1 min").tag(60.0)
-                    Text("5 min").tag(300.0)
-                    Text("15 min").tag(900.0)
+            Section("새로고침") {
+                Picker("주기", selection: $store.refreshInterval) {
+                    Text("30초").tag(30.0)
+                    Text("1분").tag(60.0)
+                    Text("5분").tag(300.0)
+                    Text("15분").tag(900.0)
                 }
             }
 
-            Section("5-hour window meter") {
+            Section("5시간 윈도우 미터") {
                 HStack {
                     Slider(value: budgetMillions, in: 10...500, step: 10)
                     Text("\(Int(budgetMillions.wrappedValue))M")
                         .monospacedDigit().frame(width: 44, alignment: .trailing)
                 }
-                Text("Soft budget the meter fills against. Claude doesn't publish an exact 5-hour token cap, so set this to match your plan's feel.")
+                Text("미터가 채워지는 기준 소프트 예산. Claude는 정확한 5시간 토큰 상한을 공개하지 않으므로, 본인 플랜 체감에 맞춰 설정하세요.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
             Section {
-                Text("Costs are estimates from public list prices. Override per-model rates in ~/.claudebar/pricing.json")
+                Text("비용은 공개 정가 기준 추정치입니다. 모델별 단가는 ~/.claudebar/pricing.json 에서 덮어쓸 수 있습니다.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .frame(width: 360, height: 380)
+        .frame(width: 380, height: 560)
     }
 }
