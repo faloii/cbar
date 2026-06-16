@@ -7,25 +7,42 @@ struct MenuContentView: View {
     private var snap: UsageSnapshot { store.snapshot }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(spacing: 0) {
             header
-            if hasAnyData {
-                if store.enableLiveLimits, !store.adviceTips.isEmpty { Card { adviceSection } }
-                if store.enableLiveLimits { Card { limitsSection } }
-                if store.isVisible(.currentSession), let s = snap.currentSession { Card { currentSessionSection(s) } }
-                if store.isVisible(.recent) { Card { windowSection } }
-                if store.isVisible(.perModel), !store.modelBurnRows.isEmpty { Card { perModelSection } }
-                if store.isVisible(.perProject), !snap.windowByProject.isEmpty { Card { perProjectSection } }
-                if store.isVisible(.today) { Card { todaySection } }
-                if store.isVisible(.trend), !snap.dailyTokenHistory.isEmpty { Card { trendSection } }
-                if store.isVisible(.costSummary), !snap.dailyCostHistory.isEmpty { Card { costSummarySection } }
-                if let b = store.budgetStatus { Card { budgetSection(b) } }
-            } else {
-                Card { emptyStateSection }
+                .padding(.horizontal, 14)
+                .padding(.top, 14)
+                .padding(.bottom, 10)
+
+            // Cards scroll; the footer stays pinned so Settings/Quit are always
+            // reachable no matter how tall the content gets.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    if hasAnyData {
+                        if store.enableLiveLimits, !store.adviceTips.isEmpty { Card { adviceSection } }
+                        if store.enableLiveLimits { Card { limitsSection } }
+                        if store.isVisible(.currentSession), let s = snap.currentSession { Card { currentSessionSection(s) } }
+                        if store.isVisible(.recent) { Card { windowSection } }
+                        if store.isVisible(.perModel), !store.modelBurnRows.isEmpty { Card { perModelSection } }
+                        if store.isVisible(.perProject), !snap.windowByProject.isEmpty { Card { perProjectSection } }
+                        if store.isVisible(.today) { Card { todaySection } }
+                        if store.isVisible(.trend), !snap.dailyTokenHistory.isEmpty { Card { trendSection } }
+                        if store.isVisible(.costSummary), !snap.dailyCostHistory.isEmpty { Card { costSummarySection } }
+                        if let b = store.budgetStatus { Card { budgetSection(b) } }
+                    } else {
+                        Card { emptyStateSection }
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
             }
+            .frame(maxHeight: 600)
+            .scrollBounceBehavior(.basedOnSize)
+
+            Divider()
             footer
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
         }
-        .padding(14)
         .frame(width: 350)
         .tint(Color.brand)
         .dynamicTypeSize(.xLarge)   // bump all text-style fonts one step up for readability
