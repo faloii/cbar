@@ -193,10 +193,16 @@ final class UsageStore: ObservableObject {
         let now = Date()
         let samples = UsageHistory.load()
         limitHistory = samples
+        // Session = rolling 5h window → recent burst rate. Weekly = fixed 7-day
+        // bucket → realized average pace since the week started (not a burst).
         sessionProjection = Projection.compute(points: samples.compactMap { s in s.session.map { (s.at, $0) } },
                                                resetsAt: limits?.session5h?.resetsAt, now: now)
-        weeklyProjection = Projection.compute(points: samples.compactMap { s in s.weekly.map { (s.at, $0) } },
-                                              resetsAt: limits?.weekly7d?.resetsAt, now: now)
+        if let w = limits?.weekly7d {
+            weeklyProjection = Projection.paced(util: w.utilization, resetsAt: w.resetsAt,
+                                                windowSeconds: 7 * 24 * 3600, now: now)
+        } else {
+            weeklyProjection = nil
+        }
     }
 
     /// Fire a macOS notification once when a limit first crosses the threshold.

@@ -36,6 +36,27 @@ struct Projection: Equatable {
     /// A drop larger than this between consecutive samples marks a window reset.
     static let resetDrop = 3.0
 
+    /// Pace projection for a FIXED-bucket window (e.g. weekly): uses the realized
+    /// average rate since the window started — not a short burst — so a momentary
+    /// spike doesn't extrapolate to an absurd "runs out in 12h" for a barely-used week.
+    /// `windowSeconds` is the bucket length (7d for weekly); reset marks the bucket end.
+    static func paced(util: Double, resetsAt: Date?, windowSeconds: TimeInterval, now: Date) -> Projection {
+        guard let reset = resetsAt else { return .measuring }
+        let secondsToReset = reset.timeIntervalSince(now)
+        let elapsed = windowSeconds - secondsToReset
+        guard util > 0 else {
+            return Projection(ratePerHour: 0, timeToFull: nil, secondsToReset: secondsToReset, verdict: .idle)
+        }
+        guard elapsed >= 6 * 3600 else {   // too early in the bucket to judge a pace
+            return Projection(ratePerHour: 0, timeToFull: nil, secondsToReset: secondsToReset, verdict: .safe)
+        }
+        let ratePerHour = util / (elapsed / 3600)
+        let timeToFull = ratePerHour > 0 ? (max(0, 100 - util) / ratePerHour) * 3600 : nil
+        var verdict: PaceVerdict = .safe
+        if let f = timeToFull, secondsToReset > 0, f < secondsToReset { verdict = .atRisk }
+        return Projection(ratePerHour: ratePerHour, timeToFull: timeToFull, secondsToReset: secondsToReset, verdict: verdict)
+    }
+
     /// `points` are (time, utilization%) for ONE window, any order.
     static func compute(points: [(Date, Double)], resetsAt: Date?, now: Date) -> Projection {
         let secondsToReset = resetsAt.map { $0.timeIntervalSince(now) }

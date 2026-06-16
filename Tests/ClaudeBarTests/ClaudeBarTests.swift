@@ -100,6 +100,31 @@ final class ProjectionTests: XCTestCase {
         XCTAssertGreaterThan(p.blockedBy ?? 0, 0)
     }
 
+    func testPacedSafeWhenUnderPace() {
+        // 10% used, 2 days into a 7-day week → ~432h to full ≫ 5d reset → safe.
+        let week: TimeInterval = 7 * 24 * 3600
+        let p = Projection.paced(util: 10, resetsAt: now.addingTimeInterval(5 * 24 * 3600),
+                                 windowSeconds: week, now: now)
+        XCTAssertEqual(p.verdict, .safe)
+        XCTAssertLessThan(p.ratePerHour, 1)   // realized pace is small, not a burst
+    }
+
+    func testPacedAtRiskWhenAheadOfPace() {
+        // 60% used only 2 days in → on track to blow the week → at risk.
+        let week: TimeInterval = 7 * 24 * 3600
+        let p = Projection.paced(util: 60, resetsAt: now.addingTimeInterval(5 * 24 * 3600),
+                                 windowSeconds: week, now: now)
+        XCTAssertEqual(p.verdict, .atRisk)
+    }
+
+    func testPacedTooEarlyStaysSafe() {
+        // Only 3h into the week — too early to project a pace.
+        let week: TimeInterval = 7 * 24 * 3600
+        let p = Projection.paced(util: 40, resetsAt: now.addingTimeInterval(week - 3 * 3600),
+                                 windowSeconds: week, now: now)
+        XCTAssertEqual(p.verdict, .safe)
+    }
+
     func testResetBoundaryIgnoresPreDropSamples() {
         // A reset (95→10) means the slope must come from the post-reset rise (10→20),
         // not the overall negative trend — i.e. a positive burn, not idle.
