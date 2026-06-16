@@ -166,10 +166,15 @@ final class UsageStore: ObservableObject {
         let reader = self.reader
         let client = self.limitsClient
         let live = enableLiveLimits
+        // When the popover is closed and the menu-bar label is a limit %, it's driven
+        // entirely by `limits` — skip the heavy local log scan until the popover opens.
+        let needScan = popoverVisible || !barMetric.needsLiveLimits
         Task {
-            let snap = await Task.detached(priority: .utility) { reader.load() }.value
+            let snap: UsageSnapshot? = needScan
+                ? await Task.detached(priority: .utility) { reader.load() }.value
+                : nil
             let lim: LimitsSnapshot? = live ? await client.loadLimits(force: force) : nil
-            self.snapshot = snap
+            if let snap { self.snapshot = snap }
             if live { self.limits = lim } else { self.limits = nil }
             self.recomputeProjections()
             self.maybeNotify()

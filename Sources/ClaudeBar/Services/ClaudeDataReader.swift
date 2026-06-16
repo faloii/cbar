@@ -194,27 +194,29 @@ struct ClaudeDataReader {
                                          options: [.skipsHiddenFiles]) else { return [] }
 
         let cutoff = now.addingTimeInterval(-36 * 3600)
-        var records: [LogRecord] = []
-        var seen: Set<String> = []
 
+        // 1) Find the recent files (cheap stat pass).
+        var recent: [(url: URL, mtime: Date, size: Int)] = []
         for case let url as URL in walker where url.pathExtension == "jsonl" {
             let vals = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
-            let mtime = vals?.contentModificationDate
-            if let mtime, mtime < cutoff { continue }
-            let size = vals?.fileSize ?? -1
-            let key = url.path
-            seen.insert(key)
+            guard let mtime = vals?.contentModificationDate, mtime >= cutoff else { continue }
+            recent.append((url, mtime, vals?.fileSize ?? -1))
+        }
+        Self.pruneCache(keeping: Set(recent.map { $0.url.path }))
 
-            if let mtime, let cached = Self.cachedRecords(key: key, mtime: mtime, size: size) {
-                records.append(contentsOf: cached)
+        // 2) Parse them in parallel across cores (cache hits skip the work).
+        var results = [[LogRecord]](repeating: [], count: recent.count)
+        DispatchQueue.concurrentPerform(iterations: recent.count) { i in
+            let f = recent[i]
+            if let cached = Self.cachedRecords(key: f.url.path, mtime: f.mtime, size: f.size) {
+                results[i] = cached
             } else {
-                let parsed = parse(fileAt: url)
-                if let mtime { Self.storeRecords(key: key, mtime: mtime, size: size, records: parsed) }
-                records.append(contentsOf: parsed)
+                let parsed = self.parse(fileAt: f.url)
+                Self.storeRecords(key: f.url.path, mtime: f.mtime, size: f.size, records: parsed)
+                results[i] = parsed
             }
         }
-        Self.pruneCache(keeping: seen)
-        return records
+        return results.flatMap { $0 }
     }
 
     private static func cachedRecords(key: String, mtime: Date, size: Int) -> [LogRecord]? {
