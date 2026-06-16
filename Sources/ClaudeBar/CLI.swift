@@ -77,7 +77,8 @@ enum CLI {
             }
             if l.hasData {
                 let sp = Projection.compute(points: UsageHistory.sessionPoints(), resetsAt: l.session5h?.resetsAt, now: now)
-                let wp = Projection.compute(points: UsageHistory.weeklyPoints(), resetsAt: l.weekly7d?.resetsAt, now: now)
+                let wp = l.weekly7d.map { Projection.paced(util: $0.utilization, resetsAt: $0.resetsAt,
+                                                           windowSeconds: 7 * 24 * 3600, now: now) }
                 limit("Session 5h", l.session5h, sp)
                 limit("Weekly 7d", l.weekly7d, wp)
                 limit("Weekly Opus", l.weeklyOpus, nil)
