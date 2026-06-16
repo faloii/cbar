@@ -32,16 +32,9 @@ struct MenuContentView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
                     if hasAnyData {
-                        if store.enableLiveLimits, !store.adviceTips.isEmpty { Card { adviceSection } }
-                        if store.enableLiveLimits { Card { limitsSection } }
-                        if store.isVisible(.currentSession), let s = snap.currentSession { Card { currentSessionSection(s) } }
-                        if store.isVisible(.recent) { Card { windowSection } }
-                        if store.isVisible(.perModel), !store.modelBurnRows.isEmpty { Card { perModelSection } }
-                        if store.isVisible(.perProject), !snap.windowByProject.isEmpty { Card { perProjectSection } }
-                        if store.isVisible(.today) { Card { todaySection } }
-                        if store.isVisible(.trend), !snap.dailyTokenHistory.isEmpty { Card { trendSection } }
-                        if store.isVisible(.costSummary), !snap.dailyCostHistory.isEmpty { Card { costSummarySection } }
-                        if let b = store.budgetStatus { Card { budgetSection(b) } }
+                        ForEach(store.orderedSections) { section in
+                            if store.isVisible(section) { card(for: section) }
+                        }
                     } else {
                         Card { emptyStateSection }
                     }
@@ -119,6 +112,31 @@ struct MenuContentView: View {
     }
 
     // MARK: Sections (Card supplies the surrounding VStack + spacing)
+
+    @ViewBuilder private func card(for section: PanelSection) -> some View {
+        switch section {
+        case .advice:
+            if store.enableLiveLimits, !store.adviceTips.isEmpty { Card { adviceSection } }
+        case .limits:
+            if store.enableLiveLimits { Card { limitsSection } }
+        case .currentSession:
+            if let s = snap.currentSession { Card { currentSessionSection(s) } }
+        case .recent:
+            Card { windowSection }
+        case .perModel:
+            if !store.modelBurnRows.isEmpty { Card { perModelSection } }
+        case .perProject:
+            if !snap.windowByProject.isEmpty { Card { perProjectSection } }
+        case .today:
+            Card { todaySection }
+        case .trend:
+            if !snap.dailyTokenHistory.isEmpty { Card { trendSection } }
+        case .costSummary:
+            if !snap.dailyCostHistory.isEmpty { Card { costSummarySection } }
+        case .budget:
+            if let b = store.budgetStatus { Card { budgetSection(b) } }
+        }
+    }
 
     @ViewBuilder private var emptyStateSection: some View {
         CardHeader(icon: "tray", title: "데이터 없음")

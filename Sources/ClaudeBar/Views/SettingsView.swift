@@ -33,12 +33,22 @@ struct SettingsView: View {
                 }
             }
 
-            Section("표시 섹션") {
-                ForEach(PanelSection.allCases) { section in
-                    Toggle(section.label, isOn: Binding(
-                        get: { store.isVisible(section) },
-                        set: { store.setVisible(section, $0) }))
+            Section("섹션 (표시 · 순서)") {
+                let sections = store.orderedSections
+                ForEach(Array(sections.enumerated()), id: \.element) { index, section in
+                    HStack(spacing: 6) {
+                        Toggle(section.label, isOn: Binding(
+                            get: { store.isVisible(section) },
+                            set: { store.setVisible(section, $0) }))
+                        Spacer()
+                        Button { store.moveSection(section, by: -1) } label: { Image(systemName: "chevron.up") }
+                            .buttonStyle(.borderless).disabled(index == 0)
+                        Button { store.moveSection(section, by: 1) } label: { Image(systemName: "chevron.down") }
+                            .buttonStyle(.borderless).disabled(index == sections.count - 1)
+                    }
                 }
+                Text("토글로 표시/숨김, ↑↓로 순서 변경.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("모델별 소진") {

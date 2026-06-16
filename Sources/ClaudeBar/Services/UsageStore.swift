@@ -2,12 +2,15 @@ import Foundation
 import SwiftUI
 import Combine
 
-/// Optional popover cards the user can show/hide (Settings → 표시 섹션).
+/// Popover cards the user can show/hide and reorder (Settings → 섹션).
+/// Declaration order is the default layout order.
 enum PanelSection: String, CaseIterable, Identifiable {
-    case currentSession, recent, perModel, perProject, today, trend, costSummary
+    case advice, limits, currentSession, recent, perModel, perProject, today, trend, costSummary, budget
     var id: String { rawValue }
     var label: String {
         switch self {
+        case .advice:         return "조언"
+        case .limits:         return "플랜 한도"
         case .currentSession: return "현재 세션"
         case .recent:         return "최근 5시간"
         case .perModel:       return "모델별 소진"
@@ -15,6 +18,7 @@ enum PanelSection: String, CaseIterable, Identifiable {
         case .today:          return "오늘"
         case .trend:          return "추세"
         case .costSummary:    return "기간 비용"
+        case .budget:         return "월 예산"
         }
     }
 }
@@ -95,6 +99,10 @@ final class UsageStore: ObservableObject {
     @AppStorage("hiddenSections") private var hiddenSectionsRaw: String = "" {
         didSet { objectWillChange.send() }
     }
+    /// Comma-joined raw values defining card order (missing ones append in default order).
+    @AppStorage("sectionOrder") private var sectionOrderRaw: String = "" {
+        didSet { objectWillChange.send() }
+    }
 
     func isVisible(_ section: PanelSection) -> Bool {
         !hiddenSectionsRaw.split(separator: ",").contains(Substring(section.rawValue))
@@ -103,6 +111,19 @@ final class UsageStore: ObservableObject {
         var hidden = Set(hiddenSectionsRaw.split(separator: ",").map(String.init))
         if visible { hidden.remove(section.rawValue) } else { hidden.insert(section.rawValue) }
         hiddenSectionsRaw = hidden.sorted().joined(separator: ",")
+    }
+
+    /// Sections in display order (saved order first, then any new ones in default order).
+    var orderedSections: [PanelSection] {
+        let saved = sectionOrderRaw.split(separator: ",").compactMap { PanelSection(rawValue: String($0)) }
+        return saved + PanelSection.allCases.filter { !saved.contains($0) }
+    }
+    /// Move a section up (delta -1) or down (delta +1).
+    func moveSection(_ section: PanelSection, by delta: Int) {
+        var order = orderedSections
+        guard let i = order.firstIndex(of: section), order.indices.contains(i + delta) else { return }
+        order.swapAt(i, i + delta)
+        sectionOrderRaw = order.map(\.rawValue).joined(separator: ",")
     }
     @AppStorage("notifyOnWarning") var notifyOnWarning: Bool = false {
         didSet { if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() } }
