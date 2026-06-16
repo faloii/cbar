@@ -97,8 +97,10 @@ final class UsageStore: ObservableObject {
     @AppStorage("monthlyBudget") var monthlyBudget: Double = 0 {
         didSet { objectWillChange.send() }
     }
-    /// Comma-joined raw values of hidden sections (empty = all shown).
-    @AppStorage("hiddenSections") private var hiddenSectionsRaw: String = "" {
+    /// Comma-joined raw values of hidden sections. Default = lean: show only the
+    /// core (advice, limits, recent, today); deeper analysis cards are opt-in.
+    @AppStorage("hiddenSections") private var hiddenSectionsRaw: String =
+        "costSummary,currentSession,limitTrend,perModel,perProject,trend" {
         didSet { objectWillChange.send() }
     }
     /// Comma-joined raw values defining card order (missing ones append in default order).
