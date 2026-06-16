@@ -71,8 +71,20 @@ struct SettingsView: View {
                 Text("비용은 공개 정가 기준 추정치입니다. 모델별 단가는 ~/.claudebar/pricing.json 에서 덮어쓸 수 있습니다.")
                     .font(.caption).foregroundStyle(.secondary)
             }
+
+            Section("정보") {
+                HStack {
+                    Text("ClaudeBar")
+                    Spacer()
+                    Text("버전 \(Self.appVersion)").foregroundStyle(.secondary)
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(width: 380, height: 560)
+    }
+
+    private static var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
     }
 }

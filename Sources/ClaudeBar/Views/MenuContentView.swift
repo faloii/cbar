@@ -27,6 +27,8 @@ struct MenuContentView: View {
         .tint(Color.brand)
         .dynamicTypeSize(.xLarge)   // bump all text-style fonts one step up for readability
         .preferredColorScheme(store.appearance.colorScheme)   // System / Light / Dark
+        .onAppear { store.setPopoverVisible(true) }
+        .onDisappear { store.setPopoverVisible(false) }
     }
 
     // MARK: Header / footer

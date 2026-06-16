@@ -33,27 +33,53 @@ struct OAuthUsageClient: Sendable {
 
     /// Fresh-if-cached, otherwise fetch. Never throws — failures surface as
     /// `error` on a (possibly stale-cached) snapshot.
+    // Exponential backoff after consecutive failures so we don't hammer the
+    // (rate-limited) endpoint — beyond the normal 180s cache TTL.
+    private static let throttleLock = NSLock()
+    private static var nextAllowedFetch = Date.distantPast
+    private static var consecutiveFailures = 0
+
     func loadLimits(force: Bool = false) async -> LimitsSnapshot {
-        if !force, let cached = readCache(), Date().timeIntervalSince(cached.fetchedAt) < Self.cacheTTL {
-            return cached
+        let cached = readCache()
+        if !force, let c = cached, Date().timeIntervalSince(c.fetchedAt) < Self.cacheTTL {
+            return c
+        }
+        if !force, Self.isBackingOff(), var c = cached {
+            c.stale = true
+            return c
         }
         do {
             let fresh = try await fetchRemote()
             writeCache(fresh)
-            // One time-series point per real network fetch (gated by the TTL above).
             UsageHistory.append(session: fresh.session5h?.utilization,
                                 weekly: fresh.weekly7d?.utilization,
                                 at: fresh.fetchedAt)
+            Self.recordSuccess()
             return fresh
         } catch {
+            Self.recordFailure()
             let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            if var cached = readCache() {
-                cached.stale = true
-                cached.error = message
-                return cached
+            if var c = cached {
+                c.stale = true
+                c.error = message
+                return c
             }
             return LimitsSnapshot(fetchedAt: Date(), error: message)
         }
+    }
+
+    private static func isBackingOff() -> Bool {
+        throttleLock.lock(); defer { throttleLock.unlock() }
+        return Date() < nextAllowedFetch
+    }
+    private static func recordSuccess() {
+        throttleLock.lock(); consecutiveFailures = 0; nextAllowedFetch = .distantPast; throttleLock.unlock()
+    }
+    private static func recordFailure() {
+        throttleLock.lock(); defer { throttleLock.unlock() }
+        consecutiveFailures += 1
+        let backoff = min(cacheTTL * pow(2, Double(min(consecutiveFailures, 4))), 1800)
+        nextAllowedFetch = Date().addingTimeInterval(backoff)
     }
 
     // MARK: - Network

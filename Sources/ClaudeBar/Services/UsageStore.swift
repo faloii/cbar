@@ -150,10 +150,24 @@ final class UsageStore: ObservableObject {
         check(limits?.weekly7d, name: "주간", key: "weekly", flag: &notifiedWeekly)
     }
 
+    /// Idle cadence when the popover is closed — the menu-bar label only needs to
+    /// drift slowly, so we don't scan/fetch on the full interval in the background.
+    private static let idleInterval: TimeInterval = 600
+    private var popoverVisible = false
+
+    /// Driven by the popover's onAppear/onDisappear: refresh on open and use the
+    /// user's interval while visible; back off to the idle cadence when closed.
+    func setPopoverVisible(_ visible: Bool) {
+        popoverVisible = visible
+        if visible { refresh() }
+        restartTimer()
+    }
+
     private func restartTimer() {
         timer?.invalidate()
         guard refreshInterval > 0 else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: refreshInterval, repeats: true) { [weak self] _ in
+        let interval = popoverVisible ? refreshInterval : max(refreshInterval, Self.idleInterval)
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
     }

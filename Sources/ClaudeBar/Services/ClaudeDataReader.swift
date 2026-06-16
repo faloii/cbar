@@ -207,48 +207,64 @@ struct ClaudeDataReader {
         parseCache = parseCache.filter { keys.contains($0.key) }
     }
 
+    /// Stream the file line-by-line via a FileHandle so a large session log isn't
+    /// loaded into memory all at once (peak memory ≈ one chunk + one line).
     private func parse(fileAt url: URL) -> [LogRecord] {
-        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return [] }
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return [] }
+        defer { try? handle.close() }
+
         var out: [LogRecord] = []
+        var buffer = Data()
+        let newline = UInt8(0x0A)
 
-        content.enumerateLines { line, _ in
-            guard !line.isEmpty,
-                  let data = line.data(using: .utf8),
-                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let type = obj["type"] as? String,
-                  let ts = obj["timestamp"] as? String,
-                  let date = DateParse.iso(ts)
-            else { return }
-
-            let sessionId = obj["sessionId"] as? String ?? ""
-            let message = obj["message"] as? [String: Any]
-
-            var tokens: TokenCounts?
-            var toolUses = 0
-            if let message {
-                if let usage = message["usage"] as? [String: Any] {
-                    tokens = TokenCounts(
-                        input: usage["input_tokens"] as? Int ?? 0,
-                        output: usage["output_tokens"] as? Int ?? 0,
-                        cacheWrite: usage["cache_creation_input_tokens"] as? Int ?? 0,
-                        cacheRead: usage["cache_read_input_tokens"] as? Int ?? 0
-                    )
-                }
-                if let content = message["content"] as? [[String: Any]] {
-                    toolUses = content.reduce(0) { $0 + (($1["type"] as? String) == "tool_use" ? 1 : 0) }
-                }
+        while let chunk = try? handle.read(upToCount: 1 << 16), !chunk.isEmpty {
+            buffer.append(chunk)
+            while let nl = buffer.firstIndex(of: newline) {
+                let line = buffer.subdata(in: buffer.startIndex..<nl)
+                buffer.removeSubrange(buffer.startIndex...nl)
+                if let record = Self.record(from: line) { out.append(record) }
             }
-
-            out.append(LogRecord(
-                timestamp: date,
-                type: type,
-                sessionId: sessionId,
-                model: message?["model"] as? String ?? "unknown",
-                tokens: tokens,
-                toolUseCount: toolUses
-            ))
         }
+        if let record = Self.record(from: buffer) { out.append(record) }
         return out
+    }
+
+    /// Parse one JSONL line (as raw bytes) into a `LogRecord`, or nil to skip.
+    private static func record(from line: Data) -> LogRecord? {
+        guard !line.isEmpty,
+              let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+              let type = obj["type"] as? String,
+              let ts = obj["timestamp"] as? String,
+              let date = DateParse.iso(ts)
+        else { return nil }
+
+        let sessionId = obj["sessionId"] as? String ?? ""
+        let message = obj["message"] as? [String: Any]
+
+        var tokens: TokenCounts?
+        var toolUses = 0
+        if let message {
+            if let usage = message["usage"] as? [String: Any] {
+                tokens = TokenCounts(
+                    input: usage["input_tokens"] as? Int ?? 0,
+                    output: usage["output_tokens"] as? Int ?? 0,
+                    cacheWrite: usage["cache_creation_input_tokens"] as? Int ?? 0,
+                    cacheRead: usage["cache_read_input_tokens"] as? Int ?? 0
+                )
+            }
+            if let content = message["content"] as? [[String: Any]] {
+                toolUses = content.reduce(0) { $0 + (($1["type"] as? String) == "tool_use" ? 1 : 0) }
+            }
+        }
+
+        return LogRecord(
+            timestamp: date,
+            type: type,
+            sessionId: sessionId,
+            model: message?["model"] as? String ?? "unknown",
+            tokens: tokens,
+            toolUseCount: toolUses
+        )
     }
 }
 
