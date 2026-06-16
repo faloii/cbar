@@ -33,7 +33,12 @@ final class SettingsWindowController: NSObject {
             p.level = .floating
             p.hidesOnDeactivate = false
             p.isReleasedWhenClosed = false
-            p.center()
+            // Place at the top-left so it doesn't overlap the popover (top-right).
+            if let vf = NSScreen.main?.visibleFrame {
+                p.setFrameOrigin(NSPoint(x: vf.minX + 24, y: vf.maxY - p.frame.height - 8))
+            } else {
+                p.center()
+            }
             panel = p
         }
         // Float it in without activating the app, so the popover keeps key and stays open.
