@@ -104,8 +104,12 @@ struct MenuContentView: View {
             .buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
             .help("설정")
             .accessibilityLabel("설정")
-            Button("종료") { NSApplication.shared.terminate(nil) }
-                .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
+            Button { NSApplication.shared.terminate(nil) } label: {
+                Image(systemName: "power")
+            }
+            .buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
+            .help("종료")
+            .accessibilityLabel("종료")
         }
         .padding(.horizontal, 2)
     }
