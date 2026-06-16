@@ -13,9 +13,9 @@ struct ClaudeBarApp: App {
             // glyph once a live limit crosses the warning threshold.
             HStack(spacing: 3) {
                 Image(systemName: store.isOverThreshold ? "exclamationmark.triangle.fill" : "sparkle")
-                    .foregroundStyle(store.isOverThreshold ? Color.orange : Color.primary)
                 Text(store.barText).monospacedDigit()
             }
+            .foregroundStyle(store.barColor)   // green → orange → red by limit level
         }
         .menuBarExtraStyle(.window)
     }

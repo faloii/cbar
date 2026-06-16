@@ -125,7 +125,7 @@ final class UsageStore: ObservableObject {
         order.swapAt(i, i + delta)
         sectionOrderRaw = order.map(\.rawValue).joined(separator: ",")
     }
-    @AppStorage("notifyOnWarning") var notifyOnWarning: Bool = false {
+    @AppStorage("notifyOnWarning") var notifyOnWarning: Bool = true {
         didSet { if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() } }
     }
     @AppStorage("barMetric") private var barMetricRaw: String = BarMetric.sessionLimit.rawValue {
@@ -153,6 +153,7 @@ final class UsageStore: ObservableObject {
     private let limitsClient = OAuthUsageClient()
 
     init() {
+        if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() }
         refresh()
         restartTimer()
     }
@@ -283,5 +284,21 @@ final class UsageStore: ObservableObject {
     /// menu-bar warning icon/color.
     var isOverThreshold: Bool {
         (maxLimitUtilization ?? 0) >= Double(warnThreshold)
+    }
+
+    /// Menu-bar tint: green (safe) → orange (warning) → red (nearly out), based on
+    /// the utilization relevant to the chosen bar metric.
+    var barColor: Color {
+        let util: Double?
+        switch barMetric {
+        case .sessionLimit: util = limits?.session5h?.utilization
+        case .weeklyLimit:  util = limits?.weekly7d?.utilization
+        case .bothLimits:   util = maxLimitUtilization
+        default:            return isOverThreshold ? .orange : .primary
+        }
+        guard let u = util else { return .primary }
+        if u >= 95 { return .red }
+        if u >= Double(warnThreshold) { return .orange }
+        return .green
     }
 }
