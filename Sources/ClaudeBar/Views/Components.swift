@@ -255,6 +255,9 @@ struct ModelBurnRowView: View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
                 Text(row.model).font(.callout.weight(.medium))
+                if let tier = ModelTier.of(row.model) {
+                    Text(tier.short).font(.caption2).foregroundStyle(.tertiary)
+                }
                 Spacer()
                 Text(String(format: "%.1f×", row.burnMultiplier))
                     .font(.caption).monospacedDigit()
@@ -279,6 +282,7 @@ struct ModelBurnRowView: View {
             }
             .font(.caption2).foregroundStyle(.secondary)
         }
+        .help(ModelTier.of(row.model)?.blurb ?? "")
         .accessibilityElement(children: .combine)
     }
 }

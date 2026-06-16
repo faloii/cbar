@@ -297,6 +297,7 @@ struct MenuContentView: View {
     @ViewBuilder private var perModelSection: some View {
         HStack {
             CardHeader(icon: "chart.bar.fill", title: "모델별 소진 · 5시간")
+                .help(ModelTier.effortNote)
             Spacer()
             Text(store.burnBasis.shortLabel).font(.caption2).foregroundStyle(.tertiary)
         }
