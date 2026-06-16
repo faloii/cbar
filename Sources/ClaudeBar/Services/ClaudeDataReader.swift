@@ -80,6 +80,7 @@ struct ClaudeDataReader {
         var windowCost = 0.0
         var oldestInWindow: Date?
         var winByModel: [String: ModelWindowUsage] = [:]
+        var winByProject: [String: ProjectUsage] = [:]
 
         var todayTokens = TokenCounts()
         var todayCost = 0.0
@@ -111,6 +112,13 @@ struct ClaudeDataReader {
                 mw.cost += cost
                 mw.requests += 1
                 winByModel[key] = mw
+
+                let proj = Self.projectName(r.cwd)
+                var pu = winByProject[proj] ?? ProjectUsage(project: proj, tokens: TokenCounts(), cost: 0, requests: 0)
+                pu.tokens += tokens
+                pu.cost += cost
+                pu.requests += 1
+                winByProject[proj] = pu
             }
 
             if isToday {
@@ -131,6 +139,23 @@ struct ClaudeDataReader {
         snap.windowByModel = winByModel.values
             .filter { $0.tokens.total > 0 }
             .sorted { $0.tokens.total > $1.tokens.total }
+        snap.windowByProject = winByProject.values
+            .filter { $0.tokens.total > 0 }
+            .sorted { $0.cost > $1.cost }
+
+        // Active conversation = the session of the most recent assistant turn.
+        let assistantTurns = records.filter { $0.type == "assistant" && $0.tokens != nil }
+        if let latest = assistantTurns.max(by: { $0.timestamp < $1.timestamp }) {
+            let inSession = assistantTurns.filter { $0.sessionId == latest.sessionId }
+            let sessionCost = inSession.reduce(0.0) { $0 + Pricing.cost(for: $1.tokens!, model: $1.model) }
+            let t = latest.tokens!
+            snap.currentSession = SessionUsage(
+                project: Self.projectName(latest.cwd),
+                cost: sessionCost,
+                requests: inSession.count,
+                contextTokens: t.input + t.cacheRead + t.cacheWrite,
+                lastActivity: latest.timestamp)
+        }
 
         snap.todayTokens = todayTokens
         snap.todayCost = todayCost
@@ -147,6 +172,7 @@ struct ClaudeDataReader {
         let timestamp: Date
         let type: String        // "user" | "assistant" | ...
         let sessionId: String
+        let cwd: String
         let model: String
         let tokens: TokenCounts? // assistant turns only
         let toolUseCount: Int
@@ -261,10 +287,16 @@ struct ClaudeDataReader {
             timestamp: date,
             type: type,
             sessionId: sessionId,
+            cwd: obj["cwd"] as? String ?? "",
             model: message?["model"] as? String ?? "unknown",
             tokens: tokens,
             toolUseCount: toolUses
         )
+    }
+
+    /// Project label for a working directory ("/Users/me/Foo" → "Foo").
+    fileprivate static func projectName(_ cwd: String) -> String {
+        cwd.isEmpty ? "기타" : URL(fileURLWithPath: cwd).lastPathComponent
     }
 }
 

@@ -40,6 +40,24 @@ struct ModelWindowUsage: Identifiable {
     var requests: Int
 }
 
+/// Per-project usage within the 5-hour window.
+struct ProjectUsage: Identifiable {
+    var id: String { project }
+    let project: String
+    var tokens: TokenCounts
+    var cost: Double
+    var requests: Int
+}
+
+/// The currently-active conversation (most recently used session).
+struct SessionUsage {
+    let project: String
+    let cost: Double          // cumulative cost of this session
+    let requests: Int
+    let contextTokens: Int    // ≈ current context size (latest turn input + cache)
+    let lastActivity: Date
+}
+
 /// Everything the UI needs for one refresh.
 struct UsageSnapshot {
     var generatedAt = Date()
@@ -48,6 +66,10 @@ struct UsageSnapshot {
     var windowTokens = TokenCounts()
     var windowCost = 0.0
     var windowByModel: [ModelWindowUsage] = []
+    var windowByProject: [ProjectUsage] = []
+
+    // The active conversation right now.
+    var currentSession: SessionUsage?
     /// When the oldest request in the current window ages past 5h — i.e. when
     /// the window first starts to free up. `nil` when the window is empty.
     var windowResetAt: Date?

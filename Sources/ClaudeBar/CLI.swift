@@ -111,6 +111,21 @@ enum CLI {
             }
         }
 
+        if !s.windowByProject.isEmpty {
+            print("\nPer-project (last 5h):")
+            for p in s.windowByProject.prefix(5) {
+                line(p.project, "~\(Fmt.usd(p.cost))  \(Fmt.tokens(p.tokens.total))")
+            }
+        }
+
+        if let cs = s.currentSession {
+            print("\nCurrent session:")
+            line("Project", cs.project)
+            line("Cost", "~" + Fmt.usd(cs.cost))
+            line("Context", Fmt.tokens(cs.contextTokens))
+            line("Requests", Fmt.int(cs.requests))
+        }
+
         print("\nToday:")
         line("Tokens", Fmt.tokens(s.todayTokens.total))
         line("Est. cost", "~" + Fmt.usd(s.todayCost))

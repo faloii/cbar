@@ -192,6 +192,34 @@ final class CostEstimatorTests: XCTestCase {
     }
 }
 
+final class BudgetTests: XCTestCase {
+    func testMonthToDateAndProjection() {
+        // now = 2026-06-15 (day 15 of a 30-day month).
+        var comps = DateComponents(); comps.year = 2026; comps.month = 6; comps.day = 15
+        let cal = Calendar(identifier: .gregorian)
+        let now = cal.date(from: comps)!
+        let history = [
+            DailyCost(date: "2026-05-31", tokens: 0, cost: 99),   // previous month — excluded
+            DailyCost(date: "2026-06-05", tokens: 0, cost: 30),
+            DailyCost(date: "2026-06-10", tokens: 0, cost: 30),
+        ]
+        let s = Budget.status(history: history, now: now, budget: 200, calendar: cal)
+        XCTAssertEqual(s.monthToDate, 60, accuracy: 0.001)        // 30 + 30, May excluded
+        XCTAssertEqual(s.projected, 60.0 / 15 * 30, accuracy: 0.001)  // = 120
+        XCTAssertEqual(s.fraction, 60.0 / 200, accuracy: 0.001)
+        XCTAssertFalse(s.projectedOver)                          // 120 < 200
+    }
+
+    func testProjectedOver() {
+        var comps = DateComponents(); comps.year = 2026; comps.month = 6; comps.day = 10
+        let cal = Calendar(identifier: .gregorian)
+        let now = cal.date(from: comps)!
+        let history = [DailyCost(date: "2026-06-09", tokens: 0, cost: 100)]
+        let s = Budget.status(history: history, now: now, budget: 150, calendar: cal)
+        XCTAssertTrue(s.projectedOver)   // 100/10*30 = 300 > 150
+    }
+}
+
 final class AdviceTests: XCTestCase {
     let now = Date(timeIntervalSince1970: 1_000_000)
     private func model(_ name: String, total: Int, requests: Int, cost: Double) -> ModelWindowUsage {

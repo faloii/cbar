@@ -12,11 +12,14 @@ struct MenuContentView: View {
             if hasAnyData {
                 if store.enableLiveLimits, !store.adviceTips.isEmpty { Card { adviceSection } }
                 if store.enableLiveLimits { Card { limitsSection } }
+                if let s = snap.currentSession { Card { currentSessionSection(s) } }
                 Card { windowSection }
                 if !store.modelBurnRows.isEmpty { Card { perModelSection } }
+                if !snap.windowByProject.isEmpty { Card { perProjectSection } }
                 Card { todaySection }
                 if !snap.dailyTokenHistory.isEmpty { Card { trendSection } }
                 if !snap.dailyCostHistory.isEmpty { Card { costSummarySection } }
+                if let b = store.budgetStatus { Card { budgetSection(b) } }
             } else {
                 Card { emptyStateSection }
             }
@@ -145,6 +148,54 @@ struct MenuContentView: View {
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    @ViewBuilder private func currentSessionSection(_ s: SessionUsage) -> some View {
+        CardHeader(icon: "text.bubble", title: "현재 세션")
+        HStack {
+            Text(s.project).font(.callout.weight(.medium)).lineLimit(1)
+            Spacer()
+            Text("~\(Fmt.usd(s.cost))").font(.callout).monospacedDigit()
+        }
+        HStack(spacing: 5) {
+            Text("맥락 \(Fmt.tokens(s.contextTokens))")
+            Text("·")
+            Text("\(Fmt.int(s.requests))회")
+            Spacer()
+            Text(Fmt.time(s.lastActivity))
+        }
+        .font(.caption).foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder private var perProjectSection: some View {
+        let total = max(snap.windowByProject.reduce(0) { $0 + $1.cost }, 0.0001)
+        CardHeader(icon: "folder", title: "프로젝트별 · 5시간")
+        VStack(alignment: .leading, spacing: 9) {
+            ForEach(Array(snap.windowByProject.prefix(5))) { p in
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack {
+                        Text(p.project).font(.callout.weight(.medium)).lineLimit(1)
+                        Spacer()
+                        Text("~\(Fmt.usd(p.cost))").font(.callout).monospacedDigit()
+                    }
+                    MeterBar(fraction: p.cost / total)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    @ViewBuilder private func budgetSection(_ b: BudgetStatus) -> some View {
+        CardHeader(icon: "creditcard", title: "월 예산")
+        HStack(alignment: .firstTextBaseline, spacing: 5) {
+            Text("~\(Fmt.usd(b.monthToDate))")
+                .font(.system(size: 22, weight: .semibold, design: .rounded)).monospacedDigit()
+            Text("/ \(Fmt.usd(b.budget))").foregroundStyle(.secondary).font(.callout)
+            Spacer()
+        }
+        MeterBar(fraction: b.fraction)
+        Text("이 추세면 월말 ~\(Fmt.usd(b.projected))\(b.projectedOver ? " · 예산 초과 예상" : "")")
+            .font(.caption2).foregroundStyle(b.projectedOver ? Color.orange : Color.secondary)
     }
 
     @ViewBuilder private var windowSection: some View {

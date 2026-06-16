@@ -70,6 +70,10 @@ final class UsageStore: ObservableObject {
     @AppStorage("warnThreshold") var warnThreshold: Int = 80 {
         didSet { objectWillChange.send() }
     }
+    /// Monthly budget in USD; 0 = off.
+    @AppStorage("monthlyBudget") var monthlyBudget: Double = 0 {
+        didSet { objectWillChange.send() }
+    }
     @AppStorage("notifyOnWarning") var notifyOnWarning: Bool = false {
         didSet { if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() } }
     }
@@ -203,6 +207,12 @@ final class UsageStore: ObservableObject {
                        models: snapshot.windowByModel,
                        warnThreshold: warnThreshold,
                        now: snapshot.generatedAt)
+    }
+
+    /// Month-to-date spend vs the monthly budget, or nil when no budget is set.
+    var budgetStatus: BudgetStatus? {
+        guard monthlyBudget > 0 else { return nil }
+        return Budget.status(history: snapshot.dailyCostHistory, now: Date(), budget: monthlyBudget)
     }
 
     /// Per-model burn comparison for the current 5-hour window.

@@ -43,6 +43,16 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            Section("월 예산") {
+                HStack {
+                    Slider(value: $store.monthlyBudget, in: 0...1000, step: 10)
+                    Text(store.monthlyBudget <= 0 ? "끔" : Fmt.usd(store.monthlyBudget))
+                        .monospacedDigit().frame(width: 56, alignment: .trailing)
+                }
+                Text("이번 달 추정 비용과 월말 예상을 예산 대비로 표시합니다. 0이면 끕니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("알림") {
                 HStack {
                     Text("경고 임계값")
@@ -81,7 +91,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 380, height: 560)
+        .frame(width: 380, height: 640)
     }
 
     private static var appVersion: String {
