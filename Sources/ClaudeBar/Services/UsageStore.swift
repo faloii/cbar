@@ -150,9 +150,9 @@ final class UsageStore: ObservableObject {
         check(limits?.weekly7d, name: "주간", key: "weekly", flag: &notifiedWeekly)
     }
 
-    /// Idle cadence when the popover is closed — the menu-bar label only needs to
-    /// drift slowly, so we don't scan/fetch on the full interval in the background.
-    private static let idleInterval: TimeInterval = 600
+    /// Idle cadence when the popover is closed — kept at the limits cache TTL (180s)
+    /// so the menu-bar warning icon stays reasonably fresh without scanning every 60s.
+    private static let idleInterval: TimeInterval = 180
     private var popoverVisible = false
 
     /// Driven by the popover's onAppear/onDisappear: refresh on open and use the
