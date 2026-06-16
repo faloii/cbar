@@ -11,30 +11,32 @@ enum SettingsOpener {
 /// ourselves and, while it's open, flip the app to a regular (Dock-visible) app so
 /// the window can reliably take focus and come to the front — reverting to accessory
 /// when it closes.
+/// A panel that never becomes key/main, so showing it doesn't make the menu-bar
+/// popover resign key (and dismiss). All Settings controls are mouse-operable.
+final class NonKeyPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
 @MainActor
-final class SettingsWindowController: NSObject, NSWindowDelegate {
+final class SettingsWindowController: NSObject {
     static let shared = SettingsWindowController()
-    private var window: NSWindow?
+    private var panel: NSPanel?
 
     func show() {
-        NSLog("ClaudeBar: SettingsOpener.show()")
-        if window == nil {
+        if panel == nil {
             let hosting = NSHostingController(rootView: SettingsView(store: .shared))
-            let w = NSWindow(contentViewController: hosting)
-            w.title = "ClaudeBar 설정"
-            w.styleMask = [.titled, .closable]
-            w.isReleasedWhenClosed = false
-            w.delegate = self
-            w.center()
-            window = w
+            let p = NonKeyPanel(contentViewController: hosting)
+            p.styleMask = [.titled, .closable, .nonactivatingPanel]
+            p.title = "ClaudeBar 설정"
+            p.isFloatingPanel = true
+            p.level = .floating
+            p.hidesOnDeactivate = false
+            p.isReleasedWhenClosed = false
+            p.center()
+            panel = p
         }
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        window?.makeKeyAndOrderFront(nil)
-        window?.orderFrontRegardless()
-    }
-
-    func windowWillClose(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        // Float it in without activating the app, so the popover keeps key and stays open.
+        panel?.orderFrontRegardless()
     }
 }
