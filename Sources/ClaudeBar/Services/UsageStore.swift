@@ -5,12 +5,13 @@ import Combine
 /// Popover cards the user can show/hide and reorder (Settings → 섹션).
 /// Declaration order is the default layout order.
 enum PanelSection: String, CaseIterable, Identifiable {
-    case advice, limits, currentSession, recent, perModel, perProject, today, trend, costSummary, budget
+    case advice, limits, limitTrend, currentSession, recent, perModel, perProject, today, trend, costSummary, budget
     var id: String { rawValue }
     var label: String {
         switch self {
         case .advice:         return "조언"
         case .limits:         return "플랜 한도"
+        case .limitTrend:     return "한도 추세"
         case .currentSession: return "현재 세션"
         case .recent:         return "최근 5시간"
         case .perModel:       return "모델별 소진"
@@ -71,6 +72,7 @@ final class UsageStore: ObservableObject {
     @Published private(set) var limits: LimitsSnapshot?
     @Published private(set) var sessionProjection: Projection?
     @Published private(set) var weeklyProjection: Projection?
+    @Published private(set) var limitHistory: [UsageSample] = []   // our own sampled limit % over time
     @Published private(set) var isRefreshing = false
 
     @AppStorage("refreshIntervalSeconds") var refreshInterval: Double = 60 {
@@ -183,11 +185,15 @@ final class UsageStore: ObservableObject {
     }
 
     private func recomputeProjections() {
-        guard enableLiveLimits else { sessionProjection = nil; weeklyProjection = nil; return }
+        guard enableLiveLimits else {
+            sessionProjection = nil; weeklyProjection = nil; limitHistory = []; return
+        }
         let now = Date()
-        sessionProjection = Projection.compute(points: UsageHistory.sessionPoints(),
+        let samples = UsageHistory.load()
+        limitHistory = samples
+        sessionProjection = Projection.compute(points: samples.compactMap { s in s.session.map { (s.at, $0) } },
                                                resetsAt: limits?.session5h?.resetsAt, now: now)
-        weeklyProjection = Projection.compute(points: UsageHistory.weeklyPoints(),
+        weeklyProjection = Projection.compute(points: samples.compactMap { s in s.weekly.map { (s.at, $0) } },
                                               resetsAt: limits?.weekly7d?.resetsAt, now: now)
     }
 

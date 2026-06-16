@@ -123,6 +123,10 @@ struct MenuContentView: View {
             if store.enableLiveLimits, !store.adviceTips.isEmpty { Card { adviceSection } }
         case .limits:
             if store.enableLiveLimits { Card { limitsSection } }
+        case .limitTrend:
+            if store.enableLiveLimits, store.limitHistory.filter({ $0.session != nil }).count >= 2 {
+                Card { limitTrendSection }
+            }
         case .currentSession:
             if let s = snap.currentSession { Card { currentSessionSection(s) } }
         case .recent:
@@ -205,6 +209,23 @@ struct MenuContentView: View {
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    @ViewBuilder private var limitTrendSection: some View {
+        let session = store.limitHistory.compactMap { s in s.session.map { (s.at, $0) } }
+        let weekly = store.limitHistory.compactMap { s in s.weekly.map { (s.at, $0) } }
+        HStack {
+            CardHeader(icon: "waveform.path.ecg", title: "한도 추세")
+            Spacer()
+            HStack(spacing: 8) {
+                Label("세션", systemImage: "circle.fill").foregroundStyle(Color.brand)
+                Label("주간", systemImage: "circle.fill").foregroundStyle(.secondary)
+            }
+            .font(.caption2).labelStyle(.titleAndIcon).imageScale(.small)
+        }
+        LimitTrendChart(session: session, weekly: weekly, threshold: store.warnThreshold)
+        Text("최근 \(store.limitHistory.count)개 샘플 · 0–100% · 점선=경고 임계값")
+            .font(.caption2).foregroundStyle(.tertiary)
     }
 
     @ViewBuilder private func currentSessionSection(_ s: SessionUsage) -> some View {

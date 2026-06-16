@@ -105,6 +105,44 @@ struct Sparkline: View {
     }
 }
 
+/// Line chart of sampled limit utilization (%) over time, on a fixed 0–100 scale
+/// with a dashed warning-threshold line. Session is emphasized; weekly is faint.
+struct LimitTrendChart: View {
+    let session: [(Date, Double)]
+    let weekly: [(Date, Double)]
+    let threshold: Int
+
+    var body: some View {
+        GeometryReader { geo in
+            let times = (session + weekly).map { $0.0.timeIntervalSinceReferenceDate }
+            let tMin = times.min() ?? 0
+            let tMax = times.max() ?? 1
+            let span = max(tMax - tMin, 1)
+            func x(_ t: Date) -> CGFloat { geo.size.width * CGFloat((t.timeIntervalSinceReferenceDate - tMin) / span) }
+            func y(_ u: Double) -> CGFloat { geo.size.height * CGFloat(1 - min(max(u, 0), 100) / 100) }
+            func line(_ pts: [(Date, Double)]) -> Path {
+                Path { p in
+                    let sorted = pts.sorted { $0.0 < $1.0 }
+                    guard let f = sorted.first else { return }
+                    p.move(to: CGPoint(x: x(f.0), y: y(f.1)))
+                    for pt in sorted.dropFirst() { p.addLine(to: CGPoint(x: x(pt.0), y: y(pt.1))) }
+                }
+            }
+            ZStack {
+                Path { p in
+                    let ty = y(Double(threshold))
+                    p.move(to: CGPoint(x: 0, y: ty)); p.addLine(to: CGPoint(x: geo.size.width, y: ty))
+                }
+                .stroke(Color.orange.opacity(0.5), style: .init(lineWidth: 0.5, dash: [3, 3]))
+                line(weekly).stroke(Color.secondary.opacity(0.5), style: .init(lineWidth: 1.2, lineJoin: .round))
+                line(session).stroke(Color.brand, style: .init(lineWidth: 1.6, lineJoin: .round))
+            }
+        }
+        .frame(height: 40)
+        .accessibilityHidden(true)
+    }
+}
+
 /// Small bar chart of daily cost; the most recent day is highlighted.
 struct DailyCostBars: View {
     let days: [DailyCost]
