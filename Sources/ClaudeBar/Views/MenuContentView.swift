@@ -98,8 +98,12 @@ struct MenuContentView: View {
             Text("업데이트 \(Fmt.time(snap.generatedAt))")
                 .font(.caption2).foregroundStyle(.tertiary)
             Spacer()
-            Button("설정…") { SettingsOpener.open() }
-                .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
+            Button { SettingsOpener.open() } label: {
+                Image(systemName: "gearshape")
+            }
+            .buttonStyle(.plain).font(.callout).foregroundStyle(.secondary)
+            .help("설정")
+            .accessibilityLabel("설정")
             Button("종료") { NSApplication.shared.terminate(nil) }
                 .buttonStyle(.plain).font(.caption).foregroundStyle(.secondary)
         }
