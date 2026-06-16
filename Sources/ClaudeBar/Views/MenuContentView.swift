@@ -12,13 +12,13 @@ struct MenuContentView: View {
             if hasAnyData {
                 if store.enableLiveLimits, !store.adviceTips.isEmpty { Card { adviceSection } }
                 if store.enableLiveLimits { Card { limitsSection } }
-                if let s = snap.currentSession { Card { currentSessionSection(s) } }
-                Card { windowSection }
-                if !store.modelBurnRows.isEmpty { Card { perModelSection } }
-                if !snap.windowByProject.isEmpty { Card { perProjectSection } }
-                Card { todaySection }
-                if !snap.dailyTokenHistory.isEmpty { Card { trendSection } }
-                if !snap.dailyCostHistory.isEmpty { Card { costSummarySection } }
+                if store.isVisible(.currentSession), let s = snap.currentSession { Card { currentSessionSection(s) } }
+                if store.isVisible(.recent) { Card { windowSection } }
+                if store.isVisible(.perModel), !store.modelBurnRows.isEmpty { Card { perModelSection } }
+                if store.isVisible(.perProject), !snap.windowByProject.isEmpty { Card { perProjectSection } }
+                if store.isVisible(.today) { Card { todaySection } }
+                if store.isVisible(.trend), !snap.dailyTokenHistory.isEmpty { Card { trendSection } }
+                if store.isVisible(.costSummary), !snap.dailyCostHistory.isEmpty { Card { costSummarySection } }
                 if let b = store.budgetStatus { Card { budgetSection(b) } }
             } else {
                 Card { emptyStateSection }

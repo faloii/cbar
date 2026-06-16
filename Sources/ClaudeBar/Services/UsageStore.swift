@@ -2,6 +2,23 @@ import Foundation
 import SwiftUI
 import Combine
 
+/// Optional popover cards the user can show/hide (Settings → 표시 섹션).
+enum PanelSection: String, CaseIterable, Identifiable {
+    case currentSession, recent, perModel, perProject, today, trend, costSummary
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .currentSession: return "현재 세션"
+        case .recent:         return "최근 5시간"
+        case .perModel:       return "모델별 소진"
+        case .perProject:     return "프로젝트별"
+        case .today:          return "오늘"
+        case .trend:          return "추세"
+        case .costSummary:    return "기간 비용"
+        }
+    }
+}
+
 /// Popover appearance — follow the system, or pin light/dark.
 enum Appearance: String, CaseIterable, Identifiable {
     case system, light, dark
@@ -73,6 +90,19 @@ final class UsageStore: ObservableObject {
     /// Monthly budget in USD; 0 = off.
     @AppStorage("monthlyBudget") var monthlyBudget: Double = 0 {
         didSet { objectWillChange.send() }
+    }
+    /// Comma-joined raw values of hidden sections (empty = all shown).
+    @AppStorage("hiddenSections") private var hiddenSectionsRaw: String = "" {
+        didSet { objectWillChange.send() }
+    }
+
+    func isVisible(_ section: PanelSection) -> Bool {
+        !hiddenSectionsRaw.split(separator: ",").contains(Substring(section.rawValue))
+    }
+    func setVisible(_ section: PanelSection, _ visible: Bool) {
+        var hidden = Set(hiddenSectionsRaw.split(separator: ",").map(String.init))
+        if visible { hidden.remove(section.rawValue) } else { hidden.insert(section.rawValue) }
+        hiddenSectionsRaw = hidden.sorted().joined(separator: ",")
     }
     @AppStorage("notifyOnWarning") var notifyOnWarning: Bool = false {
         didSet { if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() } }

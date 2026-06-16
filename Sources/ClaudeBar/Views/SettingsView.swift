@@ -33,6 +33,14 @@ struct SettingsView: View {
                 }
             }
 
+            Section("표시 섹션") {
+                ForEach(PanelSection.allCases) { section in
+                    Toggle(section.label, isOn: Binding(
+                        get: { store.isVisible(section) },
+                        set: { store.setVisible(section, $0) }))
+                }
+            }
+
             Section("모델별 소진") {
                 Picker("비교 기준", selection: Binding(
                     get: { store.burnBasis },
@@ -91,7 +99,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 380, height: 640)
+        .frame(width: 380, height: 700)
     }
 
     private static var appVersion: String {
