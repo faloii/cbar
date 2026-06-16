@@ -1,10 +1,24 @@
 import SwiftUI
+import AppKit
+
+private struct ContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
 
 /// The popover shown when the menu-bar icon is clicked.
 struct MenuContentView: View {
     @ObservedObject var store: UsageStore
+    @State private var contentHeight: CGFloat = 0
 
     private var snap: UsageSnapshot { store.snapshot }
+
+    /// Cap the scroll area to the screen (minus header/footer/menu-bar/margins) so
+    /// the pinned footer always fits, adapting to small displays.
+    private var maxScroll: CGFloat {
+        let usable = NSScreen.main?.visibleFrame.height ?? 800
+        return max(280, usable - 180)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,9 +48,13 @@ struct MenuContentView: View {
                 }
                 .padding(.horizontal, 14)
                 .padding(.bottom, 12)
+                .background(GeometryReader { g in
+                    Color.clear.preference(key: ContentHeightKey.self, value: g.size.height)
+                })
             }
-            .frame(maxHeight: 600)
+            .frame(height: contentHeight == 0 ? maxScroll : min(contentHeight, maxScroll))
             .scrollBounceBehavior(.basedOnSize)
+            .onPreferenceChange(ContentHeightKey.self) { contentHeight = $0 }
 
             Divider()
             footer
