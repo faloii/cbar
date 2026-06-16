@@ -38,8 +38,8 @@ enum Advice {
         if let s = session, s.verdict == .atRisk {
             tips.append(AdviceTip(
                 kind: .sessionPacing, level: .critical, icon: "speedometer",
-                text: "세션 한도 임박 — 이 속도면 \(dur(s.timeToFull)) 후 소진(리셋 \(dur(s.blockedBy)) 전). "
-                    + "속도를 약 \(reductionPercent(s))% 낮추거나 잠시 쉬었다 가세요."))
+                text: "이 속도면 약 \(dur(s.timeToFull)) 뒤 한도가 차고, 그 뒤 \(dur(s.blockedBy)) 동안은 더 못 써요. "
+                    + "잠깐 쉬거나 천천히 쓰는 게 좋아요."))
         }
 
         // 2) Weekly — defer big work.
@@ -61,10 +61,11 @@ enum Advice {
                 let share = top.cost / totalCost
                 let mult = costPerTurn(top) / costPerTurn(light)
                 if share >= 0.55, mult >= 1.8 {
+                    let multText = mult >= 100 ? "100배 넘게" : "약 \(Int(mult.rounded()))배"
                     tips.append(AdviceTip(
                         kind: .costModel, level: .info, icon: "arrow.left.arrow.right",
-                        text: "비용의 \(Int((share * 100).rounded()))%가 \(top.model)에 집중 — "
-                            + "루틴 작업을 \(light.model)로 바꾸면 턴당 비용이 ~\(String(format: "%.1f", mult))× 절감됩니다."))
+                        text: "비용의 \(Int((share * 100).rounded()))%가 \(top.model)에서 나와요. "
+                            + "\(top.model)은 \(light.model)보다 턴당 \(multText) 비싸니, 가벼운 작업은 \(light.model)로 돌리면 크게 아껴요."))
                 }
             }
         }
