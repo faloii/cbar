@@ -27,7 +27,7 @@ if [ -f Resources/AppIcon.icns ]; then
     ICON_KEY="    <key>CFBundleIconFile</key>        <string>AppIcon</string>"
 fi
 
-VERSION="${CLAUDEBAR_VERSION:-1.0.0}"
+VERSION="${CLAUDEBAR_VERSION:-$(cat VERSION 2>/dev/null || echo 1.0.0)}"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -66,7 +66,11 @@ if [ -z "$SIGN_ID" ]; then
 fi
 if [ -n "$SIGN_ID" ]; then
     echo "    identity: $SIGN_ID"
-    codesign --force --identifier "$BUNDLE_ID" --sign "$SIGN_ID" "$APP"
+    # Hardened runtime is required for notarization — add it only for Developer ID
+    # (local Apple Development builds don't need it).
+    RUNTIME=""
+    case "$SIGN_ID" in "Developer ID"*) RUNTIME="--options runtime" ;; esac
+    codesign --force $RUNTIME --identifier "$BUNDLE_ID" --sign "$SIGN_ID" "$APP"
     echo "    → stable signature; approve the Keychain prompt once with “Always Allow”."
 else
     echo "    no stable identity found — falling back to ad-hoc"

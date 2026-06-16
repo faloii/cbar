@@ -33,6 +33,7 @@ struct CardHeader: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: icon).font(.caption2.weight(.semibold)).foregroundStyle(Color.brand)
+                .accessibilityHidden(true)
             Text(title.uppercased())
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -64,6 +65,7 @@ struct MeterBar: View {
             }
         }
         .frame(height: 7)
+        .accessibilityHidden(true)   // decorative; the % is shown as text alongside
     }
 }
 
@@ -99,6 +101,7 @@ struct Sparkline: View {
             }
         }
         .frame(height: 30)
+        .accessibilityHidden(true)
     }
 }
 
@@ -123,6 +126,7 @@ struct DailyCostBars: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         }
         .frame(height: 30)
+        .accessibilityHidden(true)
     }
 }
 
@@ -170,6 +174,7 @@ struct LimitRow: View {
             MeterBar(fraction: window.fraction)
             projectionLine
         }
+        .accessibilityElement(children: .combine)
     }
 
     @ViewBuilder private var projectionLine: some View {
@@ -237,6 +242,7 @@ struct ModelBurnRowView: View {
             }
             .font(.caption2).foregroundStyle(.secondary)
         }
+        .accessibilityElement(children: .combine)
     }
 }
 

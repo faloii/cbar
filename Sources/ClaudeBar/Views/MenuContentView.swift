@@ -9,13 +9,17 @@ struct MenuContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
-            if store.enableLiveLimits, !store.adviceTips.isEmpty { Card { adviceSection } }
-            if store.enableLiveLimits { Card { limitsSection } }
-            Card { windowSection }
-            if !store.modelBurnRows.isEmpty { Card { perModelSection } }
-            Card { todaySection }
-            if !snap.dailyTokenHistory.isEmpty { Card { trendSection } }
-            if !snap.dailyCostHistory.isEmpty { Card { costSummarySection } }
+            if hasAnyData {
+                if store.enableLiveLimits, !store.adviceTips.isEmpty { Card { adviceSection } }
+                if store.enableLiveLimits { Card { limitsSection } }
+                Card { windowSection }
+                if !store.modelBurnRows.isEmpty { Card { perModelSection } }
+                Card { todaySection }
+                if !snap.dailyTokenHistory.isEmpty { Card { trendSection } }
+                if !snap.dailyCostHistory.isEmpty { Card { costSummarySection } }
+            } else {
+                Card { emptyStateSection }
+            }
             footer
         }
         .padding(14)
@@ -37,6 +41,7 @@ struct MenuContentView: View {
                     LinearGradient(colors: [Color.brandTop, Color.brand], startPoint: .top, endPoint: .bottom),
                     in: RoundedRectangle(cornerRadius: 7, style: .continuous)
                 )
+                .accessibilityHidden(true)
             Text("ClaudeBar").font(.headline)
             Spacer()
             Button { store.refresh() } label: {
@@ -51,6 +56,7 @@ struct MenuContentView: View {
             }
             .buttonStyle(.plain)
             .help("새로고침")
+            .accessibilityLabel("새로고침")
         }
     }
 
@@ -67,7 +73,22 @@ struct MenuContentView: View {
         .padding(.horizontal, 2)
     }
 
+    private var hasAnyData: Bool {
+        snap.windowTokens.total > 0 || snap.todayRequests > 0
+            || !snap.dailyCostHistory.isEmpty || (store.limits?.hasData ?? false)
+    }
+
     // MARK: Sections (Card supplies the surrounding VStack + spacing)
+
+    @ViewBuilder private var emptyStateSection: some View {
+        CardHeader(icon: "tray", title: "데이터 없음")
+        Text("아직 표시할 사용 데이터가 없어요.\nClaude Code로 작업하면 여기에 사용량·비용·한도가 나타납니다.")
+            .font(.callout).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        if store.enableLiveLimits, store.limits == nil {
+            Text("실시간 한도 불러오는 중…").font(.caption).foregroundStyle(.tertiary)
+        }
+    }
 
     @ViewBuilder private var adviceSection: some View {
         CardHeader(icon: "lightbulb", title: "조언")
@@ -77,6 +98,7 @@ struct MenuContentView: View {
                     Image(systemName: tip.icon)
                         .font(.caption).foregroundStyle(adviceColor(tip.level))
                         .frame(width: 14)
+                        .accessibilityHidden(true)
                     Text(tip.text)
                         .font(.caption)
                         .fixedSize(horizontal: false, vertical: true)

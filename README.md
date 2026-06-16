@@ -55,10 +55,29 @@ Plus an **optional live fetch** of your real plan limits (see
 # Quick run during development (debug build, launches the menu-bar app)
 ./Scripts/run.sh
 
-# Build a distributable, ad-hoc-signed ClaudeBar.app
+# Build a distributable ClaudeBar.app (signed with a stable identity if available)
 ./Scripts/package_app.sh
 open build/ClaudeBar.app          # or: cp -r build/ClaudeBar.app /Applications/
+
+# Package a .dmg (build/ClaudeBar-<version>.dmg) — version comes from the VERSION file
+./Scripts/make_dmg.sh
 ```
+
+### Distribution / notarization
+
+`package_app.sh` signs with a stable identity (Developer ID preferred, else Apple
+Development; override via `CLAUDEBAR_SIGN_IDENTITY`). To share the `.dmg` to other Macs
+without a Gatekeeper warning it must be **notarized**, which needs a paid Apple Developer
+account (a *Developer ID Application* certificate):
+
+```bash
+CLAUDEBAR_SIGN_IDENTITY="Developer ID Application: NAME (TEAMID)" ./Scripts/make_dmg.sh
+xcrun notarytool store-credentials claudebar-notary --apple-id you@example.com --team-id TEAMID --password <app-specific-password>
+./Scripts/notarize.sh
+```
+
+For personal use this isn't needed — the stable Apple Development signature is enough to
+run locally (approve the Keychain prompt once with *Always Allow*).
 
 The packaged app is menu-bar-only (`LSUIElement`) — no Dock icon. Quit it from the
 popover's **Quit** button.
@@ -164,5 +183,6 @@ Sources/ClaudeBar/
   Util/     Formatters.swift
 Tests/ClaudeBarTests/   unit tests
 Resources/AppIcon.icns  app icon (regenerate with Scripts/make_icon.swift)
-Scripts/  run.sh, package_app.sh, make_icon.swift
+VERSION                 app version (read by the packaging scripts)
+Scripts/  run.sh, package_app.sh, make_icon.swift, make_dmg.sh, notarize.sh
 ```

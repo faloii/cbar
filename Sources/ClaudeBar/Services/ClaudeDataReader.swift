@@ -152,24 +152,59 @@ struct ClaudeDataReader {
         let toolUseCount: Int
     }
 
+    // Per-file parse cache so a refresh re-parses only files that actually changed
+    // (keyed by modification date + size); unchanged logs are reused.
+    private struct CachedParse { let mtime: Date; let size: Int; let records: [LogRecord] }
+    private static let parseCacheLock = NSLock()
+    private static var parseCache: [String: CachedParse] = [:]
+
     /// Parse session logs touched in the last ~36h. (We only need today + a 5h
     /// window, so older files are skipped for speed.)
     private func recentRecords(now: Date) -> [LogRecord] {
         let projects = Self.configDir.appendingPathComponent("projects", isDirectory: true)
         let fm = FileManager.default
         guard let walker = fm.enumerator(at: projects,
-                                         includingPropertiesForKeys: [.contentModificationDateKey],
+                                         includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
                                          options: [.skipsHiddenFiles]) else { return [] }
 
         let cutoff = now.addingTimeInterval(-36 * 3600)
         var records: [LogRecord] = []
+        var seen: Set<String> = []
 
         for case let url as URL in walker where url.pathExtension == "jsonl" {
-            let mtime = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
+            let vals = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey])
+            let mtime = vals?.contentModificationDate
             if let mtime, mtime < cutoff { continue }
-            records.append(contentsOf: parse(fileAt: url))
+            let size = vals?.fileSize ?? -1
+            let key = url.path
+            seen.insert(key)
+
+            if let mtime, let cached = Self.cachedRecords(key: key, mtime: mtime, size: size) {
+                records.append(contentsOf: cached)
+            } else {
+                let parsed = parse(fileAt: url)
+                if let mtime { Self.storeRecords(key: key, mtime: mtime, size: size, records: parsed) }
+                records.append(contentsOf: parsed)
+            }
         }
+        Self.pruneCache(keeping: seen)
         return records
+    }
+
+    private static func cachedRecords(key: String, mtime: Date, size: Int) -> [LogRecord]? {
+        parseCacheLock.lock(); defer { parseCacheLock.unlock() }
+        guard let c = parseCache[key], c.mtime == mtime, c.size == size else { return nil }
+        return c.records
+    }
+
+    private static func storeRecords(key: String, mtime: Date, size: Int, records: [LogRecord]) {
+        parseCacheLock.lock(); defer { parseCacheLock.unlock() }
+        parseCache[key] = CachedParse(mtime: mtime, size: size, records: records)
+    }
+
+    private static func pruneCache(keeping keys: Set<String>) {
+        parseCacheLock.lock(); defer { parseCacheLock.unlock() }
+        parseCache = parseCache.filter { keys.contains($0.key) }
     }
 
     private func parse(fileAt url: URL) -> [LogRecord] {
