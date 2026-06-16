@@ -33,15 +33,29 @@ final class SettingsWindowController: NSObject {
             p.level = .floating
             p.hidesOnDeactivate = false
             p.isReleasedWhenClosed = false
-            // Place at the top-left so it doesn't overlap the popover (top-right).
-            if let vf = NSScreen.main?.visibleFrame {
-                p.setFrameOrigin(NSPoint(x: vf.minX + 24, y: vf.maxY - p.frame.height - 8))
-            } else {
-                p.center()
-            }
             panel = p
         }
+        positionNextToPopover()
         // Float it in without activating the app, so the popover keeps key and stays open.
         panel?.orderFrontRegardless()
+    }
+
+    /// Snap the panel against the left edge of the open popover, top-aligned.
+    /// Our app's only other visible window is the MenuBarExtra popover.
+    private func positionNextToPopover() {
+        guard let p = panel else { return }
+        let vf = NSScreen.main?.visibleFrame
+        let popover = NSApp.windows.first {
+            $0 !== p && $0.isVisible && $0.frame.width > 120 && $0.frame.height > 120
+        }
+        if let pop = popover {
+            var x = pop.frame.minX - p.frame.width
+            if let vf, x < vf.minX { x = pop.frame.maxX }   // no room on the left → go right
+            var y = pop.frame.maxY - p.frame.height
+            if let vf { y = max(vf.minY, y) }
+            p.setFrameOrigin(NSPoint(x: x, y: y))
+        } else if let vf {
+            p.setFrameOrigin(NSPoint(x: vf.minX + 24, y: vf.maxY - p.frame.height - 8))
+        }
     }
 }
