@@ -173,33 +173,60 @@ struct OAuthUsageClient: Sendable {
     }
 }
 
-/// Reads Claude Code's OAuth access token from `~/.claude/.credentials.json`
-/// (if present) or the macOS login Keychain (`Claude Code-credentials`).
+/// ClaudeBar's own Keychain item caching the credential blob, so we read it
+/// back without a prompt (we own it) on subsequent launches.
+private enum TokenStore {
+    static let service = "com.claudebar.token"
+    static let account = "default"
+    private static var base: [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: service, kSecAttrAccount as String: account]
+    }
+    static func read() -> Data? {
+        var q = base
+        q[kSecReturnData as String] = true
+        q[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess, let d = item as? Data else { return nil }
+        return d
+    }
+    static func write(_ data: Data) {
+        SecItemDelete(base as CFDictionary)
+        var add = base
+        add[kSecValueData as String] = data
+        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        SecItemAdd(add as CFDictionary, nil)
+    }
+    static func clear() { SecItemDelete(base as CFDictionary) }
+}
+
+/// Reads Claude Code's OAuth token, then caches it in ClaudeBar's own Keychain item
+/// so later launches don't re-prompt. Claude Code's (prompting) item is only read
+/// when our copy is missing or stale — minimizing the access prompt.
 struct ClaudeCredentials {
     let accessToken: String
     let expiresAt: Date?
+    var stillValid: Bool { expiresAt.map { $0 > Date().addingTimeInterval(60) } ?? true }
 
-    // In-memory cache so the Keychain is touched at most once per launch (and again
-    // only after expiry / a 401) instead of on every fetch — this is what stops the
-    // Keychain access prompt from reappearing every few minutes.
     private static let lock = NSLock()
     private static var cached: ClaudeCredentials?
 
     static func load() -> ClaudeCredentials? {
         lock.lock(); defer { lock.unlock() }
-        if let c = cached {
-            // Reuse while still valid (treat a missing expiry as long-lived).
-            let stillValid = c.expiresAt.map { $0 > Date().addingTimeInterval(60) } ?? true
-            if stillValid { return c }
-        }
-        let fresh = fromFile() ?? fromKeychain()
-        if let fresh { cached = fresh }
-        return fresh
+        if let c = cached, c.stillValid { return c }
+        // Our own item first — no prompt.
+        if let data = TokenStore.read(), let c = parse(data), c.stillValid { cached = c; return c }
+        // Else read Claude Code's item (may prompt once), then cache a copy.
+        guard let data = sourceData(), let c = parse(data) else { return nil }
+        TokenStore.write(data)
+        cached = c
+        return c
     }
 
-    /// Drop the cached token so the next `load()` re-reads the Keychain.
+    /// Drop our cached token (memory + our Keychain copy) so the next `load()`
+    /// re-reads Claude Code's item — used after a 401 / expiry.
     static func invalidate() {
-        lock.lock(); cached = nil; lock.unlock()
+        lock.lock(); cached = nil; TokenStore.clear(); lock.unlock()
     }
 
     private static func parse(_ data: Data) -> ClaudeCredentials? {
@@ -213,13 +240,10 @@ struct ClaudeCredentials {
         return ClaudeCredentials(accessToken: token, expiresAt: expires)
     }
 
-    private static func fromFile() -> ClaudeCredentials? {
+    /// Claude Code's credential JSON: file first, else its Keychain item (prompts).
+    private static func sourceData() -> Data? {
         let url = ClaudeDataReader.configDir.appendingPathComponent(".credentials.json")
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return parse(data)
-    }
-
-    private static func fromKeychain() -> ClaudeCredentials? {
+        if let data = try? Data(contentsOf: url) { return data }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "Claude Code-credentials",
@@ -229,6 +253,6 @@ struct ClaudeCredentials {
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
               let data = item as? Data else { return nil }
-        return parse(data)
+        return data
     }
 }
