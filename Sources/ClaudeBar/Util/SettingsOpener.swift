@@ -49,13 +49,18 @@ final class SettingsWindowController: NSObject {
             $0 !== p && $0.isVisible && $0.frame.width > 120 && $0.frame.height > 120
         }
         if let pop = popover {
+            // Match the popover's (high) window level so the panel isn't hidden behind it.
+            p.level = pop.level
             var x = pop.frame.minX - p.frame.width
             if let vf, x < vf.minX { x = pop.frame.maxX }   // no room on the left → go right
             var y = pop.frame.maxY - p.frame.height
             if let vf { y = max(vf.minY, y) }
             p.setFrameOrigin(NSPoint(x: x, y: y))
-        } else if let vf {
-            p.setFrameOrigin(NSPoint(x: vf.minX + 24, y: vf.maxY - p.frame.height - 8))
+        } else {
+            p.level = .floating
+            if let vf {
+                p.setFrameOrigin(NSPoint(x: vf.minX + 24, y: vf.maxY - p.frame.height - 8))
+            }
         }
     }
 }
