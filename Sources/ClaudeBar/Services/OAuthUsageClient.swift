@@ -85,11 +85,9 @@ struct OAuthUsageClient: Sendable {
     // MARK: - Network
 
     private func fetchRemote() async throws -> LimitsSnapshot {
+        // Don't gate on expiresAt (its format is unreliable and a valid token can look
+        // "expired"); just use the token and let a 401 trigger a refresh.
         guard let creds = ClaudeCredentials.load() else { throw FetchError.noCredentials }
-        if let exp = creds.expiresAt, exp < Date() {
-            ClaudeCredentials.invalidate()
-            throw FetchError.tokenExpired
-        }
 
         var req = URLRequest(url: Self.endpoint)
         req.httpMethod = "GET"
@@ -173,60 +171,70 @@ struct OAuthUsageClient: Sendable {
     }
 }
 
-/// ClaudeBar's own Keychain item caching the credential blob, so we read it
-/// back without a prompt (we own it) on subsequent launches.
-private enum TokenStore {
-    static let service = "com.claudebar.token"
-    static let account = "default"
-    private static var base: [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword,
-         kSecAttrService as String: service, kSecAttrAccount as String: account]
-    }
-    static func read() -> Data? {
-        var q = base
-        q[kSecReturnData as String] = true
-        q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &item) == errSecSuccess, let d = item as? Data else { return nil }
-        return d
-    }
-    static func write(_ data: Data) {
-        SecItemDelete(base as CFDictionary)
-        var add = base
-        add[kSecValueData as String] = data
-        add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        SecItemAdd(add as CFDictionary, nil)
-    }
-    static func clear() { SecItemDelete(base as CFDictionary) }
-}
-
-/// Reads Claude Code's OAuth token, then caches it in ClaudeBar's own Keychain item
-/// so later launches don't re-prompt. Claude Code's (prompting) item is only read
-/// when our copy is missing or stale — minimizing the access prompt.
-struct ClaudeCredentials {
+/// Reads Claude Code's OAuth token, then caches just the access token in a 0600
+/// file (`~/.claudebar/token.json`). File reads never prompt, so Claude Code's
+/// (prompting) Keychain item is read only on first run or after a 401 — not on
+/// every launch. Only the short-lived access token is stored (not the refresh token).
+struct ClaudeCredentials: Codable {
     let accessToken: String
     let expiresAt: Date?
-    var stillValid: Bool { expiresAt.map { $0 > Date().addingTimeInterval(60) } ?? true }
 
     private static let lock = NSLock()
     private static var cached: ClaudeCredentials?
+    private static var fileURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claudebar/token.json")
+    }
 
     static func load() -> ClaudeCredentials? {
         lock.lock(); defer { lock.unlock() }
-        if let c = cached, c.stillValid { return c }
-        // Our own item first — no prompt.
-        if let data = TokenStore.read(), let c = parse(data), c.stillValid { cached = c; return c }
-        // Else read Claude Code's item (may prompt once), then cache a copy.
-        guard let data = sourceData(), let c = parse(data) else { return nil }
-        TokenStore.write(data)
+        if let c = cached { return c }                 // in-memory (this launch)
+        if let c = readFile() { cached = c; return c } // our file — no prompt
+        guard let c = readSource() else { return nil } // Claude Code (may prompt once)
+        writeFile(c)
         cached = c
         return c
     }
 
-    /// Drop our cached token (memory + our Keychain copy) so the next `load()`
-    /// re-reads Claude Code's item — used after a 401 / expiry.
+    /// Drop the cached token (memory + file) so the next `load()` re-reads the
+    /// source — used after a 401.
     static func invalidate() {
-        lock.lock(); cached = nil; TokenStore.clear(); lock.unlock()
+        lock.lock(); cached = nil
+        try? FileManager.default.removeItem(at: fileURL)
+        lock.unlock()
+    }
+
+    // MARK: file cache
+
+    private static func readFile() -> ClaudeCredentials? {
+        guard let data = try? Data(contentsOf: fileURL) else { return nil }
+        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
+        guard let c = try? dec.decode(ClaudeCredentials.self, from: data), !c.accessToken.isEmpty else { return nil }
+        return c
+    }
+    private static func writeFile(_ c: ClaudeCredentials) {
+        let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
+        guard let data = try? enc.encode(c) else { return }
+        let dir = fileURL.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? data.write(to: fileURL, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+    }
+
+    // MARK: source (Claude Code)
+
+    private static func readSource() -> ClaudeCredentials? {
+        let url = ClaudeDataReader.configDir.appendingPathComponent(".credentials.json")
+        if let data = try? Data(contentsOf: url), let c = parse(data) { return c }
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: "Claude Code-credentials",
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
+              let data = item as? Data else { return nil }
+        return parse(data)
     }
 
     private static func parse(_ data: Data) -> ClaudeCredentials? {
@@ -238,21 +246,5 @@ struct ClaudeCredentials {
         if let ms = oauth["expiresAt"] as? Double { expires = Date(timeIntervalSince1970: ms / 1000) }
         else if let ms = oauth["expiresAt"] as? Int { expires = Date(timeIntervalSince1970: Double(ms) / 1000) }
         return ClaudeCredentials(accessToken: token, expiresAt: expires)
-    }
-
-    /// Claude Code's credential JSON: file first, else its Keychain item (prompts).
-    private static func sourceData() -> Data? {
-        let url = ClaudeDataReader.configDir.appendingPathComponent(".credentials.json")
-        if let data = try? Data(contentsOf: url) { return data }
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "Claude Code-credentials",
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else { return nil }
-        return data
     }
 }
