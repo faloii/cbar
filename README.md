@@ -55,7 +55,10 @@ Plus an **optional live fetch** of your real plan limits (see
 # Quick run during development (debug build, launches the menu-bar app)
 ./Scripts/run.sh
 
-# Build a distributable ClaudeBar.app (signed with a stable identity if available)
+# Install into /Applications and launch (build + copy + open)
+./Scripts/install.sh
+
+# Or just build a distributable ClaudeBar.app without installing
 ./Scripts/package_app.sh
 open build/ClaudeBar.app          # or: cp -r build/ClaudeBar.app /Applications/
 
@@ -184,5 +187,5 @@ Sources/ClaudeBar/
 Tests/ClaudeBarTests/   unit tests
 Resources/AppIcon.icns  app icon (regenerate with Scripts/make_icon.swift)
 VERSION                 app version (read by the packaging scripts)
-Scripts/  run.sh, package_app.sh, make_icon.swift, make_dmg.sh, notarize.sh
+Scripts/  run.sh, install.sh, package_app.sh, make_icon.swift, make_dmg.sh, notarize.sh
 ```
