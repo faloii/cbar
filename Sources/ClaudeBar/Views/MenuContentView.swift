@@ -59,7 +59,10 @@ struct MenuContentView: View {
         .dynamicTypeSize(.xLarge)   // bump all text-style fonts one step up for readability
         .preferredColorScheme(store.appearance.colorScheme)   // System / Light / Dark
         .onAppear { store.setPopoverVisible(true) }
-        .onDisappear { store.setPopoverVisible(false) }
+        .onDisappear {
+            store.setPopoverVisible(false)
+            SettingsOpener.close()   // dismiss Settings together with the popover
+        }
     }
 
     // MARK: Header / footer

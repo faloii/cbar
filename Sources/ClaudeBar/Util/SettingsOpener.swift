@@ -4,6 +4,7 @@ import SwiftUI
 @MainActor
 enum SettingsOpener {
     static func open() { SettingsWindowController.shared.show() }
+    static func close() { SettingsWindowController.shared.close() }
 }
 
 /// Owns the Settings window directly. SwiftUI's `Settings` scene / `openSettings()`
@@ -39,6 +40,9 @@ final class SettingsWindowController: NSObject {
         // Float it in without activating the app, so the popover keeps key and stays open.
         panel?.orderFrontRegardless()
     }
+
+    /// Hide the panel — used when the popover is dismissed so they close together.
+    func close() { panel?.orderOut(nil) }
 
     /// Snap the panel against the left edge of the open popover, top-aligned.
     /// Our app's only other visible window is the MenuBarExtra popover.
