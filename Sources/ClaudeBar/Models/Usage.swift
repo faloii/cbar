@@ -99,6 +99,19 @@ struct UsageSnapshot {
     var weeklyReview: WeeklyReview?
 
     static let empty = UsageSnapshot()
+
+    /// Returns a copy keeping this snapshot's stats fields but taking the
+    /// session-derived fields from `other` (used when a background refresh skipped
+    /// the session-log scan, to preserve the last-known session data).
+    func mergingSession(from o: UsageSnapshot) -> UsageSnapshot {
+        var s = self
+        s.windowTokens = o.windowTokens; s.windowCost = o.windowCost; s.windowResetAt = o.windowResetAt
+        s.windowByModel = o.windowByModel; s.windowByProject = o.windowByProject
+        s.currentSession = o.currentSession
+        s.todayTokens = o.todayTokens; s.todayCost = o.todayCost; s.todayByModel = o.todayByModel
+        s.todayRequests = o.todayRequests; s.todaySessions = o.todaySessions; s.todayToolCalls = o.todayToolCalls
+        return s
+    }
 }
 
 /// One day's token total and estimated cost.

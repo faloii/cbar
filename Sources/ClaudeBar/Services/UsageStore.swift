@@ -133,6 +133,9 @@ final class UsageStore: ObservableObject {
     @AppStorage("notifyOnWarning") var notifyOnWarning: Bool = true {
         didSet { if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() } }
     }
+    @AppStorage("weeklySummary") var weeklySummaryEnabled: Bool = true {
+        didSet { if weeklySummaryEnabled { Notifier.requestAuthorizationIfNeeded() } }
+    }
     @AppStorage("barMetric") private var barMetricRaw: String = BarMetric.sessionLimit.rawValue {
         didSet { objectWillChange.send() }
     }
@@ -171,20 +174,40 @@ final class UsageStore: ObservableObject {
         let reader = self.reader
         let client = self.limitsClient
         let live = enableLiveLimits
-        // When the popover is closed and the menu-bar label is a limit %, it's driven
-        // entirely by `limits` — skip the heavy local log scan until the popover opens.
-        let needScan = popoverVisible || !barMetric.needsLiveLimits
+        // Always parse the cheap stats cache (for the menu-bar/weekly summary); skip
+        // only the heavy session-log scan when the popover is closed and the bar metric
+        // is a limit % (driven by `limits` alone).
+        let full = popoverVisible || !barMetric.needsLiveLimits
+        let previous = snapshot
         Task {
-            let snap: UsageSnapshot? = needScan
-                ? await Task.detached(priority: .utility) { reader.load() }.value
-                : nil
+            var snap = await Task.detached(priority: .utility) { reader.load(includeSessionLogs: full) }.value
             let lim: LimitsSnapshot? = live ? await client.loadLimits(force: force) : nil
-            if let snap { self.snapshot = snap }
+            if !full { snap = snap.mergingSession(from: previous) }
+            self.snapshot = snap
             if live { self.limits = lim } else { self.limits = nil }
             self.recomputeProjections()
             self.maybeNotify()
+            self.maybeWeeklySummary()
             self.isRefreshing = false
         }
+    }
+
+    @AppStorage("lastWeeklySummaryAt") private var lastWeeklySummaryAt: Double = 0
+
+    /// Fire a weekly usage summary notification ~once every 7 days.
+    private func maybeWeeklySummary() {
+        guard weeklySummaryEnabled, let r = snapshot.weeklyReview else { return }
+        let now = Date().timeIntervalSince1970
+        guard now - lastWeeklySummaryAt >= 7 * 86400 else { return }
+        lastWeeklySummaryAt = now
+
+        var body = "지난 7일 ~\(Fmt.usd(r.thisCost))"
+        if let d = r.costDeltaPct {
+            body += d >= 0 ? " · 전주 ▲\(Int(d.rounded()))%" : " · 전주 ▼\(Int(abs(d).rounded()))%"
+        }
+        body += " · Opus 비중 \(Int((r.opusShareThis * 100).rounded()))%"
+        if let coaching = r.coaching { body += "\n\(coaching)" }
+        Notifier.notify(title: "주간 사용 요약", body: body, id: "weekly-summary")
     }
 
     private func recomputeProjections() {

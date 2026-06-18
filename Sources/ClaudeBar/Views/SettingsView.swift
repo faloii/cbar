@@ -84,6 +84,9 @@ struct SettingsView: View {
                     .disabled(!store.enableLiveLimits)
                 Text("세션 또는 주간 한도가 이 임계값을 넘으면 메뉴바 아이콘이 주황 ⚠︎로 바뀝니다.")
                     .font(.caption).foregroundStyle(.secondary)
+                Toggle("주간 사용 요약 알림", isOn: $store.weeklySummaryEnabled)
+                Text("매주 한 번 지난 7일 비용·Opus 비중 요약과 코칭을 알림으로 보냅니다.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("새로고침") {

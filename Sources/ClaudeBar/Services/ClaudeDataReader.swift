@@ -20,10 +20,13 @@ struct ClaudeDataReader {
     }
 
     /// Build a fresh snapshot. Safe to call off the main thread.
-    func load(now: Date = Date()) -> UsageSnapshot {
+    /// `includeSessionLogs: false` parses only the cheap stats cache (totals, daily
+    /// cost, weekly review) and skips the expensive session-log scan — used in the
+    /// background so the weekly summary stays available without the heavy work.
+    func load(now: Date = Date(), includeSessionLogs: Bool = true) -> UsageSnapshot {
         var snap = UsageSnapshot(generatedAt: now)
         applyStatsCache(to: &snap, now: now)
-        applySessionLogs(to: &snap, now: now)
+        if includeSessionLogs { applySessionLogs(to: &snap, now: now) }
         return snap
     }
 
