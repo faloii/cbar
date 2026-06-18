@@ -190,13 +190,18 @@ struct MenuContentView: View {
     }
 
     @ViewBuilder private var limitsSection: some View {
-        HStack {
+        HStack(spacing: 6) {
             CardHeader(icon: "gauge.with.dots.needle.67percent", title: "플랜 한도")
             Spacer()
-            if let l = store.limits, l.stale {
-                Image(systemName: "wifi.exclamationmark")
-                    .font(.caption2).foregroundStyle(.orange)
-                    .help("캐시된 값 표시 중 — 마지막 새로고침 실패")
+            if let l = store.limits, l.hasData {
+                Text("\(Fmt.age(l.fetchedAt, from: snap.generatedAt)) 갱신")
+                    .font(.caption2).foregroundStyle(.tertiary)
+                    .help("이 수치가 마지막으로 갱신된 시점")
+                if l.stale {
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.caption2).foregroundStyle(.orange)
+                        .help("캐시된 값 표시 중 — 마지막 새로고침 실패")
+                }
             }
         }
         if let l = store.limits, l.hasData {

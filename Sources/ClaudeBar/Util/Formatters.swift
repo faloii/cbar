@@ -35,6 +35,17 @@ enum Fmt {
         return "<1m"
     }
 
+    /// "방금" / "N분 전" / "N시간 전" — how long ago `date` was.
+    static func age(_ date: Date, from now: Date = Date()) -> String {
+        let secs = max(0, Int(now.timeIntervalSince(date)))
+        if secs < 60 { return "방금" }
+        let m = secs / 60
+        if m < 60 { return "\(m)분 전" }
+        let h = m / 60
+        if h < 24 { return "\(h)시간 전" }
+        return "\(h / 24)일 전"
+    }
+
     static func shortDate(_ date: Date) -> String {
         let f = DateFormatter()
         f.dateStyle = .medium
