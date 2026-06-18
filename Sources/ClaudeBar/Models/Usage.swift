@@ -95,6 +95,9 @@ struct UsageSnapshot {
     /// Per-day tokens + estimated cost (oldest → newest), up to ~30 days.
     var dailyCostHistory: [DailyCost] = []
 
+    /// This-week vs last-week habit comparison.
+    var weeklyReview: WeeklyReview?
+
     static let empty = UsageSnapshot()
 }
 

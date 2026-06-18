@@ -5,7 +5,7 @@ import Combine
 /// Popover cards the user can show/hide and reorder (Settings → 섹션).
 /// Declaration order is the default layout order.
 enum PanelSection: String, CaseIterable, Identifiable {
-    case advice, limits, limitTrend, currentSession, recent, perModel, perProject, today, trend, costSummary, budget
+    case advice, limits, limitTrend, currentSession, recent, perModel, perProject, today, weeklyReview, trend, costSummary, budget
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -17,6 +17,7 @@ enum PanelSection: String, CaseIterable, Identifiable {
         case .perModel:       return "모델별 소진"
         case .perProject:     return "프로젝트별"
         case .today:          return "오늘"
+        case .weeklyReview:   return "주간 리뷰"
         case .trend:          return "추세"
         case .costSummary:    return "기간 비용"
         case .budget:         return "월 예산"

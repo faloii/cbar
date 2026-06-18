@@ -22,14 +22,14 @@ struct ClaudeDataReader {
     /// Build a fresh snapshot. Safe to call off the main thread.
     func load(now: Date = Date()) -> UsageSnapshot {
         var snap = UsageSnapshot(generatedAt: now)
-        applyStatsCache(to: &snap)
+        applyStatsCache(to: &snap, now: now)
         applySessionLogs(to: &snap, now: now)
         return snap
     }
 
     // MARK: - stats-cache.json
 
-    private func applyStatsCache(to snap: inout UsageSnapshot) {
+    private func applyStatsCache(to snap: inout UsageSnapshot, now: Date) {
         let url = Self.configDir.appendingPathComponent("stats-cache.json")
         guard let data = try? Data(contentsOf: url),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -55,17 +55,22 @@ struct ClaudeDataReader {
         }
         let (rates, fallback) = CostEstimator.blendedRates(modelUsage)
 
-        // Per-day token totals + estimated cost (for the trend chart).
+        // Per-day token totals + estimated cost (for the trend chart) and the
+        // this-week-vs-last-week review.
         if let daily = root["dailyModelTokens"] as? [[String: Any]] {
-            let history: [DailyCost] = daily.compactMap { entry in
-                guard let date = entry["date"] as? String,
-                      let byModel = entry["tokensByModel"] as? [String: Int] else { return nil }
-                return DailyCost(date: date,
-                                 tokens: byModel.values.reduce(0, +),
-                                 cost: CostEstimator.dailyCost(tokensByModel: byModel, rates: rates, fallback: fallback))
+            var history: [DailyCost] = []
+            var entries: [(date: Date, byModel: [String: Int])] = []
+            for entry in daily {
+                guard let dateStr = entry["date"] as? String,
+                      let byModel = entry["tokensByModel"] as? [String: Int] else { continue }
+                history.append(DailyCost(date: dateStr,
+                                         tokens: byModel.values.reduce(0, +),
+                                         cost: CostEstimator.dailyCost(tokensByModel: byModel, rates: rates, fallback: fallback)))
+                if let d = DateParse.day(dateStr) { entries.append((d, byModel)) }
             }
             snap.dailyCostHistory = Array(history.suffix(30))
             snap.dailyTokenHistory = Array(history.suffix(14).map(\.tokens))
+            snap.weeklyReview = WeeklyReview.compute(entries: entries, rates: rates, fallback: fallback, now: now)
         }
     }
 
@@ -315,6 +320,15 @@ enum DateParse {
     static func iso(_ s: String) -> Date? {
         iso8601.date(from: s) ?? iso8601NoFrac.date(from: s)
     }
+
+    private static let dayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+    /// Parse a "yyyy-MM-dd" day string (as used by Claude's stats cache).
+    static func day(_ s: String) -> Date? { dayFormatter.date(from: s) }
 }
 
 enum ModelName {

@@ -144,6 +144,8 @@ struct MenuContentView: View {
             if !snap.windowByProject.isEmpty { Card { perProjectSection } }
         case .today:
             Card { todaySection }
+        case .weeklyReview:
+            if let r = snap.weeklyReview { Card { weeklyReviewSection(r) } }
         case .trend:
             if !snap.dailyTokenHistory.isEmpty { Card { trendSection } }
         case .costSummary:
@@ -273,6 +275,33 @@ struct MenuContentView: View {
                 .accessibilityElement(children: .combine)
             }
         }
+    }
+
+    @ViewBuilder private func weeklyReviewSection(_ r: WeeklyReview) -> some View {
+        CardHeader(icon: "calendar.badge.clock", title: "주간 리뷰")
+        VStack(spacing: 5) {
+            StatRow(label: "비용", value: "~\(Fmt.usd(r.thisCost))", secondary: deltaText(r.costDeltaPct))
+            StatRow(label: "Opus 비중", value: "\(Int((r.opusShareThis * 100).rounded()))%",
+                    secondary: opusDeltaText(r.opusShareDeltaPts))
+        }
+        if let coaching = r.coaching {
+            HStack(alignment: .top, spacing: 7) {
+                Image(systemName: "lightbulb").font(.caption).foregroundStyle(Color.brand)
+                Text(coaching).font(.caption)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        Text("이번 주 vs 지난주").font(.caption2).foregroundStyle(.tertiary)
+    }
+
+    private func deltaText(_ pct: Double?) -> String? {
+        guard let p = pct else { return nil }
+        if abs(p) < 1 { return "지난주와 비슷" }
+        return p > 0 ? "지난주 ▲\(Int(p.rounded()))%" : "지난주 ▼\(Int(abs(p).rounded()))%"
+    }
+    private func opusDeltaText(_ pts: Double) -> String? {
+        if abs(pts) < 1 { return nil }
+        return pts > 0 ? "▲\(Int(pts.rounded()))%p" : "▼\(Int(abs(pts).rounded()))%p"
     }
 
     @ViewBuilder private func budgetSection(_ b: BudgetStatus) -> some View {

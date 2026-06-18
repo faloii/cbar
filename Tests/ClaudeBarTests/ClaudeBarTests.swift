@@ -245,6 +245,31 @@ final class BudgetTests: XCTestCase {
     }
 }
 
+final class WeeklyReviewTests: XCTestCase {
+    func testThisVsLastWeek() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let entries: [(date: Date, byModel: [String: Int])] = [
+            (now.addingTimeInterval(-1 * 86400), ["claude-opus-4-8": 1_000_000]),    // this week
+            (now.addingTimeInterval(-8 * 86400), ["claude-sonnet-4-6": 1_000_000]),  // last week
+        ]
+        let rates = ["claude-opus-4-8": 0.0001, "claude-sonnet-4-6": 0.00001]
+        let r = WeeklyReview.compute(entries: entries, rates: rates, fallback: 0, now: now)!
+        XCTAssertEqual(r.thisCost, 100, accuracy: 0.001)
+        XCTAssertEqual(r.lastCost, 10, accuracy: 0.001)
+        XCTAssertEqual(r.opusShareThis, 1.0, accuracy: 0.001)   // this week was all Opus
+        XCTAssertEqual(r.opusShareLast, 0.0, accuracy: 0.001)
+        XCTAssertEqual(r.costDeltaPct ?? 0, 900, accuracy: 0.1)
+    }
+
+    func testNilWhenNoRecentData() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let entries: [(date: Date, byModel: [String: Int])] = [
+            (now.addingTimeInterval(-40 * 86400), ["claude-opus-4-8": 1_000_000]),   // too old
+        ]
+        XCTAssertNil(WeeklyReview.compute(entries: entries, rates: [:], fallback: 0.0001, now: now))
+    }
+}
+
 final class AdviceTests: XCTestCase {
     let now = Date(timeIntervalSince1970: 1_000_000)
     private func model(_ name: String, total: Int, requests: Int, cost: Double) -> ModelWindowUsage {
