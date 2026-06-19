@@ -61,6 +61,19 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            Section("습관 목표") {
+                HStack {
+                    Text("Opus 비중 ≤")
+                    Slider(value: Binding(
+                        get: { Double(store.opusShareTarget) },
+                        set: { store.opusShareTarget = Int($0) }), in: 0...100, step: 5)
+                    Text(store.opusShareTarget <= 0 ? "끔" : "\(store.opusShareTarget)%")
+                        .monospacedDigit().frame(width: 44, alignment: .trailing)
+                }
+                Text("이번 주 Opus 비용 비중을 목표와 비교하고, 최근 몇 주 준수율을 보여줍니다. 0이면 끕니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("월 예산") {
                 HStack {
                     Slider(value: $store.monthlyBudget, in: 0...1000, step: 10)

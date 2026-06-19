@@ -98,6 +98,9 @@ struct UsageSnapshot {
     /// This-week vs last-week habit comparison.
     var weeklyReview: WeeklyReview?
 
+    /// Opus cost share for the last few weeks (index 0 = current week) — habit goal.
+    var weeklyOpusShares: [WeekShare] = []
+
     static let empty = UsageSnapshot()
 
     /// Returns a copy keeping this snapshot's stats fields but taking the

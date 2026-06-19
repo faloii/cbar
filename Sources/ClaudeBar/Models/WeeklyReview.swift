@@ -1,5 +1,11 @@
 import Foundation
 
+/// One week's Opus cost share, for the habit-goal adherence track.
+struct WeekShare: Equatable {
+    let opusShare: Double   // 0...1
+    let hasUsage: Bool
+}
+
 /// This-week vs last-week habit comparison, from per-day per-model token totals.
 struct WeeklyReview: Equatable {
     let thisCost: Double
@@ -24,6 +30,29 @@ struct WeeklyReview: Equatable {
             return "지난주보다 절약했어요 👍"
         }
         return nil
+    }
+
+    /// Opus cost share for each of the last `weeks` weeks (index 0 = current week).
+    static func opusShares(entries: [(date: Date, byModel: [String: Int])],
+                           rates: [String: Double], fallback: Double,
+                           now: Date, weeks: Int, calendar: Calendar = .current) -> [WeekShare] {
+        let today = calendar.startOfDay(for: now)
+        var totals = Array(repeating: 0.0, count: weeks)
+        var opuses = Array(repeating: 0.0, count: weeks)
+        for (date, byModel) in entries {
+            let day = calendar.startOfDay(for: date)
+            guard let daysAgo = calendar.dateComponents([.day], from: day, to: today).day, daysAgo >= 0 else { continue }
+            let w = daysAgo / 7
+            guard w < weeks else { continue }
+            for (model, tokens) in byModel {
+                let c = Double(tokens) * (rates[model] ?? fallback)
+                totals[w] += c
+                if model.lowercased().contains("opus") { opuses[w] += c }
+            }
+        }
+        return (0..<weeks).map { w in
+            WeekShare(opusShare: totals[w] > 0 ? opuses[w] / totals[w] : 0, hasUsage: totals[w] > 0)
+        }
     }
 
     static func compute(entries: [(date: Date, byModel: [String: Int])],

@@ -146,6 +146,8 @@ struct MenuContentView: View {
             Card { todaySection }
         case .weeklyReview:
             if let r = snap.weeklyReview { Card { weeklyReviewSection(r) } }
+        case .goals:
+            if store.opusShareTarget > 0, !snap.weeklyOpusShares.isEmpty { Card { goalsSection } }
         case .trend:
             if !snap.dailyTokenHistory.isEmpty { Card { trendSection } }
         case .costSummary:
@@ -274,6 +276,27 @@ struct MenuContentView: View {
                 }
                 .accessibilityElement(children: .combine)
             }
+        }
+    }
+
+    @ViewBuilder private var goalsSection: some View {
+        let shares = snap.weeklyOpusShares
+        let current = shares.first?.opusShare ?? 0
+        let used = shares.filter { $0.hasUsage }
+        let compliant = used.filter { $0.opusShare * 100 <= Double(store.opusShareTarget) }.count
+        let over = (shares.first?.hasUsage ?? false) && current * 100 > Double(store.opusShareTarget)
+        CardHeader(icon: "target", title: "습관 목표")
+        HStack(alignment: .firstTextBaseline) {
+            Text("Opus 비중 ≤ \(store.opusShareTarget)%").font(.callout.weight(.medium))
+            Spacer()
+            Text("이번 주 \(Int((current * 100).rounded()))%").font(.callout).monospacedDigit()
+            Text(over ? "초과" : "준수")
+                .font(.caption2.weight(.medium)).foregroundStyle(over ? .red : .green)
+        }
+        MeterBar(fraction: current)
+        if !used.isEmpty {
+            Text("최근 \(used.count)주 중 \(compliant)주 준수")
+                .font(.caption2).foregroundStyle(.tertiary)
         }
     }
 

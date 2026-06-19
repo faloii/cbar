@@ -5,7 +5,7 @@ import Combine
 /// Popover cards the user can show/hide and reorder (Settings → 섹션).
 /// Declaration order is the default layout order.
 enum PanelSection: String, CaseIterable, Identifiable {
-    case advice, limits, limitTrend, currentSession, recent, perModel, perProject, today, weeklyReview, trend, costSummary, budget
+    case advice, limits, limitTrend, currentSession, recent, perModel, perProject, today, weeklyReview, goals, trend, costSummary, budget
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -18,6 +18,7 @@ enum PanelSection: String, CaseIterable, Identifiable {
         case .perProject:     return "프로젝트별"
         case .today:          return "오늘"
         case .weeklyReview:   return "주간 리뷰"
+        case .goals:          return "습관 목표"
         case .trend:          return "추세"
         case .costSummary:    return "기간 비용"
         case .budget:         return "월 예산"
@@ -96,6 +97,10 @@ final class UsageStore: ObservableObject {
     }
     /// Monthly budget in USD; 0 = off.
     @AppStorage("monthlyBudget") var monthlyBudget: Double = 0 {
+        didSet { objectWillChange.send() }
+    }
+    /// Habit goal: keep Opus cost share at or below this %; 0 = off.
+    @AppStorage("opusShareTarget") var opusShareTarget: Int = 0 {
         didSet { objectWillChange.send() }
     }
     /// Comma-joined raw values of hidden sections. Default = lean: show only the

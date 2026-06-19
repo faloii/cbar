@@ -261,6 +261,24 @@ final class WeeklyReviewTests: XCTestCase {
         XCTAssertEqual(r.costDeltaPct ?? 0, 900, accuracy: 0.1)
     }
 
+    func testOpusSharesPerWeek() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let rates = ["claude-opus-4-8": 0.0001, "claude-sonnet-4-6": 0.0001]
+        let entries: [(date: Date, byModel: [String: Int])] = [
+            // this week (w0): 80% Opus
+            (now.addingTimeInterval(-1 * 86400), ["claude-opus-4-8": 800_000, "claude-sonnet-4-6": 200_000]),
+            // last week (w1): 20% Opus
+            (now.addingTimeInterval(-8 * 86400), ["claude-opus-4-8": 200_000, "claude-sonnet-4-6": 800_000]),
+        ]
+        let shares = WeeklyReview.opusShares(entries: entries, rates: rates, fallback: 0, now: now, weeks: 4)
+        XCTAssertEqual(shares.count, 4)
+        XCTAssertEqual(shares[0].opusShare, 0.8, accuracy: 0.001)
+        XCTAssertTrue(shares[0].hasUsage)
+        XCTAssertEqual(shares[1].opusShare, 0.2, accuracy: 0.001)
+        XCTAssertFalse(shares[2].hasUsage)   // no data 2-3 weeks ago
+        XCTAssertFalse(shares[3].hasUsage)
+    }
+
     func testNilWhenNoRecentData() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let entries: [(date: Date, byModel: [String: Int])] = [
