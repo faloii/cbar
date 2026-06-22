@@ -294,12 +294,6 @@ final class AdviceTests: XCTestCase {
         ModelWindowUsage(model: name, tokens: TokenCounts(cacheRead: total), cost: cost, requests: requests)
     }
 
-    func testReductionPercent() {
-        // full in 900s, reset in 3600s → cut 75% to last to reset.
-        let p = Projection(ratePerHour: 40, timeToFull: 900, secondsToReset: 3600, verdict: .atRisk)
-        XCTAssertEqual(Advice.reductionPercent(p), 75)
-    }
-
     func testAtRiskGivesCriticalPacingTip() {
         let p = Projection(ratePerHour: 40, timeToFull: 1800, secondsToReset: 7200, verdict: .atRisk)
         let tips = Advice.compute(session: p, weekly: nil, sessionUtil: 70, weeklyUtil: nil,

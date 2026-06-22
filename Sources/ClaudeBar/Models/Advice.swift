@@ -19,13 +19,6 @@ struct AdviceTip: Identifiable, Equatable {
 /// the token total — cache reads dominate). Switching a pricey model only changes
 /// *cost*, so that advice is framed as a cost saving.
 enum Advice {
-    /// How much to cut the current rate to last until reset (%), for an at-risk session.
-    static func reductionPercent(_ p: Projection) -> Int {
-        guard p.verdict == .atRisk, let full = p.timeToFull, let reset = p.secondsToReset,
-              reset > 0, full >= 0 else { return 0 }
-        return min(95, max(1, Int(((1 - full / reset) * 100).rounded())))
-    }
-
     static func compute(session: Projection?, weekly: Projection?,
                         sessionUtil: Double?, weeklyUtil: Double?,
                         models: [ModelWindowUsage], warnThreshold: Int, now: Date) -> [AdviceTip] {

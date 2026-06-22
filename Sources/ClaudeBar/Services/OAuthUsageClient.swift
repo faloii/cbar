@@ -17,12 +17,11 @@ struct OAuthUsageClient: Sendable {
     static let cacheTTL: TimeInterval = 180
 
     enum FetchError: LocalizedError {
-        case noCredentials, tokenExpired, unauthorized, rateLimited, http(Int), badResponse
+        case noCredentials, unauthorized, rateLimited, http(Int), badResponse
 
         var errorDescription: String? {
             switch self {
             case .noCredentials: return "Claude 자격증명을 찾을 수 없음 — Claude Code에서 로그인하세요."
-            case .tokenExpired:  return "토큰 만료 — Claude Code를 열어 갱신하세요."
             case .unauthorized:  return "인증 실패(401) — Claude Code에서 재인증하세요."
             case .rateLimited:   return "요청 제한(429) — 잠시 후 재시도합니다."
             case .http(let c):   return "서버 응답 HTTP \(c)."
