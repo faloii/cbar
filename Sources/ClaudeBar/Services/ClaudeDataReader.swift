@@ -72,7 +72,6 @@ struct ClaudeDataReader {
                 if let d = DateParse.day(dateStr) { entries.append((d, byModel)) }
             }
             snap.dailyCostHistory = Array(history.suffix(30))
-            snap.dailyTokenHistory = Array(history.suffix(14).map(\.tokens))
             snap.weeklyReview = WeeklyReview.compute(entries: entries, rates: rates, fallback: fallback, now: now)
             snap.weeklyOpusShares = WeeklyReview.opusShares(entries: entries, rates: rates, fallback: fallback, now: now, weeks: 4)
         }

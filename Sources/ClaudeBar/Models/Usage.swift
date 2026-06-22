@@ -89,9 +89,6 @@ struct UsageSnapshot {
     var totalMessages = 0
     var firstSessionDate: Date?
 
-    /// 14-day token history (oldest → newest) for the sparkline.
-    var dailyTokenHistory: [Int] = []
-
     /// Per-day tokens + estimated cost (oldest → newest), up to ~30 days.
     var dailyCostHistory: [DailyCost] = []
 

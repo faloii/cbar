@@ -69,42 +69,6 @@ struct MeterBar: View {
     }
 }
 
-/// Minimal sparkline (line + soft area fill) for the daily token history.
-struct Sparkline: View {
-    let values: [Int]
-
-    var body: some View {
-        GeometryReader { geo in
-            let maxV = max(values.max() ?? 1, 1)
-            let n = max(values.count - 1, 1)
-            let pts = values.enumerated().map { i, v in
-                CGPoint(x: geo.size.width * CGFloat(i) / CGFloat(n),
-                        y: geo.size.height * (1 - CGFloat(v) / CGFloat(maxV)))
-            }
-            ZStack {
-                Path { p in
-                    guard let first = pts.first else { return }
-                    p.move(to: CGPoint(x: first.x, y: geo.size.height))
-                    p.addLine(to: first)
-                    for pt in pts.dropFirst() { p.addLine(to: pt) }
-                    p.addLine(to: CGPoint(x: pts.last!.x, y: geo.size.height))
-                    p.closeSubpath()
-                }
-                .fill(LinearGradient(colors: [Color.brand.opacity(0.28), Color.brand.opacity(0.02)],
-                                     startPoint: .top, endPoint: .bottom))
-                Path { p in
-                    guard let first = pts.first else { return }
-                    p.move(to: first)
-                    for pt in pts.dropFirst() { p.addLine(to: pt) }
-                }
-                .stroke(Color.brand, style: .init(lineWidth: 1.5, lineJoin: .round))
-            }
-        }
-        .frame(height: 30)
-        .accessibilityHidden(true)
-    }
-}
-
 /// Line chart of sampled limit utilization (%) over time, on a fixed 0–100 scale
 /// with a dashed warning-threshold line. Session is emphasized; weekly is faint.
 struct LimitTrendChart: View {
@@ -139,31 +103,6 @@ struct LimitTrendChart: View {
             line(weekly).stroke(Color.secondary.opacity(0.5), style: .init(lineWidth: 1.2, lineJoin: .round))
             line(session).stroke(Color.brand, style: .init(lineWidth: 1.6, lineJoin: .round))
         }
-    }
-}
-
-/// Small bar chart of daily cost; the most recent day is highlighted.
-struct DailyCostBars: View {
-    let days: [DailyCost]
-
-    var body: some View {
-        let maxV = max(days.map(\.cost).max() ?? 0, 0.0001)
-        GeometryReader { geo in
-            let gap: CGFloat = 2
-            let n = max(days.count, 1)
-            let w = max(2, (geo.size.width - gap * CGFloat(n - 1)) / CGFloat(n))
-            HStack(alignment: .bottom, spacing: gap) {
-                ForEach(Array(days.enumerated()), id: \.element.id) { i, d in
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(Color.accentColor.opacity(i == days.count - 1 ? 1.0 : 0.45))
-                        .frame(width: w, height: max(2, geo.size.height * CGFloat(d.cost / maxV)))
-                        .help("\(d.date): ~\(Fmt.usd(d.cost)) · \(Fmt.tokens(d.tokens)) 토큰")
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-        }
-        .frame(height: 30)
-        .accessibilityHidden(true)
     }
 }
 

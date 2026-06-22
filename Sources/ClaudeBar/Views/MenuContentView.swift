@@ -148,10 +148,6 @@ struct MenuContentView: View {
             if let r = snap.weeklyReview { Card { weeklyReviewSection(r) } }
         case .goals:
             if store.opusShareTarget > 0, !snap.weeklyOpusShares.isEmpty { Card { goalsSection } }
-        case .trend:
-            if !snap.dailyTokenHistory.isEmpty { Card { trendSection } }
-        case .costSummary:
-            if !snap.dailyCostHistory.isEmpty { Card { costSummarySection } }
         case .budget:
             if let b = store.budgetStatus { Card { budgetSection(b) } }
         }
@@ -380,35 +376,4 @@ struct MenuContentView: View {
         }
     }
 
-    @ViewBuilder private var trendSection: some View {
-        let costDays = Array(snap.dailyCostHistory.suffix(14))
-        let total = costDays.reduce(0) { $0 + $1.cost }
-        let avg = costDays.isEmpty ? 0 : total / Double(costDays.count)
-        CardHeader(icon: "chart.xyaxis.line", title: "추세 · 14일")
-        if !costDays.isEmpty {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("일별 비용 · 추정").font(.caption2).foregroundStyle(.secondary)
-                    Spacer()
-                    Text("14일 ~\(Fmt.usd(total)) · ~\(Fmt.usd(avg))/일")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                }
-                DailyCostBars(days: costDays)
-            }
-        }
-        VStack(alignment: .leading, spacing: 4) {
-            Text("일별 토큰").font(.caption2).foregroundStyle(.secondary)
-            Sparkline(values: snap.dailyTokenHistory)
-        }
-    }
-
-    @ViewBuilder private var costSummarySection: some View {
-        let last7 = snap.dailyCostHistory.suffix(7).reduce(0) { $0 + $1.cost }
-        let last30 = snap.dailyCostHistory.reduce(0) { $0 + $1.cost }
-        CardHeader(icon: "dollarsign.circle", title: "기간 비용 · 추정")
-        VStack(spacing: 5) {
-            StatRow(label: "최근 7일", value: "~\(Fmt.usd(last7))")
-            StatRow(label: "최근 30일", value: "~\(Fmt.usd(last30))")
-        }
-    }
 }
