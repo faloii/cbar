@@ -102,6 +102,31 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            Section("막힘 해제 시 자동 재개") {
+                Toggle("한도가 풀리면 이전 대화 자동 이어가기", isOn: $store.autoResumeEnabled)
+                    .disabled(!store.enableLiveLimits)
+                Text("이것만 켜면 됩니다 — 세션 한도에 막혔다가 풀리는 순간, `claude` 경로와 마지막 작업 폴더를 찾아 ‘이전 대화 이어가기’를 싼 모델로 한 번 자동 실행합니다(버튼 안 눌러도 됨).")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                Toggle("막혀 있는 동안 잠자기 방지", isOn: $store.keepAwakeWhileBlocked)
+                    .disabled(!store.enableLiveLimits)
+                Text("한도에 막혀 있는 동안만 시스템 잠자기를 막아 리셋을 놓치지 않게 합니다(풀리면 즉시 해제). 화면 보호기·화면 꺼짐은 그대로 허용. 단, 노트북 뚜껑을 닫으면(배터리) 잠자기는 막지 못하고 배터리 소모가 늘 수 있어 기본은 꺼져 있습니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                DisclosureGroup("명령 직접 지정 (선택)") {
+                    Button("기본 명령 채워서 보기/수정") {
+                        store.resumeCommand = ResumeCommand.continueLastPreview()
+                    }
+                    .disabled(!store.enableLiveLimits)
+                    TextField("비우면 자동 ‘이전 대화 이어가기’. 예: cd ~/proj && claude --continue -p \"계속\" --model haiku",
+                              text: $store.resumeCommand, axis: .vertical)
+                        .lineLimit(1...3)
+                        .font(.system(.caption, design: .monospaced))
+                    Text("명령칸을 채우면 그 명령이 대신 실행됩니다(모델·프롬프트·폴더 자유). 비워두면 위 자동 동작을 씁니다.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
             Section("새로고침") {
                 Picker("주기", selection: $store.refreshInterval) {
                     Text("30초").tag(30.0)
@@ -122,6 +147,8 @@ struct SettingsView: View {
                     Spacer()
                     Text("버전 \(Self.appVersion)").foregroundStyle(.secondary)
                 }
+                Text("비공식 도구 · Anthropic과 무관하며 승인받지 않았습니다. 실제 한도는 비공개 엔드포인트에서 가져오므로 예고 없이 중단될 수 있어요. 자기 책임 하에 사용하세요. “Claude”는 Anthropic의 상표입니다.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)

@@ -130,18 +130,10 @@ struct MenuContentView: View {
             if store.enableLiveLimits, !store.adviceTips.isEmpty { Card { adviceSection } }
         case .limits:
             if store.enableLiveLimits { Card { limitsSection } }
-        case .limitTrend:
-            if store.enableLiveLimits, store.limitHistory.filter({ $0.session != nil }).count >= 2 {
-                Card { limitTrendSection }
-            }
-        case .currentSession:
-            if let s = snap.currentSession { Card { currentSessionSection(s) } }
         case .recent:
             Card { windowSection }
         case .perModel:
             if !store.modelBurnRows.isEmpty { Card { perModelSection } }
-        case .perProject:
-            if !snap.windowByProject.isEmpty { Card { perProjectSection } }
         case .today:
             Card { todaySection }
         case .weeklyReview:
@@ -220,58 +212,6 @@ struct MenuContentView: View {
             Text(store.limits?.error ?? "한도 불러오는 중…")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    @ViewBuilder private var limitTrendSection: some View {
-        let session = store.limitHistory.compactMap { s in s.session.map { (s.at, $0) } }
-        let weekly = store.limitHistory.compactMap { s in s.weekly.map { (s.at, $0) } }
-        HStack {
-            CardHeader(icon: "waveform.path.ecg", title: "한도 추세")
-            Spacer()
-            HStack(spacing: 8) {
-                Label("세션", systemImage: "circle.fill").foregroundStyle(Color.brand)
-                Label("주간", systemImage: "circle.fill").foregroundStyle(.secondary)
-            }
-            .font(.caption2).labelStyle(.titleAndIcon).imageScale(.small)
-        }
-        LimitTrendChart(session: session, weekly: weekly, threshold: store.warnThreshold)
-        Text("최근 \(store.limitHistory.count)개 샘플 · 0–100% · 점선=경고 임계값")
-            .font(.caption2).foregroundStyle(.tertiary)
-    }
-
-    @ViewBuilder private func currentSessionSection(_ s: SessionUsage) -> some View {
-        CardHeader(icon: "text.bubble", title: "현재 세션")
-        HStack {
-            Text(s.project).font(.callout.weight(.medium)).lineLimit(1)
-            Spacer()
-            Text("~\(Fmt.usd(s.cost))").font(.callout).monospacedDigit()
-        }
-        HStack(spacing: 5) {
-            Text("맥락 \(Fmt.tokens(s.contextTokens))")
-            Text("·")
-            Text("\(Fmt.int(s.requests))회")
-            Spacer()
-            Text(Fmt.time(s.lastActivity))
-        }
-        .font(.caption).foregroundStyle(.secondary)
-    }
-
-    @ViewBuilder private var perProjectSection: some View {
-        let total = max(snap.windowByProject.reduce(0) { $0 + $1.cost }, 0.0001)
-        CardHeader(icon: "folder", title: "프로젝트별 · 5시간")
-        VStack(alignment: .leading, spacing: 9) {
-            ForEach(Array(snap.windowByProject.prefix(5))) { p in
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack {
-                        Text(p.project).font(.callout.weight(.medium)).lineLimit(1)
-                        Spacer()
-                        Text("~\(Fmt.usd(p.cost))").font(.callout).monospacedDigit()
-                    }
-                    MeterBar(fraction: p.cost / total)
-                }
-                .accessibilityElement(children: .combine)
-            }
         }
     }
 
@@ -360,7 +300,7 @@ struct MenuContentView: View {
         VStack(alignment: .leading, spacing: 9) {
             ForEach(store.modelBurnRows) { ModelBurnRowView(row: $0, basis: store.burnBasis) }
         }
-        Text("× = 턴당 \(store.burnBasis.shortLabel) (최저 모델 대비) · “남은 턴” = 세션 한도 기준")
+        Text("× = 턴당 \(store.burnBasis.shortLabel) (최저 모델 대비) · 한도 %/턴 = 한 번 쓸 때 세션 한도를 먹는 비중")
             .font(.caption2).foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)
     }

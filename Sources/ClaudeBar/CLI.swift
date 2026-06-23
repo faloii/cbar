@@ -107,24 +107,9 @@ enum CLI {
                                basis.formatPerTurn(r.perTurnWeight),
                                r.burnMultiplier)
                 if basis != .cost { v += "  ~\(Fmt.usd(r.cost))" }
-                if let h = r.headroomTurns { v += "  ~\(Int(h.rounded())) turns left" }
+                if let s = r.limitSharePerTurn { v += String(format: "  %.2f%%/turn of limit", s) }
                 line(r.model, v)
             }
-        }
-
-        if !s.windowByProject.isEmpty {
-            print("\nPer-project (last 5h):")
-            for p in s.windowByProject.prefix(5) {
-                line(p.project, "~\(Fmt.usd(p.cost))  \(Fmt.tokens(p.tokens.total))")
-            }
-        }
-
-        if let cs = s.currentSession {
-            print("\nCurrent session:")
-            line("Project", cs.project)
-            line("Cost", "~" + Fmt.usd(cs.cost))
-            line("Context", Fmt.tokens(cs.contextTokens))
-            line("Requests", Fmt.int(cs.requests))
         }
 
         print("\nToday:")
@@ -195,7 +180,7 @@ enum CLI {
                     "perTurnWeight": r.perTurnWeight,
                     "burnMultiplier": r.burnMultiplier,
                     "costEstimate": r.cost,
-                    "headroomTurns": r.headroomTurns as Any,
+                    "limitSharePerTurn": r.limitSharePerTurn as Any,
                 ]
             },
             "burnBasis": savedBurnBasis().rawValue,

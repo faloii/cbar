@@ -5,17 +5,14 @@ import Combine
 /// Popover cards the user can show/hide and reorder (Settings → 섹션).
 /// Declaration order is the default layout order.
 enum PanelSection: String, CaseIterable, Identifiable {
-    case advice, limits, limitTrend, currentSession, recent, perModel, perProject, today, weeklyReview, goals, budget
+    case advice, limits, recent, perModel, today, weeklyReview, goals, budget
     var id: String { rawValue }
     var label: String {
         switch self {
         case .advice:         return "조언"
         case .limits:         return "플랜 한도"
-        case .limitTrend:     return "한도 추세"
-        case .currentSession: return "현재 세션"
         case .recent:         return "최근 5시간"
         case .perModel:       return "모델별 소진"
-        case .perProject:     return "프로젝트별"
         case .today:          return "오늘"
         case .weeklyReview:   return "주간 리뷰"
         case .goals:          return "습관 목표"
@@ -72,7 +69,6 @@ final class UsageStore: ObservableObject {
     @Published private(set) var limits: LimitsSnapshot?
     @Published private(set) var sessionProjection: Projection?
     @Published private(set) var weeklyProjection: Projection?
-    @Published private(set) var limitHistory: [UsageSample] = []   // our own sampled limit % over time
     @Published private(set) var isRefreshing = false
 
     @AppStorage("refreshIntervalSeconds") var refreshInterval: Double = 60 {
@@ -102,9 +98,9 @@ final class UsageStore: ObservableObject {
         didSet { objectWillChange.send() }
     }
     /// Comma-joined raw values of hidden sections. Default = lean: show only the
-    /// core (advice, limits, recent, today); deeper analysis cards are opt-in.
+    /// core (advice, limits, recent, today); the model-burn comparison is opt-in.
     @AppStorage("hiddenSections") private var hiddenSectionsRaw: String =
-        "currentSession,limitTrend,perModel,perProject" {
+        "perModel" {
         didSet { objectWillChange.send() }
     }
     /// Comma-joined raw values defining card order (missing ones append in default order).
@@ -139,6 +135,22 @@ final class UsageStore: ObservableObject {
     @AppStorage("weeklySummary") var weeklySummaryEnabled: Bool = true {
         didSet { if weeklySummaryEnabled { Notifier.requestAuthorizationIfNeeded() } }
     }
+    /// Run `resumeCommand` once when the session limit frees up after being blocked.
+    @AppStorage("autoResumeEnabled") var autoResumeEnabled: Bool = false {
+        didSet { objectWillChange.send() }
+    }
+    /// User-authored shell command for auto-resume (off unless non-empty + enabled).
+    @AppStorage("resumeCommand") var resumeCommand: String = "" {
+        didSet { objectWillChange.send() }
+    }
+    /// Keep the system awake while blocked so the reset (and auto-resume) isn't missed.
+    @AppStorage("keepAwakeWhileBlocked") var keepAwakeWhileBlocked: Bool = false {
+        didSet { objectWillChange.send(); updatePowerAssertion() }
+    }
+    private let sleepBlocker = PowerAssertion(reason: "ClaudeBar: 한도 리셋 대기")
+    private func updatePowerAssertion() {
+        sleepBlocker.set(keepAwakeWhileBlocked && isBlocked)
+    }
     @AppStorage("barMetric") private var barMetricRaw: String = BarMetric.sessionLimit.rawValue {
         didSet { objectWillChange.send() }
     }
@@ -150,9 +162,10 @@ final class UsageStore: ObservableObject {
         set { appearanceRaw = newValue.rawValue }
     }
 
-    // Rising-edge tracking so a notification fires once per threshold crossing.
-    private var notifiedSession = false
-    private var notifiedWeekly = false
+    // Rising-edge state so each limit alert fires once per episode (see LimitAlerts).
+    private var alertState = LimitAlertState()
+    // Tracks whether we're in the tighter "near a limit" refresh cadence.
+    private var lastUrgent = false
 
     var barMetric: BarMetric {
         get { BarMetric(rawValue: barMetricRaw) ?? .windowTokens }
@@ -182,15 +195,24 @@ final class UsageStore: ObservableObject {
         // is a limit % (driven by `limits` alone).
         let full = popoverVisible || !barMetric.needsLiveLimits
         let previous = snapshot
+        // Near a limit, fetch fresher data (shorter cache TTL) so the warning is
+        // timely; when safe, stay gentle on the rate-limited endpoint.
+        let ttl: TimeInterval = isAtLimitRisk ? 60 : OAuthUsageClient.cacheTTL
         Task {
             var snap = await Task.detached(priority: .utility) { reader.load(includeSessionLogs: full) }.value
-            let lim: LimitsSnapshot? = live ? await client.loadLimits(force: force) : nil
+            let lim: LimitsSnapshot? = live ? await client.loadLimits(force: force, ttl: ttl) : nil
             if !full { snap = snap.mergingSession(from: previous) }
             self.snapshot = snap
             if live { self.limits = lim } else { self.limits = nil }
             self.recomputeProjections()
-            self.maybeNotify()
+            self.processLimitAlerts()
             self.maybeWeeklySummary()
+            self.updatePowerAssertion()   // hold/release based on the fresh blocked state
+            // If the risk level changed, re-arm the timer at the matching cadence.
+            if self.isAtLimitRisk != self.lastUrgent {
+                self.lastUrgent = self.isAtLimitRisk
+                self.restartTimer()
+            }
             self.isRefreshing = false
         }
     }
@@ -215,11 +237,10 @@ final class UsageStore: ObservableObject {
 
     private func recomputeProjections() {
         guard enableLiveLimits else {
-            sessionProjection = nil; weeklyProjection = nil; limitHistory = []; return
+            sessionProjection = nil; weeklyProjection = nil; return
         }
         let now = Date()
         let samples = UsageHistory.load()
-        limitHistory = samples
         // Session = rolling 5h window → recent burst rate. Weekly = fixed 7-day
         // bucket → realized average pace since the week started (not a burst).
         sessionProjection = Projection.compute(points: samples.compactMap { s in s.session.map { (s.at, $0) } },
@@ -232,29 +253,40 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    /// Fire a macOS notification once when a limit first crosses the threshold.
-    private func maybeNotify() {
-        guard notifyOnWarning else { return }
-        let t = Double(warnThreshold)
+    /// Evaluate the proactive limit alerts (threshold, trajectory, blocked, reset
+    /// timing) once, then act: post notifications (if enabled) and run the optional
+    /// auto-resume command when the limit frees up after a block.
+    private func processLimitAlerts() {
+        // Always evaluate so rising-edge state advances even when notifications are off.
+        let alerts = LimitAlerts.evaluate(
+            session: limits?.session5h, weekly: limits?.weekly7d,
+            sessionProjection: sessionProjection, weeklyProjection: weeklyProjection,
+            status: limits?.status, warnThreshold: warnThreshold,
+            state: &alertState, now: Date())
 
-        func check(_ window: LimitWindow?, name: String, key: String, flag: inout Bool) {
-            guard let u = window?.utilization else { return }
-            if u >= t, !flag {
-                flag = true
-                Notifier.notify(title: "\(name) 한도 \(Int(u.rounded()))%",
-                                body: "\(name) 한도의 \(warnThreshold)%를 넘었습니다.",
-                                id: "limit-\(key)")
-            } else if u < t {
-                flag = false
+        if notifyOnWarning {
+            for a in alerts { Notifier.notify(title: a.title, body: a.body, id: a.id) }
+        }
+        // Auto-resume on the "freed after being blocked" reset (opt-in). With no
+        // custom command, default to continuing the last conversation — so just
+        // flipping the toggle is enough; no button press needed. Built + run off the
+        // main actor (resolving the binary/dir spawns a short-lived process).
+        if autoResumeEnabled, alerts.contains(where: { $0.id == "reset-after-block" }) {
+            let custom = resumeCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+            Task.detached(priority: .utility) {
+                // Empty → safe built-in (argv, no shell injection). Filled → the user's
+                // own shell command (their responsibility), run via the login shell.
+                if custom.isEmpty { ResumeCommand.runContinueLast() }
+                else { CommandRunner.run(custom) }
             }
         }
-        check(limits?.session5h, name: "세션", key: "session", flag: &notifiedSession)
-        check(limits?.weekly7d, name: "주간", key: "weekly", flag: &notifiedWeekly)
     }
 
     /// Idle cadence when the popover is closed — kept at the limits cache TTL (180s)
     /// so the menu-bar warning icon stays reasonably fresh without scanning every 60s.
+    /// Tightened to `urgentIdleInterval` while near a limit so the warning is timely.
     private static let idleInterval: TimeInterval = 180
+    private static let urgentIdleInterval: TimeInterval = 60
     private var popoverVisible = false
 
     /// Driven by the popover's onAppear/onDisappear: refresh on open and use the
@@ -268,7 +300,8 @@ final class UsageStore: ObservableObject {
     private func restartTimer() {
         timer?.invalidate()
         guard refreshInterval > 0 else { return }
-        let interval = popoverVisible ? refreshInterval : max(refreshInterval, Self.idleInterval)
+        let idle = isAtLimitRisk ? Self.urgentIdleInterval : Self.idleInterval
+        let interval = popoverVisible ? refreshInterval : max(refreshInterval, idle)
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
@@ -332,9 +365,23 @@ final class UsageStore: ObservableObject {
         (maxLimitUtilization ?? 0) >= Double(warnThreshold)
     }
 
+    /// True when you're currently rate-limited: a `rejected` status or a window at
+    /// 100%. Drives the menu-bar "blocked" glyph and red tint.
+    var isBlocked: Bool {
+        if limits?.status == "rejected" { return true }
+        return (maxLimitUtilization ?? 0) >= 100
+    }
+
+    /// Whether we're close enough to a limit to warrant the tighter refresh cadence
+    /// + fresher fetches: blocked, over the warn threshold, or projected to exhaust.
+    var isAtLimitRisk: Bool {
+        isBlocked || isOverThreshold || sessionProjection?.verdict == .atRisk
+    }
+
     /// Menu-bar tint: green (safe) → orange (warning) → red (nearly out), based on
     /// the utilization relevant to the chosen bar metric.
     var barColor: Color {
+        if isBlocked { return .red }
         let util: Double?
         switch barMetric {
         case .sessionLimit: util = limits?.session5h?.utilization

@@ -14,6 +14,20 @@ Plus an **optional live fetch** of your real plan limits (see
 
 > The app UI is in **Korean**; the `--print`/`--json` CLI output stays in English.
 
+## ⚠️ Disclaimer (please read before using)
+
+- **Unofficial.** ClaudeBar is a community tool — **not affiliated with, endorsed by, or
+  supported by Anthropic**. "Claude" is a trademark of Anthropic, used here only to
+  describe what the tool works with.
+- **Undocumented endpoint.** Live plan limits come from an **undocumented** Anthropic
+  usage endpoint, called with your own OAuth token and a Claude-Code-style `User-Agent`.
+  This may be contrary to Anthropic's Terms of Service, may rate-limit you, and **can
+  break at any time without notice**. The local-data stats work without it.
+- **Optional auto-resume runs a shell command.** The "auto-resume on reset" feature
+  (off by default) runs a command you configure when your session limit frees up. Only
+  what you configure runs.
+- **Use at your own risk.** Cost figures are estimates based on public list prices.
+
 ## What it shows
 
 - **Menu-bar label** — a sparkle + one at-a-glance number. Defaults to your **Session
@@ -80,7 +94,9 @@ xcrun notarytool store-credentials claudebar-notary --apple-id you@example.com -
 ```
 
 For personal use this isn't needed — the stable Apple Development signature is enough to
-run locally (approve the Keychain prompt once with *Always Allow*).
+run locally (approve the Keychain prompt once with *Always Allow*). If you hand an
+**un-notarized** build to someone else, macOS Gatekeeper will block it; they can run it
+once via **right-click → Open** (or *System Settings → Privacy & Security → Open Anyway*).
 
 The packaged app is menu-bar-only (`LSUIElement`) — no Dock icon. Quit it from the
 popover's **Quit** button.

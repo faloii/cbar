@@ -125,6 +125,22 @@ final class ProjectionTests: XCTestCase {
         XCTAssertEqual(p.verdict, .safe)
     }
 
+    func testProjectedAtResetShowsHeadroom() {
+        // 50→56 over 30m = 12%/h; reset in 2h → projected 56 + 12*2 = 80% (20% headroom).
+        let p = Projection.compute(points: [(mins(-30), 50), (t, 56)], resetsAt: t.addingTimeInterval(2 * 3600), now: t)
+        XCTAssertEqual(p.verdict, .safe)
+        XCTAssertEqual(p.projectedAtReset ?? 0, 80, accuracy: 0.5)
+        XCTAssertEqual(p.headroomAtReset ?? 0, 20, accuracy: 0.5)
+    }
+
+    func testPacedProjectedAtReset() {
+        // 10% used 1 day into a 7-day week → pace ~0.417%/h; 6 days to reset → ~70%.
+        let week: TimeInterval = 7 * 24 * 3600
+        let p = Projection.paced(util: 10, resetsAt: t.addingTimeInterval(6 * 24 * 3600),
+                                 windowSeconds: week, now: t)
+        XCTAssertEqual(p.projectedAtReset ?? 0, 70, accuracy: 1.0)
+    }
+
     func testResetBoundaryIgnoresPreDropSamples() {
         // A reset (95→10) means the slope must come from the post-reset rise (10→20),
         // not the overall negative trend — i.e. a positive burn, not idle.
@@ -155,9 +171,9 @@ final class ModelBurnTests: XCTestCase {
         XCTAssertEqual(opus.burnMultiplier, 2.0, accuracy: 0.001)
         XCTAssertEqual(fable.burnMultiplier, 1.0, accuracy: 0.001)
 
-        // util 50% → remaining ≈ total (1M). Opus: 1M/100k = 10 turns; Fable: 1M/50k = 20.
-        XCTAssertEqual(opus.headroomTurns ?? 0, 10, accuracy: 0.1)
-        XCTAssertEqual(fable.headroomTurns ?? 0, 20, accuracy: 0.1)
+        // util 50% maps to the 1M total → Opus 100k/turn = 5% of limit/turn; Fable 2.5%.
+        XCTAssertEqual(opus.limitSharePerTurn ?? 0, 5.0, accuracy: 0.05)
+        XCTAssertEqual(fable.limitSharePerTurn ?? 0, 2.5, accuracy: 0.05)
     }
 
     func testCostBasisChangesShareAndMultiplier() {
@@ -182,10 +198,10 @@ final class ModelBurnTests: XCTestCase {
         XCTAssertEqual(rows.first!.perTurnWeight, 60, accuracy: 0.001) // 10+20+30, cacheRead excluded
     }
 
-    func testNoHeadroomWithoutUtilization() {
+    func testNoLimitShareWithoutUtilization() {
         let rows = ModelBurn.rows(window: [model("Opus", total: 100, requests: 1)],
                                   sessionUtil: nil, basis: .totalTokens)
-        XCTAssertNil(rows.first?.headroomTurns)
+        XCTAssertNil(rows.first?.limitSharePerTurn)
     }
 
     func testEmptyWindow() {
@@ -302,6 +318,58 @@ final class AdviceTests: XCTestCase {
         XCTAssertEqual(tips.first?.level, .critical)
     }
 
+    func testPacingTipIsConcreteWithTurnsAndLever() {
+        let p = Projection(ratePerHour: 40, timeToFull: 1800, secondsToReset: 7200, verdict: .atRisk)
+        let models = [model("Opus 4.8", total: 100, requests: 40, cost: 10)]   // 40 turns at 80% util
+        let tips = Advice.compute(session: p, weekly: nil, sessionUtil: 80, weeklyUtil: nil,
+                                  models: models, warnThreshold: 80, now: now)
+        let pacing = tips.first { $0.kind == .sessionPacing }
+        XCTAssertEqual(pacing?.level, .critical)
+        XCTAssertTrue(pacing?.text.contains("턴") ?? false)        // turn estimate present
+        XCTAssertTrue(pacing?.text.contains("시간당") ?? false)    // concrete target-rate lever
+    }
+
+    func testNearMissPacingIsCalmer() {
+        // Hits full ~5m before reset → barely blocked → warn, not critical.
+        let p = Projection(ratePerHour: 30, timeToFull: 6900, secondsToReset: 7200, verdict: .atRisk)
+        let tips = Advice.compute(session: p, weekly: nil, sessionUtil: 70, weeklyUtil: nil,
+                                  models: [], warnThreshold: 80, now: now)
+        XCTAssertEqual(tips.first { $0.kind == .sessionPacing }?.level, .warn)
+    }
+
+    func testResetImminentTip() {
+        let p = Projection(ratePerHour: 3, timeToFull: 99999, secondsToReset: 600,
+                           verdict: .safe, projectedAtReset: 92)
+        let tips = Advice.compute(session: p, weekly: nil, sessionUtil: 90, weeklyUtil: nil,
+                                  models: [], warnThreshold: 80, now: now)
+        XCTAssertTrue(tips.contains { $0.kind == .resetImminent })
+    }
+
+    func testWeeklyAtRiskWordingIsDirect() {
+        let wk = Projection(ratePerHour: 2, timeToFull: 1000, secondsToReset: 3 * 24 * 3600, verdict: .atRisk)
+        let tips = Advice.compute(session: nil, weekly: wk, sessionUtil: nil, weeklyUtil: 85,
+                                  models: [], warnThreshold: 80, now: now)
+        let weekly = tips.first { $0.kind == .weeklyDefer }
+        XCTAssertTrue(weekly?.text.contains("바닥") ?? false)
+    }
+
+    func testHeadroomTipWhenUnderUsing() {
+        // Burning steadily but only on track to reach ~50% by reset → 50% headroom.
+        let safe = Projection(ratePerHour: 5, timeToFull: 36000, secondsToReset: 7200,
+                              verdict: .safe, projectedAtReset: 50)
+        let tips = Advice.compute(session: safe, weekly: nil, sessionUtil: 40, weeklyUtil: 20,
+                                  models: [], warnThreshold: 80, now: now)
+        XCTAssertTrue(tips.contains { $0.kind == .headroom })
+    }
+
+    func testNoHeadroomTipWhenOnTrackToFill() {
+        let safe = Projection(ratePerHour: 12, timeToFull: 4000, secondsToReset: 3600,
+                              verdict: .safe, projectedAtReset: 95)
+        let tips = Advice.compute(session: safe, weekly: nil, sessionUtil: 80, weeklyUtil: 20,
+                                  models: [], warnThreshold: 80, now: now)
+        XCTAssertFalse(tips.contains { $0.kind == .headroom })
+    }
+
     func testCostHeavyModelTip() {
         let models = [model("Opus 4.8", total: 500_000, requests: 5, cost: 300),
                       model("Sonnet 4.6", total: 500_000, requests: 5, cost: 30)]
@@ -366,5 +434,100 @@ final class OAuthUsageParseTests: XCTestCase {
         let snap = OAuthUsageClient.parse("{}".data(using: .utf8)!)
         XCTAssertFalse(snap.hasData)
         XCTAssertNotNil(snap.error)
+    }
+}
+
+final class ResumeCommandTests: XCTestCase {
+    func testShellQuoteWrapsAndEscapes() {
+        XCTAssertEqual(ResumeCommand.shellQuote("plain"), "'plain'")
+        XCTAssertEqual(ResumeCommand.shellQuote("a b"), "'a b'")
+        XCTAssertEqual(ResumeCommand.shellQuote("a'b"), "'a'\\''b'")   // ' → '\''
+    }
+
+    func testPreviewNeutralizesDangerousPath() {
+        // A project dir crafted to break out of double quotes must stay fully quoted.
+        let cmd = ResumeCommand.buildPreview(dir: "/x\"; rm -rf ~ #", bin: "claude")
+        XCTAssertTrue(cmd.hasPrefix("cd '"))
+        XCTAssertTrue(cmd.contains("'/x\"; rm -rf ~ #'"))   // single-quoted as one word
+        XCTAssertTrue(cmd.contains("--continue -p '계속 진행해줘' --model haiku"))
+    }
+
+    func testPreviewEscapesEmbeddedSingleQuote() {
+        let cmd = ResumeCommand.buildPreview(dir: "/a'b", bin: "claude")
+        XCTAssertTrue(cmd.contains("'/a'\\''b'"))
+    }
+}
+
+final class LimitAlertsTests: XCTestCase {
+    let now = Date(timeIntervalSince1970: 1_000_000)
+    func win(_ util: Double, resetIn: TimeInterval? = nil) -> LimitWindow {
+        LimitWindow(utilization: util, resetsAt: resetIn.map { now.addingTimeInterval($0) })
+    }
+    func eval(session: LimitWindow? = nil, weekly: LimitWindow? = nil,
+              sp: Projection? = nil, wp: Projection? = nil, status: String? = nil,
+              warn: Int = 80, state: inout LimitAlertState) -> [LimitAlert] {
+        LimitAlerts.evaluate(session: session, weekly: weekly,
+                             sessionProjection: sp, weeklyProjection: wp,
+                             status: status, warnThreshold: warn, state: &state, now: now)
+    }
+
+    func testThresholdFiresOnceThenResetsAfterDrop() {
+        var s = LimitAlertState()
+        XCTAssertTrue(eval(session: win(85), state: &s).contains { $0.id == "limit-session" })
+        XCTAssertFalse(eval(session: win(88), state: &s).contains { $0.id == "limit-session" }) // still high → silent
+        _ = eval(session: win(40), state: &s)                                                   // dropped → re-arm
+        XCTAssertTrue(eval(session: win(85), state: &s).contains { $0.id == "limit-session" })  // fires again
+    }
+
+    func testTrajectoryWarnsBelowThreshold() {
+        var s = LimitAlertState()
+        let atRisk = Projection(ratePerHour: 40, timeToFull: 600, secondsToReset: 7200, verdict: .atRisk)
+        // 60% util is under the 80% warn line, but the burn rate projects exhaustion.
+        let out = eval(session: win(60), sp: atRisk, state: &s)
+        XCTAssertTrue(out.contains { $0.id == "risk-session" })
+        XCTAssertFalse(out.contains { $0.id == "limit-session" })
+        // Fires once per episode.
+        XCTAssertFalse(eval(session: win(62), sp: atRisk, state: &s).contains { $0.id == "risk-session" })
+    }
+
+    func testBlockedFiresOnRejectedAndOnFull() {
+        var s = LimitAlertState()
+        XCTAssertTrue(eval(session: win(70), status: "rejected", state: &s).contains { $0.id == "blocked" })
+        var s2 = LimitAlertState()
+        XCTAssertTrue(eval(session: win(100, resetIn: 3600), state: &s2).contains { $0.id == "blocked" })
+        XCTAssertFalse(eval(session: win(100, resetIn: 3500), state: &s2).contains { $0.id == "blocked" }) // once
+    }
+
+    func testResetDoneOnSharpDrop() {
+        var s = LimitAlertState(); s.prevSessionUtil = 80
+        let out = eval(session: win(2), state: &s)
+        let done = out.first { $0.id == "reset-done" }
+        XCTAssertNotNil(done)
+        XCTAssertTrue(done!.title.contains("리셋됨"))        // plain reset (wasn't blocked)
+        XCTAssertEqual(s.prevSessionUtil, 2)
+    }
+
+    func testResetAfterBlockedIsAnActionPrompt() {
+        var s = LimitAlertState()
+        _ = eval(session: win(100, resetIn: 300), state: &s)   // blocked → remembers wasBlocked
+        XCTAssertTrue(s.wasBlocked)
+        let out = eval(session: win(1, resetIn: 5 * 3600), state: &s) // window reset
+        let done = out.first { $0.id == "reset-after-block" }
+        XCTAssertNotNil(done)                                 // distinct id triggers auto-resume
+        XCTAssertTrue(done!.title.contains("다시 시작"))     // stronger CTA after a block
+        XCTAssertFalse(s.wasBlocked)                          // consumed
+    }
+
+    func testResetSoonWhenHighAndClose() {
+        var s = LimitAlertState()
+        let out = eval(session: win(90, resetIn: 10 * 60), state: &s)
+        XCTAssertTrue(out.contains { $0.id == "reset-soon" })
+        XCTAssertFalse(eval(session: win(90, resetIn: 9 * 60), state: &s).contains { $0.id == "reset-soon" }) // once
+    }
+
+    func testNoAlertsWhenSafe() {
+        var s = LimitAlertState()
+        let safe = Projection(ratePerHour: 5, timeToFull: 36000, secondsToReset: 3600, verdict: .safe)
+        XCTAssertTrue(eval(session: win(30, resetIn: 3600), sp: safe, state: &s).isEmpty)
     }
 }

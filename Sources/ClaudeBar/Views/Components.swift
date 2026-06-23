@@ -69,43 +69,6 @@ struct MeterBar: View {
     }
 }
 
-/// Line chart of sampled limit utilization (%) over time, on a fixed 0–100 scale
-/// with a dashed warning-threshold line. Session is emphasized; weekly is faint.
-struct LimitTrendChart: View {
-    let session: [(Date, Double)]
-    let weekly: [(Date, Double)]
-    let threshold: Int
-
-    var body: some View {
-        GeometryReader { geo in chart(in: geo.size) }
-            .frame(height: 40)
-            .accessibilityHidden(true)
-    }
-
-    private func chart(in size: CGSize) -> some View {
-        let times = (session + weekly).map { $0.0.timeIntervalSinceReferenceDate }
-        let tMin = times.min() ?? 0
-        let span = max((times.max() ?? 1) - tMin, 1)
-        func x(_ t: Date) -> CGFloat { size.width * CGFloat((t.timeIntervalSinceReferenceDate - tMin) / span) }
-        func y(_ u: Double) -> CGFloat { size.height * CGFloat(1 - min(max(u, 0), 100) / 100) }
-        func line(_ pts: [(Date, Double)]) -> Path {
-            Path { p in
-                let sorted = pts.sorted { $0.0 < $1.0 }
-                guard let f = sorted.first else { return }
-                p.move(to: CGPoint(x: x(f.0), y: y(f.1)))
-                for pt in sorted.dropFirst() { p.addLine(to: CGPoint(x: x(pt.0), y: y(pt.1))) }
-            }
-        }
-        let ty = y(Double(threshold))
-        return ZStack {
-            Path { p in p.move(to: CGPoint(x: 0, y: ty)); p.addLine(to: CGPoint(x: size.width, y: ty)) }
-                .stroke(Color.orange.opacity(0.5), style: .init(lineWidth: 0.5, dash: [3, 3]))
-            line(weekly).stroke(Color.secondary.opacity(0.5), style: .init(lineWidth: 1.2, lineJoin: .round))
-            line(session).stroke(Color.brand, style: .init(lineWidth: 1.6, lineJoin: .round))
-        }
-    }
-}
-
 /// One "label … value" row.
 struct StatRow: View {
     let label: String
@@ -154,14 +117,26 @@ struct LimitRow: View {
     }
 
     @ViewBuilder private var projectionLine: some View {
-        if let p = projection {
+        if window.utilization >= 100 {
+            let reset = window.resetsAt.map { Fmt.countdown(to: $0, from: now) } ?? "?"
+            line("지금 막힘 · \(reset) 후 리셋", .red, "nosign")
+        } else if let p = projection {
             switch p.verdict {
             case .measuring:
                 line("측정 중…", .secondary, "hourglass")
             case .idle:
                 line("사용 없음", .secondary, "pause")
             case .safe:
-                line("\(rateText(p.ratePerHour)) · 리셋까지 충분", .green, "checkmark.circle")
+                if let proj = p.projectedAtReset {
+                    let pct = Int(proj.rounded())
+                    if proj >= 90 {
+                        line("\(rateText(p.ratePerHour)) · 리셋까지 거의 다 씀(~\(pct)%)", .green, "checkmark.circle")
+                    } else {
+                        line("\(rateText(p.ratePerHour)) · 리셋 때 ~\(pct)% · \(max(0, 100 - pct))% 여유", .secondary, "gauge.medium")
+                    }
+                } else {
+                    line("\(rateText(p.ratePerHour)) · 리셋까지 충분", .green, "checkmark.circle")
+                }
             case .atRisk:
                 let full = p.timeToFull.map { Fmt.countdown(to: now.addingTimeInterval($0), from: now) } ?? "?"
                 let gap = p.blockedBy.map { Fmt.countdown(to: now.addingTimeInterval($0), from: now) } ?? "?"
@@ -190,6 +165,14 @@ struct ModelBurnRowView: View {
     let row: ModelBurnRow
     let basis: BurnBasis
 
+    /// Compact percent: "5%", "0.4%", "0.07%" — keeps small per-turn shares legible.
+    static func pct(_ v: Double) -> String {
+        let s = v >= 1 ? String(format: "%.0f", v)
+              : v >= 0.1 ? String(format: "%.1f", v)
+              : String(format: "%.2f", v)
+        return s + "%"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 6) {
@@ -213,9 +196,9 @@ struct ModelBurnRowView: View {
                     Text("·")
                     Text("~\(Fmt.usd(row.cost))")
                 }
-                if let h = row.headroomTurns {
+                if let share = row.limitSharePerTurn {
                     Text("·")
-                    Text("~\(h >= 1000 ? "999+" : "\(Int(h.rounded()))")턴 남음")
+                    Text("한도 \(Self.pct(share))/턴")
                         .foregroundStyle(row.burnMultiplier >= 2 ? .orange : .secondary)
                 }
             }

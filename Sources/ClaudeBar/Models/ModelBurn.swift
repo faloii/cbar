@@ -52,9 +52,11 @@ struct ModelBurnRow: Identifiable {
     let shareFraction: Double     // 0...1 of the window's total weight (basis-dependent)
     let perTurnWeight: Double     // avg basis-weight per turn (the "burn weight")
     let burnMultiplier: Double    // per-turn weight relative to the lightest model
-    /// Estimated turns left *if you used only this model* — always limit (total-token)
-    /// based, nil when the session utilization isn't known. Lower = depletes faster.
-    let headroomTurns: Double?
+    /// What % of the session limit ONE turn of this model consumes — always limit
+    /// (total-token) based, nil when session utilization is unknown. Higher = greedier.
+    /// Answers "how much does one use of this model cost me?" without the confusing
+    /// counterfactual of "turns left if only this model".
+    let limitSharePerTurn: Double?
 }
 
 /// Compares how fast each model depletes the chosen basis (limit tokens / fresh tokens /
@@ -69,15 +71,18 @@ enum ModelBurn {
         let perTurnWeights = window.compactMap { $0.requests > 0 ? basis.weight($0) / Double($0.requests) : nil }
         let lightest = perTurnWeights.filter { $0 > 0 }.min() ?? 1
 
-        // Headroom is always limit-based (total tokens), independent of display basis.
+        // "Limit share per turn" is always limit-based (total tokens), independent of
+        // the display basis: what fraction of the session limit one turn of this model
+        // eats. `util%` corresponds to `totalTokensSum`, so one turn's tokens map to
+        // `tokensPerTurn * util / totalTokensSum` percent of the full limit.
         let totalTokensSum = max(1, window.map { $0.tokens.total }.reduce(0, +))
-        var remainingTokens: Double?
-        if let u = sessionUtil, u > 1 { remainingTokens = Double(totalTokensSum) * (100.0 / u - 1.0) }
+        let util = (sessionUtil.map { $0 > 1 } ?? false) ? sessionUtil : nil
 
         return window.map { m -> ModelBurnRow in
             let perTurn = m.requests > 0 ? basis.weight(m) / Double(m.requests) : 0
             let tokensPerTurn = m.requests > 0 ? Double(m.tokens.total) / Double(m.requests) : 0
-            let headroom: Double? = (remainingTokens != nil && tokensPerTurn > 0) ? remainingTokens! / tokensPerTurn : nil
+            let share: Double? = (util != nil && tokensPerTurn > 0)
+                ? tokensPerTurn * util! / Double(totalTokensSum) : nil
             return ModelBurnRow(
                 model: m.model,
                 tokens: m.tokens.total,
@@ -86,7 +91,7 @@ enum ModelBurn {
                 shareFraction: basis.weight(m) / totalWeight,
                 perTurnWeight: perTurn,
                 burnMultiplier: (lightest > 0 && perTurn > 0) ? perTurn / lightest : 1,
-                headroomTurns: headroom
+                limitSharePerTurn: share
             )
         }
         .sorted { $0.shareFraction > $1.shareFraction }

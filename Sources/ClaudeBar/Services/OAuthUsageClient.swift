@@ -38,9 +38,9 @@ struct OAuthUsageClient: Sendable {
     private static var nextAllowedFetch = Date.distantPast
     private static var consecutiveFailures = 0
 
-    func loadLimits(force: Bool = false) async -> LimitsSnapshot {
+    func loadLimits(force: Bool = false, ttl: TimeInterval = OAuthUsageClient.cacheTTL) async -> LimitsSnapshot {
         let cached = readCache()
-        if !force, let c = cached, Date().timeIntervalSince(c.fetchedAt) < Self.cacheTTL {
+        if !force, let c = cached, Date().timeIntervalSince(c.fetchedAt) < ttl {
             return c
         }
         if !force, Self.isBackingOff(), var c = cached {

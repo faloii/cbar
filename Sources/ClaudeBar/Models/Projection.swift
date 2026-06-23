@@ -20,11 +20,23 @@ struct Projection: Equatable {
     let timeToFull: TimeInterval?    // seconds until 100% at current rate, nil if not projecting
     let secondsToReset: TimeInterval?
     let verdict: PaceVerdict
+    /// Projected utilization (%) at reset time at the current rate — answers the
+    /// other half of "limit awareness": will I actually use my full allowance
+    /// before it resets, or leave headroom on the table? May exceed 100 when
+    /// `.atRisk` (you'd be blocked before reset). nil when there's no rate yet.
+    var projectedAtReset: Double? = nil
 
     /// `timeToFull` shortfall before reset, i.e. how long you'd be blocked. nil unless `.atRisk`.
     var blockedBy: TimeInterval? {
         guard verdict == .atRisk, let f = timeToFull, let r = secondsToReset else { return nil }
         return max(0, r - f)
+    }
+
+    /// Unused headroom (%) you're on track to leave at reset; nil if unknown.
+    /// Meaningful only when not `.atRisk` (otherwise you hit the cap early).
+    var headroomAtReset: Double? {
+        guard let p = projectedAtReset else { return nil }
+        return max(0, 100 - p)
     }
 
     static let measuring = Projection(ratePerHour: 0, timeToFull: nil, secondsToReset: nil, verdict: .measuring)
@@ -54,7 +66,9 @@ struct Projection: Equatable {
         let timeToFull = ratePerHour > 0 ? (max(0, 100 - util) / ratePerHour) * 3600 : nil
         var verdict: PaceVerdict = .safe
         if let f = timeToFull, secondsToReset > 0, f < secondsToReset { verdict = .atRisk }
-        return Projection(ratePerHour: ratePerHour, timeToFull: timeToFull, secondsToReset: secondsToReset, verdict: verdict)
+        let projected = util + ratePerHour * (max(0, secondsToReset) / 3600)
+        return Projection(ratePerHour: ratePerHour, timeToFull: timeToFull, secondsToReset: secondsToReset,
+                          verdict: verdict, projectedAtReset: projected)
     }
 
     /// `points` are (time, utilization%) for ONE window, any order.
@@ -92,7 +106,9 @@ struct Projection: Equatable {
         let timeToFull = (remaining / rate) * 3600
         var verdict: PaceVerdict = .safe
         if let r = secondsToReset, timeToFull < r { verdict = .atRisk }
+        let projected = secondsToReset.map { last.1 + rate * (max(0, $0) / 3600) }
 
-        return Projection(ratePerHour: rate, timeToFull: timeToFull, secondsToReset: secondsToReset, verdict: verdict)
+        return Projection(ratePerHour: rate, timeToFull: timeToFull, secondsToReset: secondsToReset,
+                          verdict: verdict, projectedAtReset: projected)
     }
 }
