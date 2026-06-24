@@ -5,7 +5,7 @@ import Combine
 /// Popover cards the user can show/hide and reorder (Settings → 섹션).
 /// Declaration order is the default layout order.
 enum PanelSection: String, CaseIterable, Identifiable {
-    case advice, limits, recent, perModel, today, weeklyReview, goals, budget
+    case advice, limits, recent, perModel, modelGuide, sessions, today, weeklyReview, goals, budget
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -13,6 +13,8 @@ enum PanelSection: String, CaseIterable, Identifiable {
         case .limits:         return "플랜 한도"
         case .recent:         return "최근 5시간"
         case .perModel:       return "모델별 소진"
+        case .modelGuide:     return "모델 가이드"
+        case .sessions:       return "세션별"
         case .today:          return "오늘"
         case .weeklyReview:   return "주간 리뷰"
         case .goals:          return "습관 목표"
@@ -98,9 +100,10 @@ final class UsageStore: ObservableObject {
         didSet { objectWillChange.send() }
     }
     /// Comma-joined raw values of hidden sections. Default = lean: show only the
-    /// core (advice, limits, recent, today); the model-burn comparison is opt-in.
+    /// core (advice, limits, recent, today); the analysis cards (per-model burn,
+    /// model guide, per-session) are opt-in.
     @AppStorage("hiddenSections") private var hiddenSectionsRaw: String =
-        "perModel" {
+        "perModel,modelGuide,sessions" {
         didSet { objectWillChange.send() }
     }
     /// Comma-joined raw values defining card order (missing ones append in default order).
@@ -129,6 +132,15 @@ final class UsageStore: ObservableObject {
         order.swapAt(i, i + delta)
         sectionOrderRaw = order.map(\.rawValue).joined(separator: ",")
     }
+
+    /// Drag-and-drop reorder: place `moved` just before `target`.
+    func moveSection(_ moved: PanelSection, before target: PanelSection) {
+        guard moved != target else { return }
+        var order = orderedSections.filter { $0 != moved }
+        guard let idx = order.firstIndex(of: target) else { return }
+        order.insert(moved, at: idx)
+        sectionOrderRaw = order.map(\.rawValue).joined(separator: ",")
+    }
     @AppStorage("notifyOnWarning") var notifyOnWarning: Bool = true {
         didSet { if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() } }
     }
@@ -141,6 +153,10 @@ final class UsageStore: ObservableObject {
     }
     /// User-authored shell command for auto-resume (off unless non-empty + enabled).
     @AppStorage("resumeCommand") var resumeCommand: String = "" {
+        didSet { objectWillChange.send() }
+    }
+    /// Notify when you're pacing to leave a lot of the limit unused ("you could use more").
+    @AppStorage("notifyUnderpace") var notifyUnderpace: Bool = false {
         didSet { objectWillChange.send() }
     }
     /// Keep the system awake while blocked so the reset (and auto-resume) isn't missed.
@@ -264,8 +280,11 @@ final class UsageStore: ObservableObject {
             status: limits?.status, warnThreshold: warnThreshold,
             state: &alertState, now: Date())
 
-        if notifyOnWarning {
-            for a in alerts { Notifier.notify(title: a.title, body: a.body, id: a.id) }
+        for a in alerts {
+            // The under-pace nudge has its own opt-in toggle; everything else follows
+            // the main warning toggle.
+            let allowed = a.id == "pace-slow" ? notifyUnderpace : notifyOnWarning
+            if allowed { Notifier.notify(title: a.title, body: a.body, id: a.id) }
         }
         // Auto-resume on the "freed after being blocked" reset (opt-in). With no
         // custom command, default to continuing the last conversation — so just

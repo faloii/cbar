@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var store: UsageStore
     @State private var launchAtLogin = LoginItem.isEnabled
+    @State private var dropTarget: PanelSection?
 
     var body: some View {
         Form {
@@ -34,9 +35,13 @@ struct SettingsView: View {
             }
 
             Section("섹션 (표시 · 순서)") {
-                let sections = store.orderedSections
-                ForEach(Array(sections.enumerated()), id: \.element) { index, section in
+                ForEach(store.orderedSections) { section in
+                    let sections = store.orderedSections
+                    let index = sections.firstIndex(of: section) ?? 0
                     HStack(spacing: 6) {
+                        Image(systemName: "line.3.horizontal")
+                            .foregroundStyle(.tertiary).font(.caption)
+                            .accessibilityHidden(true)
                         Toggle(section.label, isOn: Binding(
                             get: { store.isVisible(section) },
                             set: { store.setVisible(section, $0) }))
@@ -46,8 +51,26 @@ struct SettingsView: View {
                         Button { store.moveSection(section, by: 1) } label: { Image(systemName: "chevron.down") }
                             .buttonStyle(.borderless).disabled(index == sections.count - 1)
                     }
+                    .contentShape(Rectangle())
+                    // Drop indicator: a line above the row currently targeted.
+                    .overlay(alignment: .top) {
+                        if dropTarget == section {
+                            Rectangle().fill(Color.brand).frame(height: 2)
+                        }
+                    }
+                    .draggable(section.rawValue) {
+                        Label(section.label, systemImage: "line.3.horizontal").padding(6)
+                    }
+                    .dropDestination(for: String.self) { items, _ in
+                        dropTarget = nil
+                        guard let raw = items.first, let moved = PanelSection(rawValue: raw) else { return false }
+                        store.moveSection(moved, before: section)
+                        return true
+                    } isTargeted: { hovering in
+                        dropTarget = hovering ? section : (dropTarget == section ? nil : dropTarget)
+                    }
                 }
-                Text("토글로 표시/숨김, ↑↓로 순서 변경.")
+                Text("행을 드래그해 순서 변경(또는 ↑↓) · 토글로 표시/숨김.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -99,6 +122,10 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("주간 사용 요약 알림", isOn: $store.weeklySummaryEnabled)
                 Text("매주 한 번 지난 7일 비용·Opus 비중 요약과 코칭을 알림으로 보냅니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("한도 많이 남길 때 알림 (더 쓰라고)", isOn: $store.notifyUnderpace)
+                    .disabled(!store.enableLiveLimits)
+                Text("지금 페이스면 리셋 때 한도가 크게 남을 것 같을 때 한 번 알려줍니다. 자리를 비우면(사용 없음) 울리지 않아요. 기본은 꺼져 있습니다.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

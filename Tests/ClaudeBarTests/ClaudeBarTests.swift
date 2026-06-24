@@ -17,6 +17,14 @@ final class FormatterTests: XCTestCase {
         XCTAssertEqual(Fmt.usd(150), "$150")
     }
 
+    func testShortCountdown() {
+        let t = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertEqual(Fmt.shortCountdown(to: t.addingTimeInterval(6 * 86400 + 100), from: t), "6d")
+        XCTAssertEqual(Fmt.shortCountdown(to: t.addingTimeInterval(2 * 3600 + 100), from: t), "2h")
+        XCTAssertEqual(Fmt.shortCountdown(to: t.addingTimeInterval(13 * 60), from: t), "13m")
+        XCTAssertEqual(Fmt.shortCountdown(to: t.addingTimeInterval(30), from: t), "<1m")
+    }
+
     func testCountdown() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         XCTAssertEqual(Fmt.countdown(to: now.addingTimeInterval(2 * 3600 + 13 * 60), from: now), "2h 13m")
@@ -437,6 +445,24 @@ final class OAuthUsageParseTests: XCTestCase {
     }
 }
 
+final class PaceTests: XCTestCase {
+    func testSustainableRate() {
+        // 40% used, 2h to reset → need 60%/2h = 30%/h to land at 100%.
+        XCTAssertEqual(Pace.sustainableRate(util: 40, secondsToReset: 2 * 3600) ?? 0, 30, accuracy: 0.01)
+        // Full or no reset → nil.
+        XCTAssertNil(Pace.sustainableRate(util: 100, secondsToReset: 3600))
+        XCTAssertNil(Pace.sustainableRate(util: 50, secondsToReset: nil))
+        XCTAssertNil(Pace.sustainableRate(util: 50, secondsToReset: 30))   // reset imminent
+    }
+
+    func testElapsedFraction() {
+        let week: TimeInterval = 7 * 24 * 3600
+        // 2 days into a 7-day window → ~0.286 elapsed.
+        XCTAssertEqual(Pace.elapsedFraction(windowSeconds: week, secondsToReset: 5 * 24 * 3600) ?? -1, 2.0 / 7.0, accuracy: 0.001)
+        XCTAssertNil(Pace.elapsedFraction(windowSeconds: week, secondsToReset: nil))
+    }
+}
+
 final class ResumeCommandTests: XCTestCase {
     func testShellQuoteWrapsAndEscapes() {
         XCTAssertEqual(ResumeCommand.shellQuote("plain"), "'plain'")
@@ -529,5 +555,23 @@ final class LimitAlertsTests: XCTestCase {
         var s = LimitAlertState()
         let safe = Projection(ratePerHour: 5, timeToFull: 36000, secondsToReset: 3600, verdict: .safe)
         XCTAssertTrue(eval(session: win(30, resetIn: 3600), sp: safe, state: &s).isEmpty)
+    }
+
+    func testUnderpaceFiresWhenLeavingHeadroom() {
+        var s = LimitAlertState()
+        let safe = Projection(ratePerHour: 3, timeToFull: 99999, secondsToReset: 4 * 3600,
+                              verdict: .safe, projectedAtReset: 40)
+        let out = eval(session: win(30, resetIn: 4 * 3600), sp: safe, state: &s)
+        XCTAssertTrue(out.contains { $0.id == "pace-slow" })
+        XCTAssertTrue(s.paceSlow)
+        // Fires once per episode.
+        XCTAssertFalse(eval(session: win(31, resetIn: 4 * 3600), sp: safe, state: &s).contains { $0.id == "pace-slow" })
+    }
+
+    func testNoUnderpaceWhenOnTrack() {
+        var s = LimitAlertState()
+        let safe = Projection(ratePerHour: 10, timeToFull: 5000, secondsToReset: 4 * 3600,
+                              verdict: .safe, projectedAtReset: 85)
+        XCTAssertFalse(eval(session: win(60, resetIn: 4 * 3600), sp: safe, state: &s).contains { $0.id == "pace-slow" })
     }
 }

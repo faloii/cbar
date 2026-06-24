@@ -134,6 +134,10 @@ struct MenuContentView: View {
             Card { windowSection }
         case .perModel:
             if !store.modelBurnRows.isEmpty { Card { perModelSection } }
+        case .modelGuide:
+            if !snap.windowByModel.isEmpty { Card { modelGuideSection } }
+        case .sessions:
+            if !snap.recentSessions.isEmpty { Card { sessionsSection } }
         case .today:
             Card { todaySection }
         case .weeklyReview:
@@ -197,17 +201,29 @@ struct MenuContentView: View {
             }
         }
         if let l = store.limits, l.hasData {
-            if let w = l.session5h {
-                LimitRow(title: "세션", subtitle: "5시간", window: w, now: snap.generatedAt,
-                         projection: store.sessionProjection)
+            HStack(alignment: .top, spacing: 10) {
+                if let w = l.session5h {
+                    RingGauge(title: "세션", window: w, now: snap.generatedAt,
+                              paceFraction: Pace.elapsedFraction(windowSeconds: 5 * 3600,
+                                                                 secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt)))
+                }
+                if let w = l.weekly7d {
+                    RingGauge(title: "주간", window: w, now: snap.generatedAt,
+                              paceFraction: Pace.elapsedFraction(windowSeconds: 7 * 24 * 3600,
+                                                                 secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt)))
+                }
+                if let w = l.weeklyOpus { RingGauge(title: "Opus", window: w, now: snap.generatedAt) }
             }
-            if let w = l.weekly7d {
-                LimitRow(title: "주간", subtitle: "7일", window: w, now: snap.generatedAt,
-                         projection: store.weeklyProjection)
+            .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 3) {
+                if let w = l.session5h {
+                    PaceLine(window: w, projection: store.sessionProjection, now: snap.generatedAt)
+                }
+                if let w = l.weekly7d {
+                    ProjectionLine(tag: "주간", window: w, projection: store.weeklyProjection, now: snap.generatedAt)
+                }
             }
-            if let w = l.weeklyOpus {
-                LimitRow(title: "주간", subtitle: "Opus", window: w, now: snap.generatedAt)
-            }
+            .padding(.top, 2)
         } else {
             Text(store.limits?.error ?? "한도 불러오는 중…")
                 .font(.caption).foregroundStyle(.secondary)
@@ -301,6 +317,64 @@ struct MenuContentView: View {
             ForEach(store.modelBurnRows) { ModelBurnRowView(row: $0, basis: store.burnBasis) }
         }
         Text("× = 턴당 \(store.burnBasis.shortLabel) (최저 모델 대비) · 한도 %/턴 = 한 번 쓸 때 세션 한도를 먹는 비중")
+            .font(.caption2).foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // Recommended model per kind of work + your real per-turn cost for each model
+    // you've used. ClaudeBar can't judge task difficulty, so this is guidance, not a
+    // per-task verdict — the choice stays with you.
+    @ViewBuilder private var modelGuideSection: some View {
+        CardHeader(icon: "slider.horizontal.3", title: "모델 가이드")
+        VStack(alignment: .leading, spacing: 7) {
+            ForEach(snap.windowByModel.sorted { $0.cost > $1.cost }) { m in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(m.model).font(.callout.weight(.medium))
+                    if let tier = ModelTier.of(m.model) {
+                        Text(tier.useFor).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer(minLength: 6)
+                    if m.requests > 0 {
+                        Text("~\(Fmt.usd(m.cost / Double(m.requests)))/턴")
+                            .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        Text("작업 난이도는 ClaudeBar가 알 수 없어요 — 권장 용도는 참고용입니다. 가벼운 작업을 더 싼 모델로 옮기면 비용이 크게 줄고, 한도(토큰)엔 거의 영향이 없습니다.")
+            .font(.caption2).foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // Recent conversations by cost — spot which sessions ran on which model so you
+    // can right-size the model next time.
+    @ViewBuilder private var sessionsSection: some View {
+        CardHeader(icon: "rectangle.stack.fill", title: "세션별 · 최근")
+        VStack(alignment: .leading, spacing: 9) {
+            ForEach(snap.recentSessions.prefix(5)) { s in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(s.project).font(.callout.weight(.medium)).lineLimit(1)
+                        Spacer(minLength: 6)
+                        Text("~\(Fmt.usd(s.cost))").font(.callout.weight(.semibold)).monospacedDigit()
+                    }
+                    HStack(spacing: 5) {
+                        ForEach(Array(s.models.prefix(2)), id: \.self) { model in
+                            Text(model)
+                                .foregroundStyle(ModelTier.of(model)?.short == "최고 성능" ? .orange : .secondary)
+                        }
+                        if s.models.count > 2 { Text("외 \(s.models.count - 2)") }
+                        Text("·")
+                        Text("\(Fmt.int(s.requests))턴")
+                        Spacer(minLength: 6)
+                        Text(Fmt.time(s.lastActivity))
+                    }
+                    .font(.caption2).foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+        Text("비용이 큰 대화 순. 한 모델로만 비쌌다면 다음엔 작업에 맞춰 모델을 바꿔보세요.")
             .font(.caption2).foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)
     }

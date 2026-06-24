@@ -96,6 +96,11 @@ struct ClaudeDataReader {
         var todayToolCalls = 0
         var todaySessions = Set<String>()
 
+        // Per-conversation accumulation for the session breakdown.
+        struct SessAcc { var cost = 0.0; var requests = 0; var last = Date.distantPast
+                         var project = "기타"; var modelCost: [String: Double] = [:] }
+        var bySession: [String: SessAcc] = [:]
+
         for r in records {
             let isToday = r.timestamp >= todayStart
             if isToday {
@@ -106,6 +111,18 @@ struct ClaudeDataReader {
             // Only assistant turns carry token usage / cost.
             guard let tokens = r.tokens, r.type == "assistant" else { continue }
             let cost = Pricing.cost(for: tokens, model: r.model)
+            let key = ModelName.display(r.model)
+
+            if !r.sessionId.isEmpty {
+                var acc = bySession[r.sessionId] ?? SessAcc()
+                acc.cost += cost
+                acc.requests += 1
+                if r.timestamp > acc.last { acc.last = r.timestamp }
+                let proj = Self.projectName(r.cwd)
+                if proj != "기타" { acc.project = proj }
+                acc.modelCost[key, default: 0] += cost
+                bySession[r.sessionId] = acc
+            }
 
             if r.timestamp >= windowStart {
                 windowTokens += tokens
@@ -113,7 +130,6 @@ struct ClaudeDataReader {
                 if oldestInWindow == nil || r.timestamp < oldestInWindow! {
                     oldestInWindow = r.timestamp
                 }
-                let key = ModelName.display(r.model)
                 var mw = winByModel[key] ?? ModelWindowUsage(model: key, tokens: TokenCounts(), cost: 0, requests: 0)
                 mw.tokens += tokens
                 mw.cost += cost
@@ -125,13 +141,20 @@ struct ClaudeDataReader {
                 todayRequests += 1
                 todayTokens += tokens
                 todayCost += cost
-                let key = ModelName.display(r.model)
                 var mu = byModel[key] ?? ModelUsage(model: key, tokens: TokenCounts(), cost: 0)
                 mu.tokens += tokens
                 mu.cost += cost
                 byModel[key] = mu
             }
         }
+
+        snap.recentSessions = bySession.map { id, a in
+            SessionStat(sessionId: id, project: a.project, cost: a.cost, requests: a.requests,
+                        models: a.modelCost.sorted { $0.value > $1.value }.map(\.key),
+                        lastActivity: a.last)
+        }
+        .filter { $0.cost > 0 }
+        .sorted { $0.cost > $1.cost }
 
         snap.windowTokens = windowTokens
         snap.windowCost = windowCost
@@ -155,6 +178,7 @@ struct ClaudeDataReader {
         let timestamp: Date
         let type: String        // "user" | "assistant" | ...
         let sessionId: String
+        let cwd: String         // working dir → project label for the per-session view
         let model: String
         let tokens: TokenCounts? // assistant turns only
         let toolUseCount: Int
@@ -301,10 +325,16 @@ struct ClaudeDataReader {
             timestamp: date,
             type: type,
             sessionId: sessionId,
+            cwd: obj["cwd"] as? String ?? "",
             model: message?["model"] as? String ?? "unknown",
             tokens: tokens,
             toolUseCount: toolUses
         )
+    }
+
+    /// Project label for a working directory ("/Users/me/Foo" → "Foo").
+    fileprivate static func projectName(_ cwd: String) -> String {
+        cwd.isEmpty ? "기타" : URL(fileURLWithPath: cwd).lastPathComponent
     }
 }
 

@@ -40,6 +40,17 @@ struct ModelWindowUsage: Identifiable {
     var requests: Int
 }
 
+/// One recent conversation's usage, for the per-session model breakdown.
+struct SessionStat: Identifiable {
+    var id: String { sessionId }
+    let sessionId: String
+    let project: String           // working-dir basename, or "기타"
+    let cost: Double
+    let requests: Int
+    let models: [String]          // distinct models used, by cost desc (first = dominant)
+    let lastActivity: Date
+}
+
 /// Everything the UI needs for one refresh.
 struct UsageSnapshot {
     var generatedAt = Date()
@@ -51,6 +62,9 @@ struct UsageSnapshot {
     /// When the oldest request in the current window ages past 5h — i.e. when
     /// the window first starts to free up. `nil` when the window is empty.
     var windowResetAt: Date?
+
+    /// Recent conversations (by cost), for the per-session model breakdown.
+    var recentSessions: [SessionStat] = []
 
     // Today (local calendar day), computed from the session logs.
     var todayTokens = TokenCounts()
@@ -84,7 +98,7 @@ struct UsageSnapshot {
     func mergingSession(from o: UsageSnapshot) -> UsageSnapshot {
         var s = self
         s.windowTokens = o.windowTokens; s.windowCost = o.windowCost; s.windowResetAt = o.windowResetAt
-        s.windowByModel = o.windowByModel
+        s.windowByModel = o.windowByModel; s.recentSessions = o.recentSessions
         s.todayTokens = o.todayTokens; s.todayCost = o.todayCost; s.todayByModel = o.todayByModel
         s.todayRequests = o.todayRequests; s.todaySessions = o.todaySessions; s.todayToolCalls = o.todayToolCalls
         return s

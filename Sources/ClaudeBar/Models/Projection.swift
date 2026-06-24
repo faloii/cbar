@@ -1,5 +1,23 @@
 import Foundation
 
+/// Pacing math for "land near 100% right at reset, spread evenly".
+enum Pace {
+    /// %/h you'd need to burn from now to reach 100% exactly at reset — the steady
+    /// rate that fully uses the window without blocking early. nil when the reset is
+    /// past/imminent or you're already full.
+    static func sustainableRate(util: Double, secondsToReset: TimeInterval?) -> Double? {
+        guard let s = secondsToReset, s > 60, util < 100 else { return nil }
+        return (100 - util) / (s / 3600)
+    }
+
+    /// Fraction of the window elapsed (0…1) — where the even-usage line sits *now*,
+    /// i.e. the % you'd be at if pacing linearly to 100% at reset. nil if unknown.
+    static func elapsedFraction(windowSeconds: TimeInterval, secondsToReset: TimeInterval?) -> Double? {
+        guard let s = secondsToReset, windowSeconds > 0 else { return nil }
+        return min(1, max(0, (windowSeconds - s) / windowSeconds))
+    }
+}
+
 /// One point in the recorded usage time-series.
 struct UsageSample: Codable, Equatable {
     let at: Date

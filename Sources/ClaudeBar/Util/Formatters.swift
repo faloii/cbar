@@ -35,6 +35,15 @@ enum Fmt {
         return "<1m"
     }
 
+    /// Single-unit countdown for tight spaces (under a gauge): "6d" / "2h" / "13m" / "<1m".
+    static func shortCountdown(to date: Date, from now: Date = Date()) -> String {
+        let secs = max(0, Int(date.timeIntervalSince(now)))
+        if secs >= 86400 { return "\(secs / 86400)d" }
+        if secs >= 3600  { return "\(secs / 3600)h" }
+        if secs >= 60    { return "\(secs / 60)m" }
+        return "<1m"
+    }
+
     /// "방금" / "N분 전" / "N시간 전" — how long ago `date` was.
     static func age(_ date: Date, from now: Date = Date()) -> String {
         let secs = max(0, Int(now.timeIntervalSince(date)))

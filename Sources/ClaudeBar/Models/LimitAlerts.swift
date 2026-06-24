@@ -17,6 +17,7 @@ struct LimitAlertState: Equatable {
     var blocked = false       // currently-blocked notified
     var wasBlocked = false    // hit the wall since the last reset (→ stronger "freed" alert)
     var resetSoon = false     // session "resets soon" notified
+    var paceSlow = false      // under-pace ("you could use more") notified
     var prevSessionUtil: Double?
 }
 
@@ -84,6 +85,21 @@ enum LimitAlerts {
             }
         } else {
             state.blocked = false
+        }
+
+        // 3b) Under-pace: actively burning but on track to leave a lot of the window
+        // unused (it doesn't roll over). Opt-in; gated in UsageStore by its own toggle.
+        // Hysteresis (fire ≤55%, clear ≥70%) avoids flapping; idle verdict won't fire,
+        // so simply stepping away doesn't nag.
+        if let sp = sessionProjection, sp.verdict == .safe,
+           let proj = sp.projectedAtReset,
+           let toReset = sp.secondsToReset, toReset >= 3600,
+           (session?.utilization ?? 0) >= 10, proj <= 55, !state.paceSlow {
+            state.paceSlow = true
+            out.append(LimitAlert(id: "pace-slow", title: "한도 여유 많아요",
+                body: "이 페이스면 리셋 때 한도의 약 \(Int((100 - proj).rounded()))%가 남아요. 무거운 작업을 지금 돌려도 좋아요."))
+        } else if (sessionProjection?.projectedAtReset ?? 100) >= 70 || sessionProjection?.verdict != .safe {
+            state.paceSlow = false
         }
 
         // 4) Session reset timing — the 5h cycle is what active work bumps into.
