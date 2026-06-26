@@ -9,7 +9,7 @@ struct SettingsView: View {
         Form {
             Section("플랜 한도 (라이브)") {
                 Toggle("실제 세션·주간 한도 표시", isOn: $store.enableLiveLimits)
-                Text("Claude Code 로그인으로 Claude 사용량 엔드포인트에서 실제 세션(5시간)·주간(7일) 사용률을 가져옵니다. 네트워크가 필요하며, 첫 조회 시 키체인 자격증명 접근 권한을 한 번 묻습니다. 요청 제한을 피하려 3분간 캐시합니다.")
+                Text("Claude Code 로그인으로 Claude 사용량 엔드포인트에서 실제 세션(5시간)·주간(7일) 사용률을 가져옵니다. 네트워크가 필요하며, 첫 조회 시 키체인 자격증명 접근 권한을 한 번 묻습니다(‘항상 허용’ 권장). 이후 토큰이 만료되면 키체인을 다시 묻지 않고 자동 갱신합니다. 요청 제한을 피하려 3분간 캐시합니다.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -119,6 +119,17 @@ struct SettingsView: View {
                 Toggle("한도가 임계값을 넘으면 알림", isOn: $store.notifyOnWarning)
                     .disabled(!store.enableLiveLimits)
                 Text("세션 또는 주간 한도가 이 임계값을 넘으면 메뉴바 아이콘이 주황 ⚠︎로 바뀝니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text("막힘 임박 경고")
+                    Slider(value: Binding(
+                        get: { Double(store.blockWarnLeadMinutes) },
+                        set: { store.blockWarnLeadMinutes = Int($0) }), in: 5...60, step: 5)
+                    Text("\(store.blockWarnLeadMinutes)분 전")
+                        .monospacedDigit().frame(width: 56, alignment: .trailing)
+                }
+                .disabled(!store.enableLiveLimits)
+                Text("지금 속도면 한도에 막힐 시점이 이 시간 안으로 들어오면 ‘곧 막힘 · ~N분 후’ 알림을 한 번 보냅니다. 메뉴바 라벨도 ‘막힘 50m’처럼 남은 시간으로 바뀝니다.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("주간 사용 요약 알림", isOn: $store.weeklySummaryEnabled)
                 Text("매주 한 번 지난 7일 비용·Opus 비중 요약과 코칭을 알림으로 보냅니다.")

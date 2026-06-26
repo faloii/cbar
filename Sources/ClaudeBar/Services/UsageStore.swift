@@ -5,12 +5,13 @@ import Combine
 /// Popover cards the user can show/hide and reorder (Settings → 섹션).
 /// Declaration order is the default layout order.
 enum PanelSection: String, CaseIterable, Identifiable {
-    case advice, limits, recent, perModel, modelGuide, sessions, today, weeklyReview, goals, budget
+    case advice, limits, efficiency, recent, perModel, modelGuide, sessions, today, weeklyReview, goals, budget
     var id: String { rawValue }
     var label: String {
         switch self {
         case .advice:         return "조언"
         case .limits:         return "플랜 한도"
+        case .efficiency:     return "효율"
         case .recent:         return "최근 5시간"
         case .perModel:       return "모델별 소진"
         case .modelGuide:     return "모델 가이드"
@@ -71,6 +72,11 @@ final class UsageStore: ObservableObject {
     @Published private(set) var limits: LimitsSnapshot?
     @Published private(set) var sessionProjection: Projection?
     @Published private(set) var weeklyProjection: Projection?
+    /// Recorded session-utilization samples within the current 5h window — the in-session
+    /// usage trend ("how fast / how much am I burning right now").
+    @Published private(set) var sessionTrend: [UsageSample] = []
+    /// Efficiency recap of the most-recently-completed session (for the learning loop).
+    @Published private(set) var lastSessionRecap: SessionCoach.Recap?
     @Published private(set) var isRefreshing = false
 
     @AppStorage("refreshIntervalSeconds") var refreshInterval: Double = 60 {
@@ -89,6 +95,10 @@ final class UsageStore: ObservableObject {
         set { burnBasisRaw = newValue.rawValue }
     }
     @AppStorage("warnThreshold") var warnThreshold: Int = 80 {
+        didSet { objectWillChange.send() }
+    }
+    /// How many minutes before a projected session block to fire the imminent warning.
+    @AppStorage("blockWarnLeadMinutes") var blockWarnLeadMinutes: Int = 30 {
         didSet { objectWillChange.send() }
     }
     /// Monthly budget in USD; 0 = off.
@@ -253,10 +263,14 @@ final class UsageStore: ObservableObject {
 
     private func recomputeProjections() {
         guard enableLiveLimits else {
-            sessionProjection = nil; weeklyProjection = nil; return
+            sessionProjection = nil; weeklyProjection = nil; sessionTrend = []; lastSessionRecap = nil; return
         }
         let now = Date()
         let samples = UsageHistory.load()
+        // Session-window trend: samples with a session reading from the last 5h, oldest→newest.
+        let cutoff = now.addingTimeInterval(-5 * 3600)
+        sessionTrend = samples.filter { $0.session != nil && $0.at >= cutoff }.sorted { $0.at < $1.at }
+        lastSessionRecap = SessionCoach.lastSessionRecap(samples: samples, now: now)
         // Session = rolling 5h window → recent burst rate. Weekly = fixed 7-day
         // bucket → realized average pace since the week started (not a burst).
         sessionProjection = Projection.compute(points: samples.compactMap { s in s.session.map { (s.at, $0) } },
@@ -278,6 +292,7 @@ final class UsageStore: ObservableObject {
             session: limits?.session5h, weekly: limits?.weekly7d,
             sessionProjection: sessionProjection, weeklyProjection: weeklyProjection,
             status: limits?.status, warnThreshold: warnThreshold,
+            blockWarnLeadMinutes: blockWarnLeadMinutes,
             state: &alertState, now: Date())
 
         for a in alerts {
@@ -328,17 +343,54 @@ final class UsageStore: ObservableObject {
 
     // MARK: - Derived values for the bar label
 
+    /// Working-time budget for the current session window — drives the menu-bar
+    /// "block in N" warning and the in-popover coach.
+    var sessionWorkBudget: SessionCoach.WorkBudget? {
+        guard enableLiveLimits, let w = limits?.session5h else { return nil }
+        return SessionCoach.workBudget(session: sessionProjection, util: w.utilization,
+                                       resetsAt: w.resetsAt, now: Date())
+    }
+
+    /// Estimated session-limit cost of one more exchange, from the current conversation
+    /// size — the tangible "efficiency" number.
+    var perExchangePct: Double? {
+        guard enableLiveLimits, let u = limits?.session5h?.utilization else { return nil }
+        return SessionCoach.perExchangeLimitPct(contextTokens: snapshot.currentContextTokens,
+                                                windowTokens: snapshot.windowTokens.total, sessionUtil: u)
+    }
+
+    /// One-glance "am I spending this session efficiently?" verdict.
+    var efficiencyVerdict: SessionCoach.EfficiencyVerdict {
+        SessionCoach.efficiency(util: limits?.session5h?.utilization, projection: sessionProjection)
+    }
+
+    /// Whether the efficiency card has anything worth showing.
+    var hasEfficiencyData: Bool {
+        enableLiveLimits && (snapshot.currentContextTokens > 0 || lastSessionRecap != nil)
+    }
+
+    /// The session part of the bar label: self-warns "막힘 50m" (time until you'll hit
+    /// the cap) when on track to block before reset, "막힘" when already blocked, else
+    /// the plain %. So you see trouble coming without opening the popover.
+    private func sessionBarText(util: Double) -> String {
+        if util >= 100 { return "막힘" }
+        if let b = sessionWorkBudget, b.willBlock, let at = b.blockAt {
+            return "막힘 \(Fmt.shortCountdown(to: at, from: Date()))"
+        }
+        return "\(Int(util.rounded()))%"
+    }
+
     var barText: String {
         let s = snapshot
         switch barMetric {
         case .sessionLimit:
-            if let u = limits?.session5h?.utilization { return "\(Int(u.rounded()))%" }
+            if let u = limits?.session5h?.utilization { return sessionBarText(util: u) }
             return enableLiveLimits ? "—" : Fmt.tokens(s.windowTokens.total)
         case .weeklyLimit:
             if let u = limits?.weekly7d?.utilization { return "\(Int(u.rounded()))%" }
             return enableLiveLimits ? "—" : Fmt.tokens(s.windowTokens.total)
         case .bothLimits:
-            let sPart = limits?.session5h.map { "S \(Int($0.utilization.rounded()))%" }
+            let sPart = limits?.session5h.map { "S \(sessionBarText(util: $0.utilization))" }
             let wPart = limits?.weekly7d.map { "W \(Int($0.utilization.rounded()))%" }
             let joined = [sPart, wPart].compactMap { $0 }.joined(separator: " · ")
             return joined.isEmpty ? (enableLiveLimits ? "—" : Fmt.tokens(s.windowTokens.total)) : joined
@@ -355,6 +407,7 @@ final class UsageStore: ObservableObject {
                        sessionUtil: limits?.session5h?.utilization,
                        weeklyUtil: limits?.weekly7d?.utilization,
                        models: snapshot.windowByModel,
+                       contextTokens: snapshot.currentContextTokens,
                        warnThreshold: warnThreshold,
                        now: snapshot.generatedAt)
     }

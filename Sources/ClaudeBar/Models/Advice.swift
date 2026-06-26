@@ -2,7 +2,7 @@ import Foundation
 
 /// One piece of dynamic, situational guidance shown in the popover.
 struct AdviceTip: Identifiable, Equatable {
-    enum Kind { case sessionPacing, resetImminent, headroom, weeklyDefer, costModel, watch, healthy }
+    enum Kind { case sessionPacing, resetImminent, headroom, contextHeavy, weeklyDefer, costModel, watch, healthy }
     enum Level { case good, info, warn, critical }
 
     let kind: Kind
@@ -22,7 +22,8 @@ struct AdviceTip: Identifiable, Equatable {
 enum Advice {
     static func compute(session: Projection?, weekly: Projection?,
                         sessionUtil: Double?, weeklyUtil: Double?,
-                        models: [ModelWindowUsage], warnThreshold: Int, now: Date) -> [AdviceTip] {
+                        models: [ModelWindowUsage], contextTokens: Int = 0,
+                        warnThreshold: Int, now: Date) -> [AdviceTip] {
         var tips: [AdviceTip] = []
         let t = Double(warnThreshold)
         func dur(_ s: TimeInterval?) -> String {
@@ -72,6 +73,17 @@ enum Advice {
             tips.append(AdviceTip(kind: .headroom, level: .info, icon: "gauge.medium",
                 text: "이 속도면 리셋 때 한도의 약 \(Int(left.rounded()))%가 그냥 날아가요. "
                     + "\(turnPart)미뤘던 무거운 작업을 지금 돌리세요."))
+        }
+
+        // 3.5) Heavy context — a concrete way to cut per-turn burn (the only real
+        //      limit lever besides slowing down; model choice barely moves it). Shown
+        //      whenever the conversation is large and the window is actively in use,
+        //      so it pairs with the over-pace tip as the "here's how to fix it" lever.
+        if contextTokens >= SessionCoach.heavyContextTokens, (sessionUtil ?? 0) >= 1 {
+            let k = contextTokens / 1000
+            tips.append(AdviceTip(kind: .contextHeavy, level: .info, icon: "rectangle.compress.vertical",
+                text: "이번 대화 컨텍스트가 큼(~\(k)k토큰) — 턴마다 한도를 많이 먹어요. "
+                    + "/compact 하거나 새 대화로 시작하면 같은 한도로 더 오래 갈 수 있어요."))
         }
 
         // 4) Weekly — defer big work; sharper when the pace will blow the week.

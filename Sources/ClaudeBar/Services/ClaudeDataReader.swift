@@ -96,6 +96,12 @@ struct ClaudeDataReader {
         var todayToolCalls = 0
         var todaySessions = Set<String>()
 
+        // The latest assistant turn's context size (input + cache read/write ≈ prompt
+        // tokens carried into that turn) — a "how big is my current conversation" signal
+        // that drives the /compact-or-new-session lever.
+        var latestTurnAt = Date.distantPast
+        var currentContextTokens = 0
+
         // Per-conversation accumulation for the session breakdown.
         struct SessAcc { var cost = 0.0; var requests = 0; var last = Date.distantPast
                          var project = "기타"; var modelCost: [String: Double] = [:] }
@@ -112,6 +118,12 @@ struct ClaudeDataReader {
             guard let tokens = r.tokens, r.type == "assistant" else { continue }
             let cost = Pricing.cost(for: tokens, model: r.model)
             let key = ModelName.display(r.model)
+
+            // Track the single most-recent turn's context size (prompt tokens, not output).
+            if r.timestamp > latestTurnAt {
+                latestTurnAt = r.timestamp
+                currentContextTokens = tokens.input + tokens.cacheRead + tokens.cacheWrite
+            }
 
             if !r.sessionId.isEmpty {
                 var acc = bySession[r.sessionId] ?? SessAcc()
@@ -171,6 +183,7 @@ struct ClaudeDataReader {
         snap.todayByModel = byModel.values
             .filter { $0.tokens.total > 0 }
             .sorted { $0.tokens.total > $1.tokens.total }
+        snap.currentContextTokens = currentContextTokens
     }
 
     /// One parsed line from a session log.

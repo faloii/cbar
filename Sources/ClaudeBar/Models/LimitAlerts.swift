@@ -18,6 +18,7 @@ struct LimitAlertState: Equatable {
     var wasBlocked = false    // hit the wall since the last reset (→ stronger "freed" alert)
     var resetSoon = false     // session "resets soon" notified
     var paceSlow = false      // under-pace ("you could use more") notified
+    var blockImminent = false // session block within the lead time notified
     var prevSessionUtil: Double?
 }
 
@@ -38,6 +39,7 @@ enum LimitAlerts {
     static func evaluate(session: LimitWindow?, weekly: LimitWindow?,
                          sessionProjection: Projection?, weeklyProjection: Projection?,
                          status: String?, warnThreshold: Int,
+                         blockWarnLeadMinutes: Int = 30,
                          state: inout LimitAlertState, now: Date) -> [LimitAlert] {
         var out: [LimitAlert] = []
         let t = Double(warnThreshold)
@@ -56,8 +58,30 @@ enum LimitAlerts {
                     body: "이 속도면 약 \(full) 뒤 \(name) 한도가 찹니다. 잠깐 쉬거나 천천히 쓰세요."))
             } else if p.verdict != .atRisk { flag = false }
         }
-        risk(sessionProjection, name: "세션", key: "session", flag: &state.sessionRisk)
         risk(weeklyProjection, name: "주간", key: "weekly", flag: &state.weeklyRisk)
+
+        // 1b) Session trajectory, split by urgency around the user's lead time:
+        //     • beyond the lead time → an early heads-up ("곧 소진")
+        //     • within the lead time → the sharp "act now" warning ("곧 막힘 · ~N분 후")
+        //     Mutually exclusive by time-to-full, so you get the early note then the
+        //     imminent one — never both at once. Both clear when the risk passes.
+        if let p = sessionProjection, p.verdict == .atRisk, let ttf = p.timeToFull, ttf > 0 {
+            let lead = TimeInterval(max(1, blockWarnLeadMinutes) * 60)
+            if ttf <= lead {
+                if !state.blockImminent {
+                    state.blockImminent = true
+                    out.append(LimitAlert(id: "block-imminent", title: "세션 한도 곧 막힘",
+                        body: "이 속도면 약 \(countdown(ttf)) 뒤 막혀요. 지금 마무리하거나 속도를 늦추세요(/compact도 도움)."))
+                }
+            } else if !state.sessionRisk {
+                state.sessionRisk = true
+                out.append(LimitAlert(id: "risk-session", title: "세션 한도 곧 소진",
+                    body: "이 속도면 약 \(countdown(ttf)) 뒤 세션 한도가 찹니다. 잠깐 쉬거나 천천히 쓰세요."))
+            }
+        } else {
+            state.sessionRisk = false
+            state.blockImminent = false
+        }
 
         // 2) Static threshold crossing.
         func threshold(_ w: LimitWindow?, name: String, key: String, flag: inout Bool) {

@@ -44,6 +44,16 @@ enum Fmt {
         return "<1m"
     }
 
+    /// Two-unit countdown for under a gauge when minutes matter (the session window):
+    /// "1d 4h" / "2h 13m" / "13m" / "<1m".
+    static func mediumCountdown(to date: Date, from now: Date = Date()) -> String {
+        let secs = max(0, Int(date.timeIntervalSince(now)))
+        if secs >= 86400 { return "\(secs / 86400)d \((secs % 86400) / 3600)h" }
+        if secs >= 3600  { return "\(secs / 3600)h \((secs % 3600) / 60)m" }
+        if secs >= 60    { return "\(secs / 60)m" }
+        return "<1m"
+    }
+
     /// "방금" / "N분 전" / "N시간 전" — how long ago `date` was.
     static func age(_ date: Date, from now: Date = Date()) -> String {
         let secs = max(0, Int(now.timeIntervalSince(date)))
@@ -66,6 +76,14 @@ enum Fmt {
         let f = DateFormatter()
         f.dateStyle = .none
         f.timeStyle = .short
+        return f.string(from: date)
+    }
+
+    /// Compact 24-hour wall-clock "15:30" — for tight UI (the gauge reset line) where
+    /// the locale-short "오후 3:30" would be too wide.
+    static func clock(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
         return f.string(from: date)
     }
 }

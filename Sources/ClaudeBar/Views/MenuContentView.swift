@@ -10,6 +10,7 @@ private struct ContentHeightKey: PreferenceKey {
 struct MenuContentView: View {
     @ObservedObject var store: UsageStore
     @State private var contentHeight: CGFloat = 0
+    @State private var dropTarget: PanelSection?
 
     private var snap: UsageSnapshot { store.snapshot }
 
@@ -33,7 +34,7 @@ struct MenuContentView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     if hasAnyData {
                         ForEach(store.orderedSections) { section in
-                            if store.isVisible(section) { card(for: section) }
+                            if store.isVisible(section) { reorderableCard(section) }
                         }
                     } else {
                         Card { emptyStateSection }
@@ -124,12 +125,39 @@ struct MenuContentView: View {
 
     // MARK: Sections (Card supplies the surrounding VStack + spacing)
 
+    /// A card wrapped for inline drag-and-drop reordering, right on the popover —
+    /// drag a card onto another to drop it above (a coral line marks the spot). The
+    /// same `moveSection(_:before:)` powers Settings; cards have no inner buttons so
+    /// the whole card is a safe drag handle.
+    @ViewBuilder private func reorderableCard(_ section: PanelSection) -> some View {
+        card(for: section)
+            .overlay(alignment: .top) {
+                if dropTarget == section {
+                    Capsule().fill(Color.brand).frame(height: 3)
+                        .padding(.horizontal, 10).offset(y: -6)
+                }
+            }
+            .draggable(section.rawValue) {
+                Label(section.label, systemImage: "line.3.horizontal").padding(6)
+            }
+            .dropDestination(for: String.self) { items, _ in
+                dropTarget = nil
+                guard let raw = items.first, let moved = PanelSection(rawValue: raw) else { return false }
+                store.moveSection(moved, before: section)
+                return true
+            } isTargeted: { hovering in
+                dropTarget = hovering ? section : (dropTarget == section ? nil : dropTarget)
+            }
+    }
+
     @ViewBuilder private func card(for section: PanelSection) -> some View {
         switch section {
         case .advice:
             if store.enableLiveLimits, !store.adviceTips.isEmpty { Card { adviceSection } }
         case .limits:
             if store.enableLiveLimits { Card { limitsSection } }
+        case .efficiency:
+            if store.hasEfficiencyData { Card { efficiencySection } }
         case .recent:
             Card { windowSection }
         case .perModel:
@@ -205,7 +233,8 @@ struct MenuContentView: View {
                 if let w = l.session5h {
                     RingGauge(title: "세션", window: w, now: snap.generatedAt,
                               paceFraction: Pace.elapsedFraction(windowSeconds: 5 * 3600,
-                                                                 secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt)))
+                                                                 secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt)),
+                              preciseReset: true)
                 }
                 if let w = l.weekly7d {
                     RingGauge(title: "주간", window: w, now: snap.generatedAt,
@@ -215,7 +244,13 @@ struct MenuContentView: View {
                 if let w = l.weeklyOpus { RingGauge(title: "Opus", window: w, now: snap.generatedAt) }
             }
             .padding(.top, 2)
-            VStack(alignment: .leading, spacing: 3) {
+            // Hero: the one-glance "can I keep working?" answer.
+            if let w = l.session5h {
+                WorkTimeLine(window: w, projection: store.sessionProjection, now: snap.generatedAt)
+                    .padding(.top, 4)
+            }
+            // Supporting detail, visually subordinate to the hero line.
+            VStack(alignment: .leading, spacing: 2) {
                 if let w = l.session5h {
                     PaceLine(window: w, projection: store.sessionProjection, now: snap.generatedAt)
                 }
@@ -223,11 +258,68 @@ struct MenuContentView: View {
                     ProjectionLine(tag: "주간", window: w, projection: store.weeklyProjection, now: snap.generatedAt)
                 }
             }
-            .padding(.top, 2)
+            if let w = l.session5h {
+                SessionTrendChart(samples: store.sessionTrend, now: snap.generatedAt,
+                                  secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt))
+                    .padding(.top, 4)
+            }
         } else {
             Text(store.limits?.error ?? "한도 불러오는 중…")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func efficiencyColor(_ v: SessionCoach.EfficiencyVerdict) -> Color {
+        switch v {
+        case .optimal:    return .green
+        case .underusing: return .brand
+        case .overpacing: return .orange
+        case .fair, .idle, .measuring: return .secondary
+        }
+    }
+
+    @ViewBuilder private var efficiencySection: some View {
+        let ctx = snap.currentContextTokens
+        let verdict = store.efficiencyVerdict
+        HStack(spacing: 5) {
+            CardHeader(icon: "leaf", title: "효율")
+            Spacer()
+            if verdict.showsPill {
+                Text(verdict.label)
+                    .font(.caption2.weight(.semibold))
+                    .padding(.horizontal, 7).padding(.vertical, 2)
+                    .background(Capsule().fill(efficiencyColor(verdict).opacity(0.16)))
+                    .foregroundStyle(efficiencyColor(verdict))
+            }
+        }
+        // Per-exchange consumption — the tangible efficiency dial (context size → burn).
+        if ctx > 0 {
+            HStack(alignment: .top, spacing: 5) {
+                Image(systemName: "bubble.left.and.bubble.right").frame(width: 12)
+                if let p = store.perExchangePct {
+                    Text("대화 ~\(Fmt.tokens(ctx)) · 주고받을 때마다 한도 ~\(ModelBurnRowView.pct(p))")
+                } else {
+                    Text("대화 ~\(Fmt.tokens(ctx))")
+                }
+            }
+            .font(.caption2).foregroundStyle(.secondary)
+            if ctx >= SessionCoach.heavyContextTokens {
+                HStack(alignment: .top, spacing: 5) {
+                    Image(systemName: "rectangle.compress.vertical").frame(width: 12)
+                    Text("/compact 하거나 새 대화로 시작하면 이 값이 내려가 같은 한도로 더 오래 가요.")
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.caption2).foregroundStyle(Color.brand)
+            }
+        }
+        // Learning loop: how the last completed session was spent.
+        if let r = store.lastSessionRecap {
+            HStack(alignment: .top, spacing: 5) {
+                Image(systemName: "clock.arrow.circlepath").frame(width: 12)
+                Text(SessionCoach.recapText(r)).fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.caption2).foregroundStyle(.tertiary)
         }
     }
 

@@ -66,6 +66,11 @@ struct UsageSnapshot {
     /// Recent conversations (by cost), for the per-session model breakdown.
     var recentSessions: [SessionStat] = []
 
+    /// Context size (prompt tokens) of the most-recent assistant turn — how big the
+    /// active conversation is. Large = each turn eats more of the limit, so /compact
+    /// or a fresh session stretches the window.
+    var currentContextTokens = 0
+
     // Today (local calendar day), computed from the session logs.
     var todayTokens = TokenCounts()
     var todayCost = 0.0
@@ -99,6 +104,7 @@ struct UsageSnapshot {
         var s = self
         s.windowTokens = o.windowTokens; s.windowCost = o.windowCost; s.windowResetAt = o.windowResetAt
         s.windowByModel = o.windowByModel; s.recentSessions = o.recentSessions
+        s.currentContextTokens = o.currentContextTokens
         s.todayTokens = o.todayTokens; s.todayCost = o.todayCost; s.todayByModel = o.todayByModel
         s.todayRequests = o.todayRequests; s.todaySessions = o.todaySessions; s.todayToolCalls = o.todayToolCalls
         return s

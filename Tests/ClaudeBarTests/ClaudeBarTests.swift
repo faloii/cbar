@@ -32,6 +32,22 @@ final class FormatterTests: XCTestCase {
         XCTAssertEqual(Fmt.countdown(to: now.addingTimeInterval(10), from: now), "<1m")
         XCTAssertEqual(Fmt.countdown(to: now.addingTimeInterval(-100), from: now), "<1m") // past
     }
+
+    func testClockFormat() {
+        // Timezone-independent shape check: "HH:mm".
+        let s = Fmt.clock(Date(timeIntervalSince1970: 1_000_000))
+        XCTAssertEqual(s.count, 5)
+        XCTAssertEqual(Array(s)[2], ":")
+    }
+
+    func testMediumCountdown() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertEqual(Fmt.mediumCountdown(to: now.addingTimeInterval(2 * 3600 + 13 * 60), from: now), "2h 13m")
+        XCTAssertEqual(Fmt.mediumCountdown(to: now.addingTimeInterval(3600), from: now), "1h 0m")
+        XCTAssertEqual(Fmt.mediumCountdown(to: now.addingTimeInterval(13 * 60), from: now), "13m")
+        XCTAssertEqual(Fmt.mediumCountdown(to: now.addingTimeInterval(30), from: now), "<1m")
+        XCTAssertEqual(Fmt.mediumCountdown(to: now.addingTimeInterval(86400 + 4 * 3600), from: now), "1d 4h")
+    }
 }
 
 final class ModelNameTests: XCTestCase {
@@ -393,6 +409,28 @@ final class AdviceTests: XCTestCase {
         XCTAssertEqual(tips.map(\.kind), [.healthy])
     }
 
+    func testContextHeavyTipFiresWhenLargeAndActive() {
+        let safe = Projection(ratePerHour: 8, timeToFull: 20000, secondsToReset: 7200, verdict: .safe)
+        let tips = Advice.compute(session: safe, weekly: nil, sessionUtil: 40, weeklyUtil: 20,
+                                  models: [], contextTokens: 150_000, warnThreshold: 80, now: now)
+        let ctx = tips.first { $0.kind == .contextHeavy }
+        XCTAssertNotNil(ctx)
+        XCTAssertTrue(ctx?.text.contains("compact") ?? false)
+        XCTAssertTrue(ctx?.text.contains("새 대화") ?? false)
+    }
+
+    func testNoContextTipWhenSmallOrIdle() {
+        let safe = Projection(ratePerHour: 8, timeToFull: 20000, secondsToReset: 7200, verdict: .safe)
+        // Small context → no tip.
+        XCTAssertFalse(Advice.compute(session: safe, weekly: nil, sessionUtil: 40, weeklyUtil: 20,
+                                      models: [], contextTokens: 40_000, warnThreshold: 80, now: now)
+            .contains { $0.kind == .contextHeavy })
+        // Large context but no session usage → not relevant.
+        XCTAssertFalse(Advice.compute(session: safe, weekly: nil, sessionUtil: 0, weeklyUtil: 20,
+                                      models: [], contextTokens: 150_000, warnThreshold: 80, now: now)
+            .contains { $0.kind == .contextHeavy })
+    }
+
     func testCapsAtThreeTips() {
         let atRisk = Projection(ratePerHour: 40, timeToFull: 600, secondsToReset: 7200, verdict: .atRisk)
         let models = [model("Opus 4.8", total: 500_000, requests: 5, cost: 300),
@@ -443,6 +481,19 @@ final class OAuthUsageParseTests: XCTestCase {
         XCTAssertFalse(snap.hasData)
         XCTAssertNotNil(snap.error)
     }
+
+    /// Security invariant: the refresh token lives in memory only and must never be
+    /// encoded to disk (token.json). Only the access token + expiry are persisted.
+    func testRefreshTokenNeverEncoded() throws {
+        let creds = ClaudeCredentials(accessToken: "sk-ant-access",
+                                      expiresAt: Date(timeIntervalSince1970: 1_781_157_378),
+                                      refreshToken: "sk-ant-refresh-SECRET")
+        let data = try JSONEncoder().encode(creds)
+        let json = String(data: data, encoding: .utf8) ?? ""
+        XCTAssertTrue(json.contains("sk-ant-access"))
+        XCTAssertFalse(json.contains("sk-ant-refresh-SECRET"))
+        XCTAssertFalse(json.lowercased().contains("refresh"))
+    }
 }
 
 final class PaceTests: XCTestCase {
@@ -460,6 +511,81 @@ final class PaceTests: XCTestCase {
         // 2 days into a 7-day window → ~0.286 elapsed.
         XCTAssertEqual(Pace.elapsedFraction(windowSeconds: week, secondsToReset: 5 * 24 * 3600) ?? -1, 2.0 / 7.0, accuracy: 0.001)
         XCTAssertNil(Pace.elapsedFraction(windowSeconds: week, secondsToReset: nil))
+    }
+}
+
+final class SessionCoachTests: XCTestCase {
+    let now = Date(timeIntervalSince1970: 1_000_000)
+
+    func testAtRiskWorkBudgetIsTimeToFull() {
+        let p = Projection(ratePerHour: 40, timeToFull: 1800, secondsToReset: 7200, verdict: .atRisk)
+        let b = SessionCoach.workBudget(session: p, util: 70,
+                                        resetsAt: now.addingTimeInterval(7200), now: now)
+        XCTAssertEqual(b?.workableSeconds, 1800)
+        XCTAssertTrue(b?.willBlock ?? false)
+        XCTAssertEqual(b?.blockAt, now.addingTimeInterval(1800))
+    }
+
+    func testSafeWorkBudgetIsUntilReset() {
+        let p = Projection(ratePerHour: 5, timeToFull: 36000, secondsToReset: 7200, verdict: .safe)
+        let b = SessionCoach.workBudget(session: p, util: 40,
+                                        resetsAt: now.addingTimeInterval(7200), now: now)
+        XCTAssertEqual(b?.workableSeconds, 7200)
+        XCTAssertFalse(b?.willBlock ?? true)
+        XCTAssertNil(b?.blockAt)
+    }
+
+    func testBlockedNowWhenFull() {
+        let b = SessionCoach.workBudget(session: nil, util: 100,
+                                        resetsAt: now.addingTimeInterval(3600), now: now)
+        XCTAssertTrue(b?.blockedNow ?? false)
+    }
+
+    func testMeasuringHasNoBudget() {
+        XCTAssertNil(SessionCoach.workBudget(session: .measuring, util: 30,
+                                             resetsAt: now.addingTimeInterval(3600), now: now))
+    }
+
+    func testPerExchangeLimitPct() {
+        // 62% used over a 3.1M-token window; a 150k-token next turn ≈ 150k/3.1M of the
+        // implied limit → ~3%.
+        let p = SessionCoach.perExchangeLimitPct(contextTokens: 150_000, windowTokens: 3_100_000, sessionUtil: 62)
+        XCTAssertEqual(p ?? 0, 3.0, accuracy: 0.05)
+        XCTAssertNil(SessionCoach.perExchangeLimitPct(contextTokens: 0, windowTokens: 100, sessionUtil: 50))
+        XCTAssertNil(SessionCoach.perExchangeLimitPct(contextTokens: 100, windowTokens: 100, sessionUtil: 0))
+    }
+
+    func testLastSessionRecapFindsSegmentBeforeReset() {
+        let s: [UsageSample] = [
+            UsageSample(at: now.addingTimeInterval(-4 * 3600), session: 30, weekly: nil),
+            UsageSample(at: now.addingTimeInterval(-3 * 3600), session: 88, weekly: nil),  // peak of prev session
+            UsageSample(at: now.addingTimeInterval(-2.5 * 3600), session: 70, weekly: nil),// ended here
+            UsageSample(at: now.addingTimeInterval(-2 * 3600), session: 5, weekly: nil),   // reset (drop)
+            UsageSample(at: now.addingTimeInterval(-1 * 3600), session: 20, weekly: nil),
+        ]
+        let r = SessionCoach.lastSessionRecap(samples: s, now: now)
+        XCTAssertEqual(r?.peak, 88)
+        XCTAssertEqual(r?.endedAt, 70)
+        XCTAssertFalse(r?.blocked ?? true)
+        XCTAssertEqual(r?.leftover ?? 0, 30, accuracy: 0.001)
+    }
+
+    func testNoRecapWithoutAReset() {
+        let s: [UsageSample] = [
+            UsageSample(at: now.addingTimeInterval(-2 * 3600), session: 10, weekly: nil),
+            UsageSample(at: now.addingTimeInterval(-1 * 3600), session: 40, weekly: nil),
+        ]
+        XCTAssertNil(SessionCoach.lastSessionRecap(samples: s, now: now))
+    }
+
+    func testEfficiencyVerdict() {
+        let atRisk = Projection(ratePerHour: 40, timeToFull: 600, secondsToReset: 7200, verdict: .atRisk)
+        XCTAssertEqual(SessionCoach.efficiency(util: 70, projection: atRisk), .overpacing)
+        let full = Projection(ratePerHour: 10, timeToFull: 9000, secondsToReset: 7200, verdict: .safe, projectedAtReset: 95)
+        XCTAssertEqual(SessionCoach.efficiency(util: 60, projection: full), .optimal)
+        let waste = Projection(ratePerHour: 2, timeToFull: 99999, secondsToReset: 7200, verdict: .safe, projectedAtReset: 40)
+        XCTAssertEqual(SessionCoach.efficiency(util: 30, projection: waste), .underusing)
+        XCTAssertEqual(SessionCoach.efficiency(util: nil, projection: nil), .measuring)
     }
 }
 
@@ -507,13 +633,35 @@ final class LimitAlertsTests: XCTestCase {
 
     func testTrajectoryWarnsBelowThreshold() {
         var s = LimitAlertState()
-        let atRisk = Projection(ratePerHour: 40, timeToFull: 600, secondsToReset: 7200, verdict: .atRisk)
-        // 60% util is under the 80% warn line, but the burn rate projects exhaustion.
+        // Beyond the 30m lead time (1h to full) → the early "곧 소진" heads-up, not imminent.
+        let atRisk = Projection(ratePerHour: 40, timeToFull: 3600, secondsToReset: 7200, verdict: .atRisk)
         let out = eval(session: win(60), sp: atRisk, state: &s)
         XCTAssertTrue(out.contains { $0.id == "risk-session" })
+        XCTAssertFalse(out.contains { $0.id == "block-imminent" })
         XCTAssertFalse(out.contains { $0.id == "limit-session" })
         // Fires once per episode.
         XCTAssertFalse(eval(session: win(62), sp: atRisk, state: &s).contains { $0.id == "risk-session" })
+    }
+
+    func testImminentBlockWithinLeadTime() {
+        var s = LimitAlertState()
+        // 10m to full ≤ 30m lead → the sharp "곧 막힘" warning, not the early heads-up.
+        let atRisk = Projection(ratePerHour: 40, timeToFull: 600, secondsToReset: 7200, verdict: .atRisk)
+        let out = eval(session: win(70), sp: atRisk, state: &s)
+        XCTAssertTrue(out.contains { $0.id == "block-imminent" })
+        XCTAssertFalse(out.contains { $0.id == "risk-session" })
+        // Once per episode.
+        XCTAssertFalse(eval(session: win(72), sp: atRisk, state: &s).contains { $0.id == "block-imminent" })
+    }
+
+    func testLeadTimeIsConfigurable() {
+        var s = LimitAlertState()
+        // 40m to full with a 60m lead → imminent (within lead).
+        let atRisk = Projection(ratePerHour: 40, timeToFull: 2400, secondsToReset: 7200, verdict: .atRisk)
+        let out = LimitAlerts.evaluate(session: win(70), weekly: nil, sessionProjection: atRisk,
+                                       weeklyProjection: nil, status: nil, warnThreshold: 80,
+                                       blockWarnLeadMinutes: 60, state: &s, now: now)
+        XCTAssertTrue(out.contains { $0.id == "block-imminent" })
     }
 
     func testBlockedFiresOnRejectedAndOnFull() {

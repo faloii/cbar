@@ -101,6 +101,7 @@ struct RingGauge: View {
     let now: Date
     var paceFraction: Double? = nil   // even-usage marker ("on this much by now")
     var size: CGFloat = 66
+    var preciseReset: Bool = false    // show hours+minutes (session) vs a single unit (weekly)
 
     private var color: Color { MeterBar.color(for: window.fraction) }
 
@@ -132,8 +133,13 @@ struct RingGauge: View {
             VStack(spacing: 1) {
                 Text(title).font(.caption.weight(.semibold))
                 if let reset = window.resetsAt {
-                    Text("리셋 \(Fmt.shortCountdown(to: reset, from: now))")
+                    // Session (preciseReset): show the countdown *and* the actual reset
+                    // clock time, e.g. "리셋 1h 18m (15:30)". Weekly/Opus stay single-unit.
+                    Text(preciseReset
+                         ? "리셋 \(Fmt.mediumCountdown(to: reset, from: now)) (\(Fmt.clock(reset)))"
+                         : "리셋 \(Fmt.shortCountdown(to: reset, from: now))")
                         .font(.caption2).foregroundStyle(.tertiary)
+                        .lineLimit(1).minimumScaleFactor(0.7)
                 }
             }
         }
@@ -190,9 +196,10 @@ struct ProjectionLine: View {
     }
 }
 
-/// "On-pace" coaching for a window: the steady rate that lands you at ~100% right at
-/// reset ("권장"), your current rate, and whether you're on it / fast / slow. This is
-/// the actionable answer to "how fast should I be using it?".
+/// Plain-language "am I using too fast / just right / relaxed" verdict for a window.
+/// Deliberately number-free — "30%/h" doesn't land — using hare/tortoise framing and
+/// an action. The block/working-time facts are owned by `WorkTimeLine`; the exact
+/// rates live in the hover tooltip for anyone who wants them.
 struct PaceLine: View {
     let window: LimitWindow
     let projection: Projection?
@@ -207,33 +214,195 @@ struct PaceLine: View {
             }
             .font(.caption2)
             .foregroundStyle(s.color)
+            .help(detail)
         }
     }
 
     private func rate(_ r: Double) -> String { r >= 10 ? "\(Int(r.rounded()))%/h" : String(format: "%.1f%%/h", r) }
 
+    /// Exact numbers, tucked into the tooltip so the headline can stay number-free.
+    private var detail: String {
+        guard let rec = Pace.sustainableRate(util: window.utilization,
+                                             secondsToReset: window.resetsAt?.timeIntervalSince(now)) else { return "" }
+        let measured = projection?.ratePerHour ?? 0
+        return "현재 \(rate(measured)) · 권장 ~\(rate(rec))"
+    }
+
     private var state: (text: String, color: Color, icon: String) {
-        if window.utilization >= 100 {
-            let reset = window.resetsAt.map { Fmt.countdown(to: $0, from: now) } ?? "?"
-            return ("지금 막힘 · \(reset) 후 리셋", .red, "nosign")
-        }
+        // util ≥ 100 and the "you'll block" message belong to WorkTimeLine.
+        if window.utilization >= 100 { return ("", .secondary, "") }
         guard let rec = Pace.sustainableRate(util: window.utilization,
                                              secondsToReset: window.resetsAt?.timeIntervalSince(now)) else {
             return ("", .secondary, "")
         }
-        let recTxt = "권장 ~\(rate(rec))"
         let measured = projection?.ratePerHour ?? 0
         switch projection?.verdict {
         case .idle:
-            return ("지금 멈춤 · \(recTxt)까지 써도 리셋에 딱 맞아요", .secondary, "pause")
+            return ("지금은 거의 안 쓰는 중 — 리셋까지 여유 있어요", .secondary, "pause")
         case .measuring, .none:
-            return ("\(recTxt)로 쓰면 리셋에 딱 맞아요", .secondary, "speedometer")
+            // Can't judge the pace yet; WorkTimeLine + 추이 차트가 대신 보여줍니다.
+            return ("", .secondary, "")
         case .atRisk:
-            return ("빠름 ▲\(rate(measured)) · \(recTxt)로 낮추면 안 막혀요", .orange, "exclamationmark.triangle.fill")
+            return ("좀 빠르게 쓰는 중 — 살짝 늦추면 리셋까지 안 막혀요", .orange, "hare.fill")
         case .safe:
-            if measured > rec * 1.25 { return ("약간 빠름 ▲\(rate(measured)) · \(recTxt)", .orange, "arrow.up.right.circle") }
-            if measured < rec * 0.6  { return ("느림 ▲\(rate(measured)) · \(recTxt)까지 올려도 OK", Color.brand, "arrow.up.circle") }
-            return ("딱 맞는 페이스 ▲\(rate(measured)) (\(recTxt))", .green, "checkmark.circle")
+            if measured > rec * 1.25 { return ("살짝 빠른 편 — 이대로도 괜찮지만 늦추면 더 여유로워요", .orange, "hare") }
+            if measured < rec * 0.6  { return ("여유롭게 쓰는 중 — 더 써도 리셋 전엔 안 막혀요", Color.brand, "tortoise") }
+            return ("딱 좋은 속도로 쓰고 있어요", .green, "checkmark.circle")
+        }
+    }
+}
+
+/// The headline "can I keep working?" line: working-time left + a wall-clock block
+/// time when you're on track to hit the cap, plus a one-line directive. The visceral
+/// answer to "how much longer can I go before I'm blocked".
+struct WorkTimeLine: View {
+    let window: LimitWindow
+    let projection: Projection?
+    let now: Date
+
+    var body: some View {
+        let s = state
+        if !s.text.isEmpty {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: s.icon).font(.footnote)
+                Text(s.text).fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(s.color)
+        }
+    }
+
+    private func dur(_ s: TimeInterval) -> String { Fmt.countdown(to: now.addingTimeInterval(s), from: now) }
+
+    private var state: (text: String, color: Color, icon: String) {
+        let toReset = window.resetsAt?.timeIntervalSince(now)
+        if window.utilization >= 100 {
+            let r = window.resetsAt.map { Fmt.countdown(to: $0, from: now) } ?? "?"
+            return ("지금 막힘 · \(r) 후 새로 채워져요", .red, "nosign")
+        }
+        // About to refresh anyway — tell them to park big work for the reset.
+        if let tr = toReset, tr > 0, tr <= 15 * 60 {
+            return ("리셋 \(dur(tr)) 전 — 큰 작업은 리셋 직후 돌리세요", .green, "hourglass.bottomhalf.filled")
+        }
+        guard let b = SessionCoach.workBudget(session: projection, util: window.utilization,
+                                              resetsAt: window.resetsAt, now: now) else {
+            return ("", .secondary, "")
+        }
+        if b.willBlock {
+            let clock = b.blockAt.map { " · \(Fmt.time($0))경 막힘" } ?? ""
+            return ("앞으로 ~\(dur(b.workableSeconds)) 더 작업 가능\(clock)", .orange, "hourglass.tophalf.filled")
+        }
+        // Won't block before reset. Flag big leftover headroom as "go faster" room.
+        if let left = projection?.headroomAtReset, left >= 25 {
+            return ("리셋까지 안 막힘 · ~\(dur(b.workableSeconds)) 여유 — 미룬 큰 작업 지금 돌리세요",
+                    .green, "checkmark.circle")
+        }
+        return ("리셋까지 ~\(dur(b.workableSeconds)) 더 작업 가능 (안 막힘)", .secondary, "clock")
+    }
+}
+
+/// In-session usage trend: session utilization (%) over the last few hours, with a
+/// dashed "even-pace" guide (where you'd sit pacing linearly to 100% at reset). Lets
+/// you eyeball how fast you're burning and how much you've used vs. the steady rate.
+/// Needs ≥2 samples; shows a "measuring" hint otherwise.
+struct SessionTrendChart: View {
+    let samples: [UsageSample]          // session != nil; sorted oldest→newest
+    let now: Date
+    let secondsToReset: TimeInterval?
+    var windowSeconds: TimeInterval = 5 * 3600
+    var height: CGFloat = 46
+
+    /// Points for the CURRENT session only: trim everything up to and including the most
+    /// recent reset (a downward jump), so a prior session's curve isn't shown.
+    private var pts: [(t: Date, v: Double)] {
+        let all = samples.compactMap { s in s.session.map { (s.at, $0) } }
+        var seg = all
+        if all.count >= 2 {
+            for i in stride(from: all.count - 1, to: 0, by: -1)
+            where all[i].1 + Projection.resetDrop < all[i - 1].1 {
+                seg = Array(all[i...]); break
+            }
+        }
+        return seg
+    }
+
+    /// %-value of the even-pace guide at a given time: linear from window-start (0%)
+    /// to reset (100%). nil when the reset time is unknown.
+    private func paceValue(at t: Date) -> Double? {
+        guard let s = secondsToReset else { return nil }
+        let reset = now.addingTimeInterval(s)
+        return min(100, max(0, (windowSeconds - reset.timeIntervalSince(t)) / windowSeconds * 100))
+    }
+
+    private func niceTop(_ v: Double) -> Double {
+        for c in [25.0, 50, 75, 100] where v <= c { return c }
+        return 100
+    }
+
+    var body: some View {
+        let pts = self.pts
+        if pts.count >= 2, let first = pts.first {
+            let last = pts[pts.count - 1]
+            let tMin = first.t
+            let tMax = max(now, last.t)
+            let span = max(1, tMax.timeIntervalSince(tMin))
+            let paceNow = paceValue(at: tMax)
+            let top = niceTop(max(pts.map(\.v).max() ?? 0, paceNow ?? 0, 8) * 1.1)
+            let color = MeterBar.color(for: last.v / 100)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Canvas { ctx, size in
+                    let w = size.width, h = size.height
+                    func px(_ t: Date) -> CGFloat { CGFloat(t.timeIntervalSince(tMin) / span) * w }
+                    func py(_ v: Double) -> CGFloat { h - CGFloat(min(v, top) / top) * h }
+
+                    // Even-pace guide (dashed): the steady line that lands at 100% on reset.
+                    if let pNow = paceNow, let pMin = paceValue(at: tMin) {
+                        var guide = Path()
+                        guide.move(to: CGPoint(x: px(tMin), y: py(pMin)))
+                        guide.addLine(to: CGPoint(x: px(tMax), y: py(pNow)))
+                        ctx.stroke(guide, with: .color(.primary.opacity(0.35)),
+                                   style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                    }
+                    // Area under the actual usage curve.
+                    var area = Path()
+                    area.move(to: CGPoint(x: px(pts[0].t), y: h))
+                    for pt in pts { area.addLine(to: CGPoint(x: px(pt.t), y: py(pt.v))) }
+                    area.addLine(to: CGPoint(x: px(last.t), y: h))
+                    area.closeSubpath()
+                    ctx.fill(area, with: .linearGradient(
+                        Gradient(colors: [color.opacity(0.28), color.opacity(0.02)]),
+                        startPoint: CGPoint(x: 0, y: 0), endPoint: CGPoint(x: 0, y: h)))
+                    // Actual usage line.
+                    var line = Path()
+                    line.move(to: CGPoint(x: px(pts[0].t), y: py(pts[0].v)))
+                    for pt in pts.dropFirst() { line.addLine(to: CGPoint(x: px(pt.t), y: py(pt.v))) }
+                    ctx.stroke(line, with: .color(color),
+                               style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round))
+                    // Head dot at the latest reading.
+                    let dot = CGRect(x: px(last.t) - 2.5, y: py(last.v) - 2.5, width: 5, height: 5)
+                    ctx.fill(Path(ellipseIn: dot), with: .color(color))
+                }
+                .frame(height: height)
+                .accessibilityHidden(true)
+
+                HStack(spacing: 5) {
+                    Text("최근 \(Fmt.mediumCountdown(to: tMax, from: tMin))")
+                    Text("·")
+                    Text("\(Int(first.v.rounded()))% → \(Int(last.v.rounded()))%").monospacedDigit()
+                    if paceNow != nil {
+                        Spacer(minLength: 4)
+                        HStack(spacing: 3) {
+                            Rectangle().fill(Color.primary.opacity(0.35)).frame(width: 8, height: 1)
+                            Text("이상 페이스")
+                        }
+                    }
+                }
+                .font(.caption2).foregroundStyle(.secondary)
+            }
+        } else {
+            Text("세션 추이 측정 중… (몇 분 더 쌓이면 표시)")
+                .font(.caption2).foregroundStyle(.tertiary)
         }
     }
 }
