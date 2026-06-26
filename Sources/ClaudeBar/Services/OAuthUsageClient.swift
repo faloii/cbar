@@ -87,11 +87,30 @@ struct OAuthUsageClient: Sendable {
         // Don't gate on expiresAt (its format is unreliable and a valid token can look
         // "expired"); just use the token and let a 401 trigger a refresh.
         guard let creds = ClaudeCredentials.load() else { throw FetchError.noCredentials }
+        do {
+            return try await requestUsage(token: creds.accessToken)
+        } catch FetchError.unauthorized {
+            // The cached access token was rotated/revoked (Claude Code refreshes the shared
+            // credential out from under us). Try a SILENT refresh with the in-memory refresh
+            // token — no keychain read, so no "Always Allow" prompt — and retry once.
+            if let fresh = await ClaudeCredentials.refreshSilently() {
+                return try await requestUsage(token: fresh.accessToken)
+            }
+            // No in-memory refresh token (e.g. first 401 after an app restart). Drop the
+            // cache so the next load() re-reads the keychain once — that restores the
+            // refresh token, and subsequent refreshes are silent again.
+            ClaudeCredentials.invalidate()
+            throw FetchError.unauthorized
+        }
+    }
 
+    /// One usage request with a given bearer token. 401 surfaces as `.unauthorized`
+    /// so the caller can decide whether to refresh-and-retry.
+    private func requestUsage(token: String) async throws -> LimitsSnapshot {
         var req = URLRequest(url: Self.endpoint)
         req.httpMethod = "GET"
         req.timeoutInterval = 15
-        req.setValue("Bearer \(creds.accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         req.setValue(Self.betaHeader, forHTTPHeaderField: "anthropic-beta")
         // Must start with "claude-code/" or the endpoint uses a tiny 429-prone bucket.
         req.setValue(userAgent(), forHTTPHeaderField: "User-Agent")
@@ -100,7 +119,7 @@ struct OAuthUsageClient: Sendable {
         guard let http = resp as? HTTPURLResponse else { throw FetchError.badResponse }
         switch http.statusCode {
         case 200:  return Self.parse(data)
-        case 401:  ClaudeCredentials.invalidate(); throw FetchError.unauthorized
+        case 401:  throw FetchError.unauthorized
         case 429:  throw FetchError.rateLimited
         default:   throw FetchError.http(http.statusCode)
         }
@@ -177,6 +196,18 @@ struct OAuthUsageClient: Sendable {
 struct ClaudeCredentials: Codable {
     let accessToken: String
     let expiresAt: Date?
+    /// Kept ONLY in memory — never encoded to disk (see CodingKeys). Used to refresh
+    /// silently so we don't re-read the (prompting) keychain on every token rotation.
+    var refreshToken: String? = nil
+
+    // refreshToken is intentionally excluded so it never lands in token.json.
+    private enum CodingKeys: String, CodingKey { case accessToken, expiresAt }
+
+    /// Claude Code's public OAuth client id + token endpoint, used to exchange the
+    /// refresh token for a new access token directly (the same flow Claude Code uses).
+    private static let oauthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+    private static let tokenEndpoint = URL(string: "https://console.anthropic.com/v1/oauth/token")!
+    private static let keychainService = "Claude Code-credentials"
 
     private static let lock = NSLock()
     private static var cached: ClaudeCredentials?
@@ -195,11 +226,89 @@ struct ClaudeCredentials: Codable {
     }
 
     /// Drop the cached token (memory + file) so the next `load()` re-reads the
-    /// source — used after a 401.
+    /// source — used after a 401 when no refresh token is available.
     static func invalidate() {
         lock.lock(); cached = nil
         try? FileManager.default.removeItem(at: fileURL)
         lock.unlock()
+    }
+
+    // MARK: refresh (no keychain prompt)
+
+    /// Exchange the in-memory refresh token for a fresh access token via the OAuth
+    /// endpoint — no keychain read, so no prompt. On success we (1) update the in-memory
+    /// + file cache and (2) write the new access+refresh tokens BACK into Claude Code's
+    /// keychain item in place, so Claude Code keeps working (refresh tokens rotate, and
+    /// the old one we just used is now dead). Returns nil if no refresh token is held
+    /// (e.g. right after an app restart) or the refresh failed.
+    static func refreshSilently() async -> ClaudeCredentials? {
+        lock.lock(); let rt = cached?.refreshToken; lock.unlock()
+        guard let rt, !rt.isEmpty else { return nil }
+        guard let fresh = try? await performRefresh(refreshToken: rt) else { return nil }
+        // Keep Claude Code in sync first (it owns the credential); then our caches.
+        writeBackToKeychain(access: fresh.accessToken,
+                            refresh: fresh.refreshToken ?? rt,
+                            expiresAt: fresh.expiresAt)
+        lock.lock(); cached = fresh; lock.unlock()
+        writeFile(fresh)            // access token only (refreshToken excluded by CodingKeys)
+        return fresh
+    }
+
+    private static func performRefresh(refreshToken: String) async throws -> ClaudeCredentials {
+        var req = URLRequest(url: tokenEndpoint)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 15
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let body: [String: String] = [
+            "grant_type": "refresh_token",
+            "refresh_token": refreshToken,
+            "client_id": oauthClientID,
+        ]
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse, http.statusCode == 200,
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let access = root["access_token"] as? String, !access.isEmpty
+        else { throw OAuthUsageClient.FetchError.unauthorized }
+        let newRefresh = (root["refresh_token"] as? String) ?? refreshToken
+        var expires: Date?
+        if let secs = root["expires_in"] as? Double { expires = Date().addingTimeInterval(secs) }
+        else if let secs = root["expires_in"] as? Int { expires = Date().addingTimeInterval(Double(secs)) }
+        return ClaudeCredentials(accessToken: access, expiresAt: expires, refreshToken: newRefresh)
+    }
+
+    /// Merge the refreshed tokens into Claude Code's keychain item via SecItemUpdate
+    /// (in place — preserves the item's ACL, so our "Always Allow" grant survives). We
+    /// only touch the three token fields and leave everything else (scopes, etc.) intact.
+    /// Best-effort: any failure is silent — our own access token still works regardless.
+    private static func writeBackToKeychain(access: String, refresh: String, expiresAt: Date?) {
+        let readQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+            kSecReturnData as String: true,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+        ]
+        var item: CFTypeRef?
+        guard SecItemCopyMatching(readQuery as CFDictionary, &item) == errSecSuccess,
+              let dict = item as? [String: Any],
+              let data = dict[kSecValueData as String] as? Data,
+              var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              var oauth = root["claudeAiOauth"] as? [String: Any]
+        else { return }
+        oauth["accessToken"] = access
+        oauth["refreshToken"] = refresh
+        if let exp = expiresAt { oauth["expiresAt"] = Int(exp.timeIntervalSince1970 * 1000) }
+        root["claudeAiOauth"] = oauth
+        guard let newData = try? JSONSerialization.data(withJSONObject: root) else { return }
+        var updateQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
+        ]
+        if let account = dict[kSecAttrAccount as String] as? String {
+            updateQuery[kSecAttrAccount as String] = account
+        }
+        SecItemUpdate(updateQuery as CFDictionary, [kSecValueData as String: newData] as CFDictionary)
     }
 
     // MARK: file cache
@@ -208,6 +317,9 @@ struct ClaudeCredentials: Codable {
         guard let data = try? Data(contentsOf: fileURL) else { return nil }
         let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
         guard let c = try? dec.decode(ClaudeCredentials.self, from: data), !c.accessToken.isEmpty else { return nil }
+        // If the cached token is already expired, skip it so we go straight to the
+        // source (keychain) now — before the API call triggers a 401-invalidate cycle.
+        if let exp = c.expiresAt, exp < Date() { return nil }
         return c
     }
     private static func writeFile(_ c: ClaudeCredentials) {
@@ -244,6 +356,8 @@ struct ClaudeCredentials: Codable {
         var expires: Date?
         if let ms = oauth["expiresAt"] as? Double { expires = Date(timeIntervalSince1970: ms / 1000) }
         else if let ms = oauth["expiresAt"] as? Int { expires = Date(timeIntervalSince1970: Double(ms) / 1000) }
-        return ClaudeCredentials(accessToken: token, expiresAt: expires)
+        // Keep the refresh token in memory so we can refresh silently (never persisted).
+        let refresh = oauth["refreshToken"] as? String
+        return ClaudeCredentials(accessToken: token, expiresAt: expires, refreshToken: refresh)
     }
 }
