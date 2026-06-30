@@ -2,10 +2,10 @@
 import PackageDescription
 
 let package = Package(
-    name: "ClaudeBar",
+    name: "CBar",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "ClaudeBar", targets: ["ClaudeBar"])
+        .executable(name: "CBar", targets: ["ClaudeBar"])
     ],
     targets: [
         .executableTarget(

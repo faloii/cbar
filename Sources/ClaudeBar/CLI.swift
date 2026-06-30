@@ -3,14 +3,14 @@ import Foundation
 enum CLI {
     static func printHelp() {
         print("""
-        ClaudeBar — lightweight Claude usage in your menu bar.
+        CBar — lightweight Claude usage in your menu bar.
 
         Usage:
-          ClaudeBar              Launch the menu-bar app
-          ClaudeBar --print      Print the current usage snapshot and exit
-          ClaudeBar --print --json   Same, as JSON
-          ClaudeBar --print --no-limits   Skip the live session/weekly limit fetch
-          ClaudeBar --help       Show this help
+          CBar              Launch the menu-bar app
+          CBar --print      Print the current usage snapshot and exit
+          CBar --print --json   Same, as JSON
+          CBar --print --no-limits   Skip the live session/weekly limit fetch
+          CBar --help       Show this help
 
         Reads Claude Code's local data only (no network):
           stats-cache.json + projects/**/*.jsonl under $CLAUDE_CONFIG_DIR (~/.claude).
@@ -63,7 +63,7 @@ enum CLI {
     private static func printText(_ s: UsageSnapshot, _ limits: LimitsSnapshot?) {
         func line(_ l: String, _ v: String) { print("  \(l.padding(toLength: 16, withPad: " ", startingAt: 0)) \(v)") }
 
-        print("ClaudeBar — \(Fmt.time(s.generatedAt))\n")
+        print("CBar — \(Fmt.time(s.generatedAt))\n")
 
         if let l = limits {
             print("Plan limits\(l.stale ? " (cached)" : ""):")

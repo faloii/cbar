@@ -3,15 +3,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-DEST="/Applications/ClaudeBar.app"
+DEST="/Applications/CBar.app"
 
 ./Scripts/package_app.sh
 
 echo "==> Installing to ${DEST}"
-pkill -x ClaudeBar 2>/dev/null || true
+pkill -x CBar 2>/dev/null || true
 sleep 1
 rm -rf "$DEST"
-cp -R build/ClaudeBar.app "$DEST"
+cp -R build/CBar.app "$DEST"
 
 echo "==> Launching"
 open "$DEST"

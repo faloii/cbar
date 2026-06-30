@@ -3,8 +3,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP_NAME="ClaudeBar"
-BUNDLE_ID="com.claudebar.app"
+APP_NAME="CBar"
+BUNDLE_ID="com.cbar.app"
 BUILD_DIR=".build/release"
 APP="build/${APP_NAME}.app"
 
@@ -44,7 +44,7 @@ ${ICON_KEY}
     <key>LSMinimumSystemVersion</key>  <string>14.0</string>
     <!-- Menu-bar-only: no Dock icon, no app-switcher entry. -->
     <key>LSUIElement</key>             <true/>
-    <key>NSHumanReadableCopyright</key> <string>ClaudeBar</string>
+    <key>NSHumanReadableCopyright</key> <string>CBar</string>
 </dict>
 </plist>
 PLIST

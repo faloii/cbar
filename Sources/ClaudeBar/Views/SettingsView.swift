@@ -181,7 +181,7 @@ struct SettingsView: View {
 
             Section("정보") {
                 HStack {
-                    Text("ClaudeBar")
+                    Text("CBar")
                     Spacer()
                     Text("버전 \(Self.appVersion)").foregroundStyle(.secondary)
                 }

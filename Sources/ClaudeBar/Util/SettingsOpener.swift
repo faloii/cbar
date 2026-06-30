@@ -29,7 +29,7 @@ final class SettingsWindowController: NSObject {
             let hosting = NSHostingController(rootView: SettingsView(store: .shared))
             let p = NonKeyPanel(contentViewController: hosting)
             p.styleMask = [.titled, .closable, .nonactivatingPanel]
-            p.title = "ClaudeBar 설정"
+            p.title = "CBar 설정"
             p.isFloatingPanel = true
             p.level = .floating
             p.hidesOnDeactivate = false
