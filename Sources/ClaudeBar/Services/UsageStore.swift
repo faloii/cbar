@@ -5,7 +5,7 @@ import Combine
 /// Popover cards the user can show/hide and reorder (Settings → 섹션).
 /// Declaration order is the default layout order.
 enum PanelSection: String, CaseIterable, Identifiable {
-    case advice, limits, efficiency, recent, perModel, modelGuide, sessions, today, weeklyReview, goals, budget
+    case advice, limits, efficiency, recent, perModel, modelGuide, modelRecap, sessions, today, weeklyReview, goals, budget
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -15,6 +15,7 @@ enum PanelSection: String, CaseIterable, Identifiable {
         case .recent:         return "최근 5시간"
         case .perModel:       return "모델별 소진"
         case .modelGuide:     return "모델 가이드"
+        case .modelRecap:     return "모델·effort 회고"
         case .sessions:       return "세션별"
         case .today:          return "오늘"
         case .weeklyReview:   return "주간 리뷰"
@@ -113,7 +114,7 @@ final class UsageStore: ObservableObject {
     /// core (advice, limits, recent, today); the analysis cards (per-model burn,
     /// model guide, per-session) are opt-in.
     @AppStorage("hiddenSections") private var hiddenSectionsRaw: String =
-        "perModel,modelGuide,sessions" {
+        "modelGuide,modelRecap,perModel,sessions" {
         didSet { objectWillChange.send() }
     }
     /// Comma-joined raw values defining card order (missing ones append in default order).
@@ -423,6 +424,11 @@ final class UsageStore: ObservableObject {
         ModelBurn.rows(window: snapshot.windowByModel,
                        sessionUtil: limits?.session5h?.utilization,
                        basis: burnBasis)
+    }
+
+    /// Retrospective right-sizing read on the dominant model in the 5h window.
+    var modelRecap: ModelRecap.Verdict? {
+        ModelRecap.verdict(window: snapshot.windowByModel)
     }
 
     /// Highest of the live session/weekly utilizations, or nil if unavailable.

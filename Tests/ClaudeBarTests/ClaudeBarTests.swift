@@ -589,6 +589,61 @@ final class SessionCoachTests: XCTestCase {
     }
 }
 
+final class ModelRecapTests: XCTestCase {
+    private func win(_ model: String, output: Int, cacheRead: Int, requests: Int, cost: Double) -> ModelWindowUsage {
+        ModelWindowUsage(model: model, tokens: TokenCounts(input: 0, output: output, cacheWrite: 0, cacheRead: cacheRead),
+                         cost: cost, requests: requests)
+    }
+
+    func testIntensityBands() {
+        XCTAssertEqual(ModelRecap.intensity(outputPerTurn: 599), .light)
+        XCTAssertEqual(ModelRecap.intensity(outputPerTurn: 600), .moderate)
+        XCTAssertEqual(ModelRecap.intensity(outputPerTurn: 1499), .moderate)
+        XCTAssertEqual(ModelRecap.intensity(outputPerTurn: 1500), .heavy)
+    }
+
+    func testLightOpusSuggestsSonnetDownshift() {
+        // 400 output / 5 turns = 80/turn → light. Price the tokens at Opus so the saving
+        // is the real Opus→Sonnet delta (Sonnet is exactly 1/5 across the board).
+        let tokens = TokenCounts(input: 0, output: 400, cacheWrite: 0, cacheRead: 100_000)
+        let opusCost = Pricing.cost(for: tokens, model: "opus")
+        let v = ModelRecap.verdict(window: [
+            ModelWindowUsage(model: "claude-opus-4-8", tokens: tokens, cost: opusCost, requests: 5)
+        ])
+        XCTAssertEqual(v?.intensity, .light)
+        XCTAssertEqual(v?.downshiftTo, "Sonnet")
+        XCTAssertEqual(v?.downshiftSaving ?? 0, 0.8, accuracy: 0.001)  // Sonnet = 1/5 of Opus
+        XCTAssertEqual(v?.outputPerTurn, 80)
+    }
+
+    func testHeavyOpusIsJustifiedNoDownshift() {
+        // 8000 output / 5 turns = 1600/turn → heavy → no downshift even though Opus.
+        let v = ModelRecap.verdict(window: [win("claude-opus-4-8", output: 8000, cacheRead: 100_000, requests: 5, cost: 9)])
+        XCTAssertEqual(v?.intensity, .heavy)
+        XCTAssertTrue(v?.isTopTier == true)
+        XCTAssertNil(v?.downshiftTo)
+    }
+
+    func testSonnetDominantHasNoDownshift() {
+        let v = ModelRecap.verdict(window: [win("claude-sonnet-4-6", output: 300, cacheRead: 50_000, requests: 5, cost: 2)])
+        XCTAssertEqual(v?.isTopTier, false)
+        XCTAssertNil(v?.downshiftTo)
+    }
+
+    func testPicksDominantModelByCost() {
+        let v = ModelRecap.verdict(window: [
+            win("claude-opus-4-8", output: 400, cacheRead: 10_000, requests: 5, cost: 3),
+            win("claude-sonnet-4-6", output: 9000, cacheRead: 500_000, requests: 5, cost: 40),
+        ])
+        XCTAssertEqual(v?.model, "claude-sonnet-4-6")  // highest cost wins
+    }
+
+    func testNilWhenNoCompletedTurns() {
+        XCTAssertNil(ModelRecap.verdict(window: []))
+        XCTAssertNil(ModelRecap.verdict(window: [win("claude-opus-4-8", output: 0, cacheRead: 0, requests: 0, cost: 0)]))
+    }
+}
+
 final class ResumeCommandTests: XCTestCase {
     func testShellQuoteWrapsAndEscapes() {
         XCTAssertEqual(ResumeCommand.shellQuote("plain"), "'plain'")

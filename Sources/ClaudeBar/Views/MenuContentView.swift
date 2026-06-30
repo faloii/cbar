@@ -79,7 +79,7 @@ struct MenuContentView: View {
                     in: RoundedRectangle(cornerRadius: 7, style: .continuous)
                 )
                 .accessibilityHidden(true)
-            Text("ClaudeBar").font(.headline)
+            Text("CBar").font(.headline)
             Spacer()
             Button { store.refresh() } label: {
                 Image(systemName: "arrow.clockwise")
@@ -164,6 +164,8 @@ struct MenuContentView: View {
             if !store.modelBurnRows.isEmpty { Card { perModelSection } }
         case .modelGuide:
             if !snap.windowByModel.isEmpty { Card { modelGuideSection } }
+        case .modelRecap:
+            if let v = store.modelRecap { Card { modelRecapSection(v) } }
         case .sessions:
             if !snap.recentSessions.isEmpty { Card { sessionsSection } }
         case .today:
@@ -433,9 +435,76 @@ struct MenuContentView: View {
                 }
             }
         }
-        Text("작업 난이도는 ClaudeBar가 알 수 없어요 — 권장 용도는 참고용입니다. 가벼운 작업을 더 싼 모델로 옮기면 비용이 크게 줄고, 한도(토큰)엔 거의 영향이 없습니다.")
+        Text("작업 난이도는 CBar가 알 수 없어요 — 권장 용도는 참고용입니다. 가벼운 작업을 더 싼 모델로 옮기면 비용이 크게 줄고, 한도(토큰)엔 거의 영향이 없습니다.")
             .font(.caption2).foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // Retrospective "did I right-size?" read on the model you actually leaned on —
+    // measured, not assigned. Output/turn stands in for reasoning effort (not tracked
+    // locally); any saving re-prices the SAME tokens on a cheaper tier, so it's a cost
+    // lever, not a limit lever.
+    @ViewBuilder private func modelRecapSection(_ v: ModelRecap.Verdict) -> some View {
+        CardHeader(icon: "checkmark.seal", title: "모델·effort 회고")
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 5) {
+                Image(systemName: recapIcon(v)).frame(width: 12).foregroundStyle(recapColor(v))
+                Text(recapHeadline(v))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.caption).foregroundStyle(.primary)
+            HStack(alignment: .top, spacing: 5) {
+                Image(systemName: "brain").frame(width: 12).foregroundStyle(.secondary)
+                Text(recapEffort(v))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.caption2).foregroundStyle(.secondary)
+        }
+        Text("effort는 로컬에서 측정되지 않아요 — 턴당 출력량으로 추정한 참고용입니다.")
+            .font(.caption2).foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func recapFamily(_ id: String) -> String {
+        let m = id.lowercased()
+        if m.contains("opus")   { return "Opus" }
+        if m.contains("sonnet") { return "Sonnet" }
+        if m.contains("haiku")  { return "Haiku" }
+        if m.contains("fable")  { return "Fable" }
+        return id
+    }
+
+    private func recapHeadline(_ v: ModelRecap.Verdict) -> String {
+        let fam = recapFamily(v.model)
+        let out = Fmt.tokens(v.outputPerTurn)
+        if let down = v.downshiftTo, let usd = v.downshiftSavingUSD {
+            // Opus, light/moderate turns: a real cost-saving downshift.
+            return "주로 \(fam)를 썼는데 턴이 가벼운 편이었어요 (출력 ~\(out)/턴). 같은 작업을 \(down)으로 했다면 비용 ~1/5 (~\(Fmt.usd(usd)) 절감) — 토큰(한도)은 그대로예요."
+        }
+        if v.isTopTier {
+            // Opus, heavy turns: justified.
+            return "\(fam) 턴이 무거웠어요 (출력 ~\(out)/턴) — 깊은 추론이 필요한 작업이라 제값을 했어요."
+        }
+        return "주로 \(fam)를 썼어요 (출력 ~\(out)/턴) — 작업에 잘 맞는 선택이었어요."
+    }
+
+    private func recapEffort(_ v: ModelRecap.Verdict) -> String {
+        switch v.intensity {
+        case .light:
+            return "턴당 출력이 가벼워서, effort를 낮춰도 결과가 비슷했을 가능성이 커요 (추정)."
+        case .heavy:
+            return "턴당 출력이 많아요 — 깊게 추론하는 작업이라 effort를 유지할 만해요 (추정)."
+        case .moderate:
+            return "턴당 출력은 보통 수준 — effort 기본값이 무난해요 (추정)."
+        }
+    }
+
+    private func recapIcon(_ v: ModelRecap.Verdict) -> String {
+        v.downshiftTo != nil ? "arrow.down.circle.fill" : "checkmark.seal.fill"
+    }
+
+    private func recapColor(_ v: ModelRecap.Verdict) -> Color {
+        v.downshiftTo != nil ? .orange : .green
     }
 
     // Recent conversations by cost — spot which sessions ran on which model so you
