@@ -1,7 +1,8 @@
 #!/usr/bin/env swift
 // Generates Resources/AppIcon.icns — a bold white "C" lettermark on a deep navy
-// rounded square, with three coral activity bars inside the C opening.
-// Represents "C" (Claude/CBar) + usage monitoring at a glance.
+// rounded square, with a single coral accent dot in the C's opening (a "live
+// status" motif fitting a usage monitor). Kept deliberately simple — legible
+// down to 16px, where fine detail (e.g. multiple bars) just smears into noise.
 // Run: swift Scripts/make_icon.swift
 import AppKit
 
@@ -27,49 +28,46 @@ func render(_ px: Int) -> NSBitmapImageRep {
     let s  = CGFloat(px)
     let cx = s / 2, cy = s / 2
     let rect = NSRect(x: 0, y: 0, width: s, height: s)
+    let coral = NSColor(srgbRed: 0.97, green: 0.49, blue: 0.32, alpha: 1)
 
-    // Deep navy background with a subtle blue-tinted gradient (premium, dark).
     let bg = NSBezierPath(roundedRect: rect, xRadius: s * 0.2237, yRadius: s * 0.2237)
     bg.addClip()
+
+    // Deep navy, diagonal gradient for more depth than a flat vertical fade.
     NSGradient(
-        starting: NSColor(srgbRed: 0.10, green: 0.11, blue: 0.20, alpha: 1),
-        ending:   NSColor(srgbRed: 0.06, green: 0.07, blue: 0.14, alpha: 1))!
-        .draw(in: rect, angle: -90)
+        starting: NSColor(srgbRed: 0.13, green: 0.15, blue: 0.27, alpha: 1),
+        ending:   NSColor(srgbRed: 0.045, green: 0.05, blue: 0.09, alpha: 1))!
+        .draw(in: rect, angle: -55)
+
+    // Soft warm glow behind the mark, tying the accent color into the background
+    // without adding visual noise at small sizes.
+    if let glow = NSGradient(starting: coral.withAlphaComponent(0.16), ending: coral.withAlphaComponent(0)) {
+        glow.draw(fromCenter: NSPoint(x: cx, y: cy), radius: 0,
+                  toCenter: NSPoint(x: cx, y: cy), radius: s * 0.42, options: [])
+    }
 
     // Bold white "C" arc.
     // In AppKit lower-left-origin coords: 0°=right, 90°=up (standard math).
-    // CCW from 45° to 315° traces through top/left/bottom — the C opens to the right.
-    let arcR     = s * 0.265   // radius of arc centre-line
-    let arcWidth = s * 0.13    // stroke thickness — fat, readable at 16px
+    // CCW from ~50° to ~310° traces through top/left/bottom — the C opens to the right.
+    let arcR     = s * 0.27    // radius of arc centre-line
+    let arcWidth = s * 0.155   // thick stroke — reads clean down to 16px
     let arc = NSBezierPath()
     arc.appendArc(withCenter: NSPoint(x: cx, y: cy),
                   radius: arcR,
-                  startAngle: 42,
-                  endAngle: 318,
+                  startAngle: 50,
+                  endAngle: 310,
                   clockwise: false)
     arc.lineWidth    = arcWidth
     arc.lineCapStyle = .round
     NSColor.white.setStroke()
     arc.stroke()
 
-    // Three coral activity bars inside the C opening (right side).
-    // Heights encode a "rising" usage bar — taller middle bar, like a volume icon.
-    let coral   = NSColor(srgbRed: 0.95, green: 0.50, blue: 0.35, alpha: 1)
-    let barW    = s * 0.048
-    let spacing = s * 0.072
-    let maxH    = s * 0.20
-    let heights: [CGFloat] = [maxH * 0.55, maxH, maxH * 0.55]
-    let totalW  = barW * CGFloat(heights.count) + spacing * CGFloat(heights.count - 1)
-    let barsX   = cx + arcR * 0.60 - totalW / 2   // sit in the C opening
-    let baseY   = cy - maxH / 2
-
-    for (i, h) in heights.enumerated() {
-        let x = barsX + CGFloat(i) * (barW + spacing)
-        let barRect = NSRect(x: x, y: baseY, width: barW, height: h)
-        let bar = NSBezierPath(roundedRect: barRect, xRadius: barW * 0.4, yRadius: barW * 0.4)
-        coral.setFill()
-        bar.fill()
-    }
+    // Single coral accent dot, sitting in the C's opening — a "live status" read
+    // that stays crisp at every size, unlike fine multi-bar detail.
+    let dotR = s * 0.085
+    let dot = NSRect(x: cx + arcR * 0.62 - dotR, y: cy - dotR, width: dotR * 2, height: dotR * 2)
+    coral.setFill()
+    NSBezierPath(ovalIn: dot).fill()
 
     NSGraphicsContext.restoreGraphicsState()
     return rep
