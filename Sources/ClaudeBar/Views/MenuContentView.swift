@@ -70,14 +70,12 @@ struct MenuContentView: View {
 
     private var header: some View {
         HStack(spacing: 9) {
-            Image(systemName: "sparkle")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white)
+            // The real app icon (not a redrawn stand-in) — stays in sync automatically
+            // whenever AppIcon.icns changes.
+            Image(nsImage: NSApp.applicationIconImage ?? NSImage())
+                .resizable()
                 .frame(width: 24, height: 24)
-                .background(
-                    LinearGradient(colors: [Color.brandTop, Color.brand], startPoint: .top, endPoint: .bottom),
-                    in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-                )
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                 .accessibilityHidden(true)
             Text("CBar").font(.headline)
             Spacer()
