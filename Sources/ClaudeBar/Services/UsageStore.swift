@@ -117,6 +117,22 @@ final class UsageStore: ObservableObject {
     @AppStorage("quietHoursEnd") var quietHoursEnd: Int = 8 {
         didSet { objectWillChange.send() }
     }
+    /// Ad-hoc "quiet right now" snooze — epoch seconds until notifications are
+    /// suppressed, 0 = not snoozed. Persisted (not just in-memory) so a quick app
+    /// restart (e.g. an update) doesn't silently cancel it mid-focus-session.
+    @AppStorage("snoozeUntilEpoch") private var snoozeUntilEpoch: Double = 0 {
+        didSet { objectWillChange.send() }
+    }
+    static let snoozeDuration: TimeInterval = 2 * 3600
+
+    var snoozeUntil: Date? { snoozeUntilEpoch > 0 ? Date(timeIntervalSince1970: snoozeUntilEpoch) : nil }
+    var isSnoozed: Bool { snoozeUntil.map { Date() < $0 } ?? false }
+
+    /// One-tap toggle for the header button: snooze for `snoozeDuration`, or cancel
+    /// early if already snoozed.
+    func toggleSnooze() {
+        snoozeUntilEpoch = isSnoozed ? 0 : Date().addingTimeInterval(Self.snoozeDuration).timeIntervalSince1970
+    }
     /// Monthly budget in USD; 0 = off.
     @AppStorage("monthlyBudget") var monthlyBudget: Double = 0 {
         didSet { objectWillChange.send() }
@@ -328,9 +344,10 @@ final class UsageStore: ObservableObject {
         // The under-pace nudge has its own opt-in toggle; everything else follows
         // the main warning toggle.
         let toPost = alerts.filter { $0.id == "pace-slow" ? notifyUnderpace : notifyOnWarning }
-        let quiet = quietHoursEnabled
-            && QuietHours.isQuiet(hour: Calendar.current.component(.hour, from: now),
-                                  start: quietHoursStart, end: quietHoursEnd)
+        let quiet = isSnoozed
+            || (quietHoursEnabled
+                && QuietHours.isQuiet(hour: Calendar.current.component(.hour, from: now),
+                                      start: quietHoursStart, end: quietHoursEnd))
         if !quiet {
             // Bundle same-tick alerts into one notification so a stack of separate
             // triggers (e.g. skipping two weekly tiers at once) doesn't post a stack

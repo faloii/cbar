@@ -79,6 +79,17 @@ struct MenuContentView: View {
                 .accessibilityHidden(true)
             Text("CBar").font(.headline)
             Spacer()
+            Button { store.toggleSnooze() } label: {
+                Image(systemName: store.isSnoozed ? "moon.zzz.fill" : "moon.zzz")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 24, height: 24)
+                    .background(store.isSnoozed ? Color.brand.opacity(0.18) : Color.primary.opacity(0.06), in: Circle())
+                    .foregroundStyle(store.isSnoozed ? Color.brand : Color.primary)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help(snoozeHelp)
+            .accessibilityLabel(store.isSnoozed ? "조용히 모드 해제" : "2시간 조용히")
             Button { store.refresh() } label: {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 12, weight: .semibold))
@@ -93,6 +104,11 @@ struct MenuContentView: View {
             .help("새로고침")
             .accessibilityLabel("새로고침")
         }
+    }
+
+    private var snoozeHelp: String {
+        guard store.isSnoozed, let until = store.snoozeUntil else { return "지금부터 2시간 조용히 — 알림만 끄고, 상태 표시는 그대로예요" }
+        return "조용히 중 · \(Fmt.countdown(to: until, from: Date())) 남음 · 탭하면 해제"
     }
 
     private var footer: some View {
