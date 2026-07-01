@@ -342,6 +342,25 @@ struct WorkTimeLine: View {
     }
 }
 
+/// Today's remaining session-window reset times, so you can plan around the
+/// day's rhythm ("리셋 직후에 큰 작업을 걸어두자") instead of only reacting once
+/// the current window is nearly up. Quiet by design — a plain info line, not
+/// an alert.
+struct UpcomingResetsLine: View {
+    let resets: [Date]
+
+    var body: some View {
+        if resets.count >= 2 {
+            HStack(alignment: .top, spacing: 5) {
+                Image(systemName: "calendar.badge.clock").frame(width: 12)
+                Text("오늘 리셋 · " + resets.map { Fmt.clock($0) }.joined(separator: " · "))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+}
+
 /// Trims a raw (session or weekly) utilization series to the CURRENT window only:
 /// drops everything up to and including the most recent reset (a downward jump), so
 /// a prior window's curve isn't shown alongside the current one.

@@ -111,6 +111,62 @@ final class CacheEfficiencyTests: XCTestCase {
     }
 }
 
+final class NotificationBundlerTests: XCTestCase {
+    func alert(_ id: String) -> LimitAlert { LimitAlert(id: id, title: "제목-\(id)", body: "본문-\(id)") }
+
+    func testPassesThroughZeroOrOne() {
+        XCTAssertEqual(NotificationBundler.bundle([]), [])
+        XCTAssertEqual(NotificationBundler.bundle([alert("a")]), [alert("a")])
+    }
+
+    func testBundlesMultipleIntoOne() {
+        let out = NotificationBundler.bundle([alert("a"), alert("b")])
+        XCTAssertEqual(out.count, 1)
+        XCTAssertTrue(out[0].title.contains("2"))
+        XCTAssertTrue(out[0].body.contains("제목-a"))
+        XCTAssertTrue(out[0].body.contains("제목-b"))
+    }
+
+    func testBundledIdIsDeterministic() {
+        let out1 = NotificationBundler.bundle([alert("b"), alert("a")])
+        let out2 = NotificationBundler.bundle([alert("a"), alert("b")])
+        XCTAssertEqual(out1[0].id, out2[0].id)
+    }
+}
+
+final class QuietHoursTests: XCTestCase {
+    func testSameDayWindow() {
+        XCTAssertTrue(QuietHours.isQuiet(hour: 13, start: 12, end: 14))
+        XCTAssertFalse(QuietHours.isQuiet(hour: 15, start: 12, end: 14))
+        XCTAssertFalse(QuietHours.isQuiet(hour: 12, start: 12, end: 12))   // zero-length = never
+    }
+
+    func testOvernightWraparound() {
+        XCTAssertTrue(QuietHours.isQuiet(hour: 23, start: 22, end: 8))
+        XCTAssertTrue(QuietHours.isQuiet(hour: 3, start: 22, end: 8))
+        XCTAssertTrue(QuietHours.isQuiet(hour: 22, start: 22, end: 8))    // start inclusive
+        XCTAssertFalse(QuietHours.isQuiet(hour: 8, start: 22, end: 8))    // end exclusive
+        XCTAssertFalse(QuietHours.isQuiet(hour: 12, start: 22, end: 8))
+    }
+}
+
+final class UpcomingResetsTests: XCTestCase {
+    let t = Date(timeIntervalSince1970: 1_000_000)
+
+    func testWalksForwardEvery5Hours() {
+        let next = t.addingTimeInterval(1800)
+        let out = UpcomingResets.compute(nextReset: next, now: t, count: 3)
+        XCTAssertEqual(out.count, 3)
+        XCTAssertEqual(out[1].timeIntervalSince(out[0]), 5 * 3600, accuracy: 0.01)
+        XCTAssertEqual(out[2].timeIntervalSince(out[1]), 5 * 3600, accuracy: 0.01)
+    }
+
+    func testEmptyWhenResetIsPastOrCountZero() {
+        XCTAssertEqual(UpcomingResets.compute(nextReset: t.addingTimeInterval(-10), now: t), [])
+        XCTAssertEqual(UpcomingResets.compute(nextReset: t.addingTimeInterval(100), now: t, count: 0), [])
+    }
+}
+
 final class ProjectionTests: XCTestCase {
     let t = Date(timeIntervalSince1970: 1_000_000)
     func mins(_ m: Double) -> Date { t.addingTimeInterval(m * 60) }

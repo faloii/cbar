@@ -106,6 +106,17 @@ final class UsageStore: ObservableObject {
     @AppStorage("blockWarnLeadMinutes") var blockWarnLeadMinutes: Int = 30 {
         didSet { objectWillChange.send() }
     }
+    /// Suppress notification banners during a daily window (the in-app UI still
+    /// reflects real state) — a "quiet coach" shouldn't ping overnight.
+    @AppStorage("quietHoursEnabled") var quietHoursEnabled: Bool = false {
+        didSet { objectWillChange.send() }
+    }
+    @AppStorage("quietHoursStart") var quietHoursStart: Int = 22 {
+        didSet { objectWillChange.send() }
+    }
+    @AppStorage("quietHoursEnd") var quietHoursEnd: Int = 8 {
+        didSet { objectWillChange.send() }
+    }
     /// Monthly budget in USD; 0 = off.
     @AppStorage("monthlyBudget") var monthlyBudget: Double = 0 {
         didSet { objectWillChange.send() }
@@ -305,19 +316,28 @@ final class UsageStore: ObservableObject {
     /// timing) once, then act: post notifications (if enabled) and run the optional
     /// auto-resume command when the limit frees up after a block.
     private func processLimitAlerts() {
+        let now = Date()
         // Always evaluate so rising-edge state advances even when notifications are off.
         let alerts = LimitAlerts.evaluate(
             session: limits?.session5h, weekly: limits?.weekly7d,
             sessionProjection: sessionProjection, weeklyProjection: weeklyProjection,
             status: limits?.status, warnThreshold: warnThreshold,
             blockWarnLeadMinutes: blockWarnLeadMinutes,
-            state: &alertState, now: Date())
+            state: &alertState, now: now)
 
-        for a in alerts {
-            // The under-pace nudge has its own opt-in toggle; everything else follows
-            // the main warning toggle.
-            let allowed = a.id == "pace-slow" ? notifyUnderpace : notifyOnWarning
-            if allowed { Notifier.notify(title: a.title, body: a.body, id: a.id) }
+        // The under-pace nudge has its own opt-in toggle; everything else follows
+        // the main warning toggle.
+        let toPost = alerts.filter { $0.id == "pace-slow" ? notifyUnderpace : notifyOnWarning }
+        let quiet = quietHoursEnabled
+            && QuietHours.isQuiet(hour: Calendar.current.component(.hour, from: now),
+                                  start: quietHoursStart, end: quietHoursEnd)
+        if !quiet {
+            // Bundle same-tick alerts into one notification so a stack of separate
+            // triggers (e.g. skipping two weekly tiers at once) doesn't post a stack
+            // of separate banners.
+            for a in NotificationBundler.bundle(toPost) {
+                Notifier.notify(title: a.title, body: a.body, id: a.id)
+            }
         }
         // Auto-resume on the "freed after being blocked" reset (opt-in). With no
         // custom command, default to continuing the last conversation — so just
@@ -385,6 +405,13 @@ final class UsageStore: ObservableObject {
     /// Whether the efficiency card has anything worth showing.
     var hasEfficiencyData: Bool {
         enableLiveLimits && (snapshot.currentContextTokens > 0 || lastSessionRecap != nil)
+    }
+
+    /// The next few session-window reset times — plan heavy work around today's
+    /// rhythm instead of only reacting when the current window is about to flip.
+    var upcomingResets: [Date] {
+        guard let next = limits?.session5h?.resetsAt else { return [] }
+        return UpcomingResets.compute(nextReset: next, now: snapshot.generatedAt)
     }
 
     /// New-work vs re-read-old-context share of the 5h window — how much of the

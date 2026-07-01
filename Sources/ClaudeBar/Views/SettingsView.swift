@@ -138,6 +138,24 @@ struct SettingsView: View {
                     .disabled(!store.enableLiveLimits)
                 Text("지금 페이스면 리셋 때 한도가 크게 남을 것 같을 때 한 번 알려줍니다. 자리를 비우면(사용 없음) 울리지 않아요. 기본은 꺼져 있습니다.")
                     .font(.caption).foregroundStyle(.secondary)
+
+                Toggle("조용한 시간", isOn: $store.quietHoursEnabled)
+                if store.quietHoursEnabled {
+                    HStack {
+                        Text("시작")
+                        Picker("", selection: $store.quietHoursStart) {
+                            ForEach(0..<24) { Text(String(format: "%02d:00", $0)).tag($0) }
+                        }
+                        .labelsHidden().pickerStyle(.menu)
+                        Text("~ 종료")
+                        Picker("", selection: $store.quietHoursEnd) {
+                            ForEach(0..<24) { Text(String(format: "%02d:00", $0)).tag($0) }
+                        }
+                        .labelsHidden().pickerStyle(.menu)
+                    }
+                }
+                Text("이 시간대엔 알림을 보내지 않아요. 메뉴바 아이콘 색상·팝오버는 그대로 실제 상태를 보여줘요 — 숨기는 게 아니라 방해만 안 하는 거예요.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("막힘 해제 시 자동 재개") {
@@ -186,6 +204,8 @@ struct SettingsView: View {
                     Text("버전 \(Self.appVersion)").foregroundStyle(.secondary)
                 }
                 Text("비공식 도구 · Anthropic과 무관하며 승인받지 않았습니다. 실제 한도는 비공개 엔드포인트에서 가져오므로 예고 없이 중단될 수 있어요. 자기 책임 하에 사용하세요. “Claude”는 Anthropic의 상표입니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text("세션·주간 한도 %는 계정 전체 기준(서버 조회)이라 정확하지만, 컨텍스트 크기·모델별 소진·프로젝트별 통계는 이 Mac의 Claude Code 로그만 봅니다 — 다른 기기에서도 쓰신다면 그 사용량은 빠져 있어요.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

@@ -260,6 +260,7 @@ struct MenuContentView: View {
                         WeeklyAllowanceLine(budget: budget)
                     }
                 }
+                UpcomingResetsLine(resets: store.upcomingResets)
             }
             if let w = l.session5h {
                 SessionTrendChart(samples: store.sessionTrend, now: snap.generatedAt,
@@ -385,6 +386,7 @@ struct MenuContentView: View {
             let total = max(1, projects.reduce(0) { $0 + $1.tokens })
             Divider().padding(.vertical, 2)
             Text("프로젝트별 · 최근 7일").font(.caption2).foregroundStyle(.tertiary)
+                .help("이 Mac의 Claude Code 로그 기준이에요 — 다른 기기에서 쓴 프로젝트는 빠져 있어요.")
             VStack(alignment: .leading, spacing: 5) {
                 ForEach(projects.prefix(3)) { p in
                     let share = Double(p.tokens) / Double(total)
@@ -425,6 +427,7 @@ struct MenuContentView: View {
 
     @ViewBuilder private var windowSection: some View {
         CardHeader(icon: "clock", title: "최근 5시간")
+            .help("이 Mac의 Claude Code 로그 기준이에요 — 다른 기기에서 쓴 건 이 수치에 반영되지 않아요. 세션/주간 한도 %는 계정 전체 기준입니다.")
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text("~\(Fmt.usd(snap.windowCost))")
                 .font(.system(size: 24, weight: .semibold, design: .rounded))
@@ -440,7 +443,7 @@ struct MenuContentView: View {
     @ViewBuilder private var perModelSection: some View {
         HStack {
             CardHeader(icon: "chart.bar.fill", title: "모델별 소진 · 5시간")
-                .help(ModelTier.effortNote)
+                .help(ModelTier.effortNote + " 이 Mac의 로그 기준이라, 다른 기기 사용은 빠져 있어요.")
             Spacer()
             Text(store.burnBasis.shortLabel).font(.caption2).foregroundStyle(.tertiary)
         }
