@@ -92,6 +92,25 @@ final class TokenCountsTests: XCTestCase {
     }
 }
 
+final class CacheEfficiencyTests: XCTestCase {
+    func testFreshAndCacheReadSharesSumToOne() {
+        let t = TokenCounts(input: 10, output: 10, cacheWrite: 10, cacheRead: 70)
+        let v = CacheEfficiency.verdict(t)
+        XCTAssertEqual(v?.freshShare ?? 0, 0.3, accuracy: 0.001)
+        XCTAssertEqual(v?.cacheReadShare ?? 0, 0.7, accuracy: 0.001)
+    }
+
+    func testAllFreshWhenNoCacheRead() {
+        let t = TokenCounts(input: 50, output: 50, cacheWrite: 0, cacheRead: 0)
+        let v = CacheEfficiency.verdict(t)
+        XCTAssertEqual(v?.freshShare ?? 0, 1.0, accuracy: 0.001)
+    }
+
+    func testNilWhenEmpty() {
+        XCTAssertNil(CacheEfficiency.verdict(TokenCounts()))
+    }
+}
+
 final class ProjectionTests: XCTestCase {
     let t = Date(timeIntervalSince1970: 1_000_000)
     func mins(_ m: Double) -> Date { t.addingTimeInterval(m * 60) }
@@ -172,6 +191,79 @@ final class ProjectionTests: XCTestCase {
         let p = Projection.compute(points: pts, resetsAt: t.addingTimeInterval(5 * 3600), now: t)
         XCTAssertEqual(p.verdict, .atRisk)
         XCTAssertGreaterThan(p.ratePerHour, 30)
+    }
+
+    // MARK: - combinedWeekly (closes the "burned the week in the first 6h" blind spot)
+
+    func testCombinedWeeklyCatchesEarlyBurstPacedWouldMiss() {
+        // 3h into the week (< 6h paced cutoff), already at 70% from a burst in the
+        // last 30m. `paced` alone would stay .safe (too early to judge); the burst
+        // trajectory must catch this immediately.
+        let week: TimeInterval = 7 * 24 * 3600
+        let resetsAt = t.addingTimeInterval(week - 3 * 3600)
+        let pts: [(Date, Double)] = [(mins(-30), 40), (t, 70)]
+        let paced = Projection.paced(util: 70, resetsAt: resetsAt, windowSeconds: week, now: t)
+        XCTAssertEqual(paced.verdict, .safe)   // confirms the blind spot exists without the fix
+        let combined = Projection.combinedWeekly(points: pts, util: 70, resetsAt: resetsAt,
+                                                  windowSeconds: week, now: t)
+        XCTAssertEqual(combined.verdict, .atRisk)
+    }
+
+    func testCombinedWeeklyPrefersMoreUrgentSignal() {
+        // Both signals at-risk; the sooner time-to-full should win.
+        let week: TimeInterval = 7 * 24 * 3600
+        let resetsAt = t.addingTimeInterval(5 * 24 * 3600)
+        // Paced: 60% two days in → atRisk with a multi-day timeToFull.
+        // Burst: a sharp recent spike → atRisk with a much sooner timeToFull.
+        let pts: [(Date, Double)] = [(mins(-30), 55), (t, 60)]
+        let combined = Projection.combinedWeekly(points: pts, util: 60, resetsAt: resetsAt,
+                                                  windowSeconds: week, now: t)
+        let paced = Projection.paced(util: 60, resetsAt: resetsAt, windowSeconds: week, now: t)
+        XCTAssertEqual(combined.verdict, .atRisk)
+        XCTAssertLessThanOrEqual(combined.timeToFull ?? .infinity, paced.timeToFull ?? .infinity)
+    }
+
+    func testCombinedWeeklyFallsBackToPacedWhenNoBurst() {
+        // No burst signal (flat/insufficient data) → behaves exactly like `paced`.
+        let week: TimeInterval = 7 * 24 * 3600
+        let resetsAt = t.addingTimeInterval(5 * 24 * 3600)
+        let combined = Projection.combinedWeekly(points: [], util: 10, resetsAt: resetsAt,
+                                                  windowSeconds: week, now: t)
+        let paced = Projection.paced(util: 10, resetsAt: resetsAt, windowSeconds: week, now: t)
+        XCTAssertEqual(combined, paced)
+    }
+}
+
+final class DailyAllowanceTests: XCTestCase {
+    let t = Date(timeIntervalSince1970: 1_000_000)
+
+    func testRecommendedPctPerDaySpreadsRemainingEvenly() {
+        // 40% used, 4 days left → 60% remaining / 4 days = 15%/day.
+        let v = DailyAllowance.verdict(util: 40, resetsAt: t.addingTimeInterval(4 * 86400),
+                                       now: t, todayStartUtil: nil)
+        XCTAssertEqual(v?.daysRemaining ?? 0, 4, accuracy: 0.01)
+        XCTAssertEqual(v?.recommendedPctPerDay ?? 0, 15, accuracy: 0.01)
+        XCTAssertNil(v?.usedTodayPct)
+    }
+
+    func testUsedTodayIsDeltaFromMidnight() {
+        let v = DailyAllowance.verdict(util: 55, resetsAt: t.addingTimeInterval(3 * 86400),
+                                       now: t, todayStartUtil: 40)
+        XCTAssertEqual(v?.usedTodayPct ?? 0, 15, accuracy: 0.01)
+    }
+
+    func testNilWhenNoResetOrAlreadyFull() {
+        XCTAssertNil(DailyAllowance.verdict(util: 50, resetsAt: nil, now: t, todayStartUtil: nil))
+        XCTAssertNil(DailyAllowance.verdict(util: 100, resetsAt: t.addingTimeInterval(86400),
+                                            now: t, todayStartUtil: nil))
+    }
+
+    func testDaysRemainingFloorsNearReset() {
+        // 5 minutes to reset shouldn't blow up the recommended rate to something absurd.
+        let v = DailyAllowance.verdict(util: 90, resetsAt: t.addingTimeInterval(300),
+                                       now: t, todayStartUtil: nil)
+        XCTAssertNotNil(v)
+        XCTAssertGreaterThanOrEqual(v?.daysRemaining ?? 0, 1.0 / 24)
     }
 }
 
@@ -725,6 +817,29 @@ final class LimitAlertsTests: XCTestCase {
         var s2 = LimitAlertState()
         XCTAssertTrue(eval(session: win(100, resetIn: 3600), state: &s2).contains { $0.id == "blocked" })
         XCTAssertFalse(eval(session: win(100, resetIn: 3500), state: &s2).contains { $0.id == "blocked" }) // once
+    }
+
+    func testWeeklyTiersEscalateAndFireOncePerCrossing() {
+        var s = LimitAlertState()
+        // Crossing 50% fires the 50 tier only.
+        let out1 = eval(weekly: win(55), state: &s)
+        XCTAssertTrue(out1.contains { $0.id == "weekly-tier-50" })
+        XCTAssertFalse(out1.contains { $0.id == "weekly-tier-75" })
+        // Staying within the same tier stays silent.
+        XCTAssertTrue(eval(weekly: win(60), state: &s).isEmpty)
+        // Jumping straight to 92% fires 75 AND 90 in the same pass (skipped tiers matter too).
+        let out2 = eval(weekly: win(92), state: &s)
+        XCTAssertTrue(out2.contains { $0.id == "weekly-tier-90" })
+    }
+
+    func testWeeklyTierResetsAfterReset() {
+        var s = LimitAlertState()
+        _ = eval(weekly: win(92), state: &s)
+        XCTAssertEqual(s.weeklyTier, 3)
+        _ = eval(weekly: win(1), state: &s)   // weekly window reset
+        XCTAssertEqual(s.weeklyTier, 0)
+        // Re-arms: 50% fires again after the reset.
+        XCTAssertTrue(eval(weekly: win(55), state: &s).contains { $0.id == "weekly-tier-50" })
     }
 
     func testResetDoneOnSharpDrop() {

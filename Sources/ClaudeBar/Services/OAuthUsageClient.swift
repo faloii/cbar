@@ -53,6 +53,7 @@ struct OAuthUsageClient: Sendable {
             UsageHistory.append(session: fresh.session5h?.utilization,
                                 weekly: fresh.weekly7d?.utilization,
                                 at: fresh.fetchedAt)
+            WeeklyHistory.append(weekly: fresh.weekly7d?.utilization, at: fresh.fetchedAt)
             Self.recordSuccess()
             return fresh
         } catch {

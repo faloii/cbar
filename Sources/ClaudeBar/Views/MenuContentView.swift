@@ -258,11 +258,19 @@ struct MenuContentView: View {
                 }
                 if let w = l.weekly7d {
                     ProjectionLine(tag: "주간", window: w, projection: store.weeklyProjection, now: snap.generatedAt)
+                    if let budget = store.weeklyAllowance {
+                        WeeklyAllowanceLine(budget: budget)
+                    }
                 }
             }
             if let w = l.session5h {
                 SessionTrendChart(samples: store.sessionTrend, now: snap.generatedAt,
                                   secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt))
+                    .padding(.top, 4)
+            }
+            if let w = l.weekly7d {
+                WeeklyTrendChart(samples: store.weeklyTrend, now: snap.generatedAt,
+                                 secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt))
                     .padding(.top, 4)
             }
         } else {
@@ -315,6 +323,18 @@ struct MenuContentView: View {
                 .font(.caption2).foregroundStyle(Color.brand)
             }
         }
+        // Cache efficiency — new work vs re-reading old context, over the 5h window.
+        // Informational by default (a big cached system prompt makes some re-read
+        // normal); only tinted when paired with a heavy active conversation, where
+        // the re-read cost is actually compounding every turn.
+        if let ce = store.cacheEfficiency {
+            let heavy = ctx >= SessionCoach.heavyContextTokens && ce.cacheReadShare >= CacheEfficiency.heavyReuseThreshold
+            HStack(alignment: .top, spacing: 5) {
+                Image(systemName: "arrow.triangle.2.circlepath").frame(width: 12)
+                Text("최근 5시간 새 작업 \(Int((ce.freshShare * 100).rounded()))% · 재읽기 \(Int((ce.cacheReadShare * 100).rounded()))%")
+            }
+            .font(.caption2).foregroundStyle(heavy ? Color.orange : .secondary)
+        }
         // Learning loop: how the last completed session was spent.
         if let r = store.lastSessionRecap {
             HStack(alignment: .top, spacing: 5) {
@@ -361,6 +381,25 @@ struct MenuContentView: View {
             .fixedSize(horizontal: false, vertical: true)
         }
         Text("이번 주 vs 지난주").font(.caption2).foregroundStyle(.tertiary)
+        // Which project is eating the weekly limit — useful when juggling several.
+        let projects = snap.weeklyProjectUsage
+        if projects.count >= 2 {
+            let total = max(1, projects.reduce(0) { $0 + $1.tokens })
+            Divider().padding(.vertical, 2)
+            Text("프로젝트별 · 최근 7일").font(.caption2).foregroundStyle(.tertiary)
+            VStack(alignment: .leading, spacing: 5) {
+                ForEach(projects.prefix(3)) { p in
+                    let share = Double(p.tokens) / Double(total)
+                    HStack(spacing: 6) {
+                        Text(p.project).font(.caption).lineLimit(1)
+                        Spacer(minLength: 6)
+                        Text("\(Int((share * 100).rounded()))%")
+                            .font(.caption).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    MeterBar(fraction: share)
+                }
+            }
+        }
     }
 
     private func deltaText(_ pct: Double?) -> String? {

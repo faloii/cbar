@@ -40,6 +40,15 @@ struct ModelWindowUsage: Identifiable {
     var requests: Int
 }
 
+/// One project's share of the last 7 days of usage — "which project is eating the
+/// weekly limit?" so a user juggling several projects can see where to defer work.
+struct ProjectWeeklyUsage: Identifiable {
+    var id: String { project }
+    let project: String
+    let tokens: Int
+    let cost: Double
+}
+
 /// One recent conversation's usage, for the per-session model breakdown.
 struct SessionStat: Identifiable {
     var id: String { sessionId }
@@ -65,6 +74,10 @@ struct UsageSnapshot {
 
     /// Recent conversations (by cost), for the per-session model breakdown.
     var recentSessions: [SessionStat] = []
+
+    /// Per-project usage over the last 7 days, sorted by cost desc — "which project
+    /// is eating the weekly limit?"
+    var weeklyProjectUsage: [ProjectWeeklyUsage] = []
 
     /// Context size (prompt tokens) of the most-recent assistant turn — how big the
     /// active conversation is. Large = each turn eats more of the limit, so /compact
@@ -104,6 +117,7 @@ struct UsageSnapshot {
         var s = self
         s.windowTokens = o.windowTokens; s.windowCost = o.windowCost; s.windowResetAt = o.windowResetAt
         s.windowByModel = o.windowByModel; s.recentSessions = o.recentSessions
+        s.weeklyProjectUsage = o.weeklyProjectUsage
         s.currentContextTokens = o.currentContextTokens
         s.todayTokens = o.todayTokens; s.todayCost = o.todayCost; s.todayByModel = o.todayByModel
         s.todayRequests = o.todayRequests; s.todaySessions = o.todaySessions; s.todayToolCalls = o.todayToolCalls

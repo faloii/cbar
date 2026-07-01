@@ -129,4 +129,21 @@ struct Projection: Equatable {
         return Projection(ratePerHour: rate, timeToFull: timeToFull, secondsToReset: secondsToReset,
                           verdict: verdict, projectedAtReset: projected)
     }
+
+    /// Weekly projection that combines the realized whole-week average pace (`paced`,
+    /// stable, ignores short bursts) with a short recent-burst trajectory (`compute`,
+    /// the same ~45min-lookback math the session uses). `paced` alone has a blind spot
+    /// early in the week — it refuses to judge a pace before 6h have elapsed (to avoid
+    /// over-reacting to noise), so burning fast in the first few hours produces *no*
+    /// signal until hour 6, often too late to react. `compute` catches that immediately.
+    /// Whichever view is more urgent (`.atRisk` with the sooner time-to-full) wins;
+    /// otherwise `paced` is the stable default.
+    static func combinedWeekly(points: [(Date, Double)], util: Double, resetsAt: Date?,
+                               windowSeconds: TimeInterval, now: Date) -> Projection {
+        let paced = Projection.paced(util: util, resetsAt: resetsAt, windowSeconds: windowSeconds, now: now)
+        let burst = Projection.compute(points: points, resetsAt: resetsAt, now: now)
+        guard burst.verdict == .atRisk else { return paced }
+        guard paced.verdict == .atRisk, let pf = paced.timeToFull, let bf = burst.timeToFull else { return burst }
+        return bf <= pf ? burst : paced
+    }
 }

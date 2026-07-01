@@ -196,6 +196,47 @@ struct ProjectionLine: View {
     }
 }
 
+/// Converts the weekly % into a concrete daily allowance — "how much can I use today?"
+/// — shown persistently (not just as a one-shot alert), so a fast start to the week is
+/// visible before it burns through days of headroom.
+struct WeeklyAllowanceLine: View {
+    let budget: DailyAllowance.Verdict
+
+    var body: some View {
+        let s = state
+        HStack(alignment: .top, spacing: 5) {
+            Image(systemName: s.icon).frame(width: 12)
+            Text(s.text).fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.caption2)
+        .foregroundStyle(s.color)
+    }
+
+    private var daysText: String {
+        budget.daysRemaining >= 1
+            ? "\(Int(budget.daysRemaining.rounded()))일"
+            : "\(Int((budget.daysRemaining * 24).rounded()))시간"
+    }
+
+    private var state: (text: String, color: Color, icon: String) {
+        let rec = Int(budget.recommendedPctPerDay.rounded())
+        guard let used = budget.usedTodayPct else {
+            return ("남은 \(daysText) · 하루 권장 ~\(rec)%", .secondary, "calendar.badge.clock")
+        }
+        let usedPct = Int(used.rounded())
+        if used >= 3, used >= budget.recommendedPctPerDay * 1.15 {
+            return ("남은 \(daysText) · 하루 권장 ~\(rec)% · 오늘 이미 \(usedPct)% — 빠른 편",
+                    .orange, "hare.fill")
+        }
+        if budget.recommendedPctPerDay >= 1, used <= budget.recommendedPctPerDay * 0.5 {
+            return ("남은 \(daysText) · 하루 권장 ~\(rec)% · 오늘 \(usedPct)% — 여유 있어요",
+                    .secondary, "tortoise.fill")
+        }
+        return ("남은 \(daysText) · 하루 권장 ~\(rec)% · 오늘 \(usedPct)% — 적정 페이스",
+                .green, "checkmark.circle")
+    }
+}
+
 /// Plain-language "am I using too fast / just right / relaxed" verdict for a window.
 /// Deliberately number-free — "30%/h" doesn't land — using hare/tortoise framing and
 /// an action. The block/working-time facts are owned by `WorkTimeLine`; the exact
@@ -301,30 +342,28 @@ struct WorkTimeLine: View {
     }
 }
 
-/// In-session usage trend: session utilization (%) over the last few hours, with a
-/// dashed "even-pace" guide (where you'd sit pacing linearly to 100% at reset). Lets
-/// you eyeball how fast you're burning and how much you've used vs. the steady rate.
-/// Needs ≥2 samples; shows a "measuring" hint otherwise.
-struct SessionTrendChart: View {
-    let samples: [UsageSample]          // session != nil; sorted oldest→newest
+/// Trims a raw (session or weekly) utilization series to the CURRENT window only:
+/// drops everything up to and including the most recent reset (a downward jump), so
+/// a prior window's curve isn't shown alongside the current one.
+private func trimToCurrentWindow(_ all: [(t: Date, v: Double)]) -> [(t: Date, v: Double)] {
+    guard all.count >= 2 else { return all }
+    for i in stride(from: all.count - 1, to: 0, by: -1)
+    where all[i].1 + Projection.resetDrop < all[i - 1].1 {
+        return Array(all[i...])
+    }
+    return all
+}
+
+/// Usage trend visualization shared by the session and weekly views: actual usage
+/// line + gradient fill + a dashed "even-pace" guide (where you'd sit pacing linearly
+/// to 100% at the reset) + a head dot at the latest reading. Lets you eyeball how fast
+/// you're burning vs. the steady rate, at any window size.
+struct UsageTrendChart: View {
+    let pts: [(t: Date, v: Double)]     // already trimmed to the current window, oldest→newest
     let now: Date
     let secondsToReset: TimeInterval?
-    var windowSeconds: TimeInterval = 5 * 3600
+    let windowSeconds: TimeInterval
     var height: CGFloat = 46
-
-    /// Points for the CURRENT session only: trim everything up to and including the most
-    /// recent reset (a downward jump), so a prior session's curve isn't shown.
-    private var pts: [(t: Date, v: Double)] {
-        let all = samples.compactMap { s in s.session.map { (s.at, $0) } }
-        var seg = all
-        if all.count >= 2 {
-            for i in stride(from: all.count - 1, to: 0, by: -1)
-            where all[i].1 + Projection.resetDrop < all[i - 1].1 {
-                seg = Array(all[i...]); break
-            }
-        }
-        return seg
-    }
 
     /// %-value of the even-pace guide at a given time: linear from window-start (0%)
     /// to reset (100%). nil when the reset time is unknown.
@@ -340,7 +379,6 @@ struct SessionTrendChart: View {
     }
 
     var body: some View {
-        let pts = self.pts
         if pts.count >= 2, let first = pts.first {
             let last = pts[pts.count - 1]
             let tMin = first.t
@@ -400,8 +438,56 @@ struct SessionTrendChart: View {
                 }
                 .font(.caption2).foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+/// In-session usage trend: session utilization (%) over the last few hours. Needs
+/// ≥2 samples; shows a "measuring" hint otherwise.
+struct SessionTrendChart: View {
+    let samples: [UsageSample]          // session != nil; sorted oldest→newest
+    let now: Date
+    let secondsToReset: TimeInterval?
+    var windowSeconds: TimeInterval = 5 * 3600
+    var height: CGFloat = 46
+
+    private var pts: [(t: Date, v: Double)] {
+        trimToCurrentWindow(samples.compactMap { s in s.session.map { (t: s.at, v: $0) } })
+    }
+
+    var body: some View {
+        let pts = self.pts
+        if pts.count >= 2 {
+            UsageTrendChart(pts: pts, now: now, secondsToReset: secondsToReset,
+                            windowSeconds: windowSeconds, height: height)
         } else {
             Text("세션 추이 측정 중… (몇 분 더 쌓이면 표시)")
+                .font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+}
+
+/// Within-week usage trend: weekly utilization (%) since the last reset, sourced from
+/// the coarser, longer-retention `WeeklyHistory` (session's `UsageHistory` only keeps
+/// a few hours). Needs ≥2 samples; shows a "measuring" hint otherwise.
+struct WeeklyTrendChart: View {
+    let samples: [UsageSample]          // weekly != nil; sorted oldest→newest
+    let now: Date
+    let secondsToReset: TimeInterval?
+    var windowSeconds: TimeInterval = 7 * 24 * 3600
+    var height: CGFloat = 46
+
+    private var pts: [(t: Date, v: Double)] {
+        trimToCurrentWindow(samples.compactMap { s in s.weekly.map { (t: s.at, v: $0) } })
+    }
+
+    var body: some View {
+        let pts = self.pts
+        if pts.count >= 2 {
+            UsageTrendChart(pts: pts, now: now, secondsToReset: secondsToReset,
+                            windowSeconds: windowSeconds, height: height)
+        } else {
+            Text("주간 추이 측정 중… (데이터가 더 쌓이면 표시)")
                 .font(.caption2).foregroundStyle(.tertiary)
         }
     }

@@ -11,7 +11,6 @@ struct LimitAlert: Equatable {
 /// `UsageStore` owns one of these and threads it through `LimitAlerts.evaluate`.
 struct LimitAlertState: Equatable {
     var session = false       // session threshold notified
-    var weekly = false        // weekly threshold notified
     var sessionRisk = false   // session projected-to-exhaust notified
     var weeklyRisk = false    // weekly projected-to-exhaust notified
     var blocked = false       // currently-blocked notified
@@ -19,6 +18,7 @@ struct LimitAlertState: Equatable {
     var resetSoon = false     // session "resets soon" notified
     var paceSlow = false      // under-pace ("you could use more") notified
     var blockImminent = false // session block within the lead time notified
+    var weeklyTier = 0        // highest weekly severity tier notified (0 = none)
     var prevSessionUtil: Double?
 }
 
@@ -93,7 +93,26 @@ enum LimitAlerts {
             } else if u < t { flag = false }
         }
         threshold(session, name: "세션", key: "session", flag: &state.session)
-        threshold(weekly, name: "주간", key: "weekly", flag: &state.weekly)
+
+        // 2b) Weekly severity tiers — a weekly block costs days (not hours, like the
+        //     session), so escalate earlier and more granularly than the shared
+        //     warnThreshold: 50/75/90%, each firing once as it's crossed upward.
+        //     Resetting to 0% (a new week) naturally re-arms every tier.
+        let weeklyTiers: [(pct: Double, label: String)] = [(50, "절반"), (75, "3/4"), (90, "거의 다")]
+        if let u = weekly?.utilization {
+            let crossed = weeklyTiers.lastIndex(where: { u >= $0.pct }).map { $0 + 1 } ?? 0
+            // Emit every tier skipped since the last check (a big single jump shouldn't
+            // silently swallow the lower tiers), not just the highest one now crossed.
+            if crossed > state.weeklyTier {
+                for i in (state.weeklyTier + 1)...crossed {
+                    let tier = weeklyTiers[i - 1]
+                    out.append(LimitAlert(id: "weekly-tier-\(Int(tier.pct))",
+                        title: "주간 한도 \(Int(tier.pct))% — \(tier.label) 사용",
+                        body: "주간 한도의 \(Int(tier.pct))%를 썼어요. 남은 기간에 맞춰 페이스를 조절하세요."))
+                }
+            }
+            state.weeklyTier = crossed
+        }
 
         // 3) Actually blocked right now.
         let maxUtil = max(session?.utilization ?? 0, weekly?.utilization ?? 0)

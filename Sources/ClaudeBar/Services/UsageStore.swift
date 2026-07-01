@@ -76,8 +76,12 @@ final class UsageStore: ObservableObject {
     /// Recorded session-utilization samples within the current 5h window — the in-session
     /// usage trend ("how fast / how much am I burning right now").
     @Published private(set) var sessionTrend: [UsageSample] = []
+    /// Weekly-utilization samples over the last ~8 days — the within-week usage trend.
+    @Published private(set) var weeklyTrend: [UsageSample] = []
     /// Efficiency recap of the most-recently-completed session (for the learning loop).
     @Published private(set) var lastSessionRecap: SessionCoach.Recap?
+    /// "How much can I safely use today?" reading on the weekly limit.
+    @Published private(set) var weeklyAllowance: DailyAllowance.Verdict?
     @Published private(set) var isRefreshing = false
 
     @AppStorage("refreshIntervalSeconds") var refreshInterval: Double = 60 {
@@ -264,23 +268,36 @@ final class UsageStore: ObservableObject {
 
     private func recomputeProjections() {
         guard enableLiveLimits else {
-            sessionProjection = nil; weeklyProjection = nil; sessionTrend = []; lastSessionRecap = nil; return
+            sessionProjection = nil; weeklyProjection = nil; sessionTrend = []; weeklyTrend = []
+            lastSessionRecap = nil; weeklyAllowance = nil; return
         }
         let now = Date()
         let samples = UsageHistory.load()
         // Session-window trend: samples with a session reading from the last 5h, oldest→newest.
         let cutoff = now.addingTimeInterval(-5 * 3600)
         sessionTrend = samples.filter { $0.session != nil && $0.at >= cutoff }.sorted { $0.at < $1.at }
+        // Weekly trend: from the coarser, longer-retention store (8 days), not the
+        // short-lived `UsageHistory` ring buffer.
+        weeklyTrend = WeeklyHistory.load().filter { $0.weekly != nil }.sorted { $0.at < $1.at }
         lastSessionRecap = SessionCoach.lastSessionRecap(samples: samples, now: now)
-        // Session = rolling 5h window → recent burst rate. Weekly = fixed 7-day
-        // bucket → realized average pace since the week started (not a burst).
+        // Session = rolling 5h window → recent burst rate.
         sessionProjection = Projection.compute(points: samples.compactMap { s in s.session.map { (s.at, $0) } },
                                                resetsAt: limits?.session5h?.resetsAt, now: now)
         if let w = limits?.weekly7d {
-            weeklyProjection = Projection.paced(util: w.utilization, resetsAt: w.resetsAt,
-                                                windowSeconds: 7 * 24 * 3600, now: now)
+            // Weekly = fixed 7-day bucket → realized average pace since the week started,
+            // blended with a short-burst trajectory so a fast start doesn't go unnoticed
+            // for the first 6h (see `Projection.combinedWeekly`).
+            let weeklyPoints = samples.compactMap { s in s.weekly.map { (s.at, $0) } }
+            weeklyProjection = Projection.combinedWeekly(points: weeklyPoints, util: w.utilization,
+                                                          resetsAt: w.resetsAt,
+                                                          windowSeconds: 7 * 24 * 3600, now: now)
+            let midnight = Calendar.current.startOfDay(for: now)
+            let todayStartUtil = weeklyPoints.filter { $0.0 < midnight }.max { $0.0 < $1.0 }?.1
+            weeklyAllowance = DailyAllowance.verdict(util: w.utilization, resetsAt: w.resetsAt, now: now,
+                                                     todayStartUtil: todayStartUtil)
         } else {
             weeklyProjection = nil
+            weeklyAllowance = nil
         }
     }
 
@@ -368,6 +385,12 @@ final class UsageStore: ObservableObject {
     /// Whether the efficiency card has anything worth showing.
     var hasEfficiencyData: Bool {
         enableLiveLimits && (snapshot.currentContextTokens > 0 || lastSessionRecap != nil)
+    }
+
+    /// New-work vs re-read-old-context share of the 5h window — how much of the
+    /// limit consumed so far is "new work" vs "re-reading" (see `CacheEfficiency`).
+    var cacheEfficiency: CacheEfficiency.Verdict? {
+        CacheEfficiency.verdict(snapshot.windowTokens)
     }
 
     /// The session part of the bar label: self-warns "막힘 50m" (time until you'll hit

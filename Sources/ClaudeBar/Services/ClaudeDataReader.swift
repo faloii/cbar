@@ -80,7 +80,11 @@ struct ClaudeDataReader {
     // MARK: - session *.jsonl logs
 
     private func applySessionLogs(to snap: inout UsageSnapshot, now: Date) {
-        let records = recentRecords(now: now)
+        // Scan the full 7-day range once (not just the 36h the window/today figures
+        // need) so the per-project weekly breakdown below can piggyback on the same
+        // pass — the per-file parse cache means this costs nothing extra on repeat
+        // refreshes (only genuinely new/changed files get re-parsed).
+        let records = recentRecords(now: now, since: 7 * 24 * 3600)
         let windowStart = now.addingTimeInterval(-Self.windowDuration)
         let todayStart = Calendar.current.startOfDay(for: now)
 
@@ -107,6 +111,11 @@ struct ClaudeDataReader {
                          var project = "기타"; var modelCost: [String: Double] = [:] }
         var bySession: [String: SessAcc] = [:]
 
+        // Per-project totals across the full 7-day scan (independent of the 5h/today
+        // filters below) — "which project is eating the weekly limit?"
+        struct ProjAcc { var tokens = 0; var cost = 0.0 }
+        var byProject: [String: ProjAcc] = [:]
+
         for r in records {
             let isToday = r.timestamp >= todayStart
             if isToday {
@@ -125,16 +134,20 @@ struct ClaudeDataReader {
                 currentContextTokens = tokens.input + tokens.cacheRead + tokens.cacheWrite
             }
 
+            let proj = Self.projectName(r.cwd)
             if !r.sessionId.isEmpty {
                 var acc = bySession[r.sessionId] ?? SessAcc()
                 acc.cost += cost
                 acc.requests += 1
                 if r.timestamp > acc.last { acc.last = r.timestamp }
-                let proj = Self.projectName(r.cwd)
                 if proj != "기타" { acc.project = proj }
                 acc.modelCost[key, default: 0] += cost
                 bySession[r.sessionId] = acc
             }
+            var pAcc = byProject[proj] ?? ProjAcc()
+            pAcc.tokens += tokens.total
+            pAcc.cost += cost
+            byProject[proj] = pAcc
 
             if r.timestamp >= windowStart {
                 windowTokens += tokens
@@ -167,6 +180,10 @@ struct ClaudeDataReader {
         }
         .filter { $0.cost > 0 }
         .sorted { $0.cost > $1.cost }
+
+        snap.weeklyProjectUsage = byProject.map { ProjectWeeklyUsage(project: $0.key, tokens: $0.value.tokens, cost: $0.value.cost) }
+            .filter { $0.cost > 0 }
+            .sorted { $0.cost > $1.cost }
 
         snap.windowTokens = windowTokens
         snap.windowCost = windowCost
@@ -203,8 +220,9 @@ struct ClaudeDataReader {
     private static let parseCacheLock = NSLock()
     private static var parseCache: [String: CachedParse] = [:]
 
-    /// Parse session logs touched in the last ~36h. (We only need today + a 5h
-    /// window, so older files are skipped for speed.)
+    /// Parse session logs touched in the last `since` seconds (default 7 days — wide
+    /// enough for the per-project weekly breakdown; the 5h-window/today figures then
+    /// just filter this same superset by timestamp). Older files are skipped for speed.
     /// The working directory of the most recently active conversation — used to
     /// build the "continue last conversation" auto-resume command. Reads `cwd` from
     /// the newest session log (off the hot path; called only when wiring up resume).
@@ -235,14 +253,14 @@ struct ClaudeDataReader {
         return nil
     }
 
-    private func recentRecords(now: Date) -> [LogRecord] {
+    private func recentRecords(now: Date, since: TimeInterval = 7 * 24 * 3600) -> [LogRecord] {
         let projects = Self.configDir.appendingPathComponent("projects", isDirectory: true)
         let fm = FileManager.default
         guard let walker = fm.enumerator(at: projects,
                                          includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
                                          options: [.skipsHiddenFiles]) else { return [] }
 
-        let cutoff = now.addingTimeInterval(-36 * 3600)
+        let cutoff = now.addingTimeInterval(-since)
 
         // 1) Find the recent files (cheap stat pass).
         var recent: [(url: URL, mtime: Date, size: Int)] = []
