@@ -201,6 +201,15 @@ final class UsageStore: ObservableObject {
     @AppStorage("notifyUnderpace") var notifyUnderpace: Bool = false {
         didSet { objectWillChange.send() }
     }
+    /// Notify when the conversation you're CURRENTLY in gets heavy (big context +
+    /// mostly re-reading old turns) — a nudge for THIS session, not just an in-app
+    /// stat. Best-effort: only as fresh as the last full session-log scan (popover
+    /// open, or the bar metric set to a token/cost display). Off by default — this
+    /// is an efficiency nudge, not a limit warning.
+    @AppStorage("notifyCompactSuggestion") var notifyCompactSuggestion: Bool = false {
+        didSet { objectWillChange.send() }
+    }
+    private var compactSuggestState = CompactSuggestion.State()
     /// Keep the system awake while blocked so the reset (and auto-resume) isn't missed.
     @AppStorage("keepAwakeWhileBlocked") var keepAwakeWhileBlocked: Bool = false {
         didSet { objectWillChange.send(); updatePowerAssertion() }
@@ -264,6 +273,7 @@ final class UsageStore: ObservableObject {
             if live { self.limits = lim } else { self.limits = nil }
             self.recomputeProjections()
             self.processLimitAlerts()
+            self.processCompactSuggestion()
             self.maybeWeeklySummary()
             self.updatePowerAssertion()   // hold/release based on the fresh blocked state
             // If the risk level changed, re-arm the timer at the matching cadence.
@@ -344,11 +354,7 @@ final class UsageStore: ObservableObject {
         // The under-pace nudge has its own opt-in toggle; everything else follows
         // the main warning toggle.
         let toPost = alerts.filter { $0.id == "pace-slow" ? notifyUnderpace : notifyOnWarning }
-        let quiet = isSnoozed
-            || (quietHoursEnabled
-                && QuietHours.isQuiet(hour: Calendar.current.component(.hour, from: now),
-                                      start: quietHoursStart, end: quietHoursEnd))
-        if !quiet {
+        if !isQuietNow(now) {
             // Bundle same-tick alerts into one notification so a stack of separate
             // triggers (e.g. skipping two weekly tiers at once) doesn't post a stack
             // of separate banners.
@@ -369,6 +375,31 @@ final class UsageStore: ObservableObject {
                 else { CommandRunner.run(custom) }
             }
         }
+    }
+
+    /// Whether proactive notifications should be suppressed right now (ad-hoc
+    /// snooze or the scheduled quiet-hours window) — the in-app UI keeps reflecting
+    /// real state regardless.
+    private func isQuietNow(_ now: Date) -> Bool {
+        isSnoozed
+            || (quietHoursEnabled
+                && QuietHours.isQuiet(hour: Calendar.current.component(.hour, from: now),
+                                      start: quietHoursStart, end: quietHoursEnd))
+    }
+
+    /// Notify once when the conversation you're CURRENTLY in (best-effort: whichever
+    /// session log was touched most recently) crosses into "heavy" — see
+    /// `CompactSuggestion`. Independent of the limit-alert system: this is about
+    /// conversation efficiency, not quota, so it has its own opt-in toggle.
+    private func processCompactSuggestion() {
+        guard notifyCompactSuggestion, enableLiveLimits else { return }
+        let current = snapshot.recentSessions.first { $0.sessionId == snapshot.currentSessionId }
+        guard CompactSuggestion.shouldNotify(current: current, state: &compactSuggestState) else { return }
+        guard !isQuietNow(Date()), let s = current else { return }
+        Notifier.notify(
+            title: "이 대화, 슬슬 무거워요",
+            body: "컨텍스트 ~\(Fmt.tokens(s.lastContextTokens)) · 재읽기 \(Int((s.cacheReadShare * 100).rounded()))% — /compact 하면 같은 한도로 더 오래 가요.",
+            id: "compact-suggest-\(s.sessionId)")
     }
 
     /// Idle cadence when the popover is closed — kept at the limits cache TTL (180s)

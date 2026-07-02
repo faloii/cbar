@@ -105,6 +105,7 @@ struct ClaudeDataReader {
         // that drives the /compact-or-new-session lever.
         var latestTurnAt = Date.distantPast
         var currentContextTokens = 0
+        var currentSessionId = ""
 
         // Per-conversation accumulation for the session breakdown.
         struct SessAcc { var cost = 0.0; var requests = 0; var last = Date.distantPast
@@ -133,6 +134,7 @@ struct ClaudeDataReader {
             if r.timestamp > latestTurnAt {
                 latestTurnAt = r.timestamp
                 currentContextTokens = tokens.input + tokens.cacheRead + tokens.cacheWrite
+                currentSessionId = r.sessionId
             }
 
             let proj = Self.projectName(r.cwd)
@@ -208,6 +210,7 @@ struct ClaudeDataReader {
             .filter { $0.tokens.total > 0 }
             .sorted { $0.tokens.total > $1.tokens.total }
         snap.currentContextTokens = currentContextTokens
+        snap.currentSessionId = currentSessionId
     }
 
     /// One parsed line from a session log.

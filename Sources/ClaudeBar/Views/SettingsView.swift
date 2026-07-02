@@ -139,6 +139,11 @@ struct SettingsView: View {
                 Text("지금 페이스면 리셋 때 한도가 크게 남을 것 같을 때 한 번 알려줍니다. 자리를 비우면(사용 없음) 울리지 않아요. 기본은 꺼져 있습니다.")
                     .font(.caption).foregroundStyle(.secondary)
 
+                Toggle("지금 쓰는 대화가 무거워지면 알림", isOn: $store.notifyCompactSuggestion)
+                    .disabled(!store.enableLiveLimits)
+                Text("컨텍스트가 크고 재읽기 비중이 높은 대화로 감지되면 그 세션 하나에 대해 한 번 알려줍니다(/compact 제안). 팝오버를 자주 열지 않으면 갱신이 늦을 수 있어요. 기본은 꺼져 있습니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+
                 Toggle("조용한 시간", isOn: $store.quietHoursEnabled)
                 if store.quietHoursEnabled {
                     HStack {

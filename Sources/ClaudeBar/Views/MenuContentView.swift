@@ -572,21 +572,13 @@ struct MenuContentView: View {
         v.downshiftTo != nil ? .orange : .green
     }
 
-    /// A session whose last known turn was both a heavy context AND dominated by
-    /// re-reading old context — the same bar the aggregate 5h card uses, applied
-    /// per-session so you can see WHICH conversation to /compact, not just that
-    /// "something" is heavy.
-    private func isCompactCandidate(_ s: SessionStat) -> Bool {
-        s.lastContextTokens >= SessionCoach.heavyContextTokens && s.cacheReadShare >= CacheEfficiency.heavyReuseThreshold
-    }
-
     // Recent conversations by cost — spot which sessions ran on which model so you
     // can right-size the model next time, and which ones are worth /compact-ing.
     @ViewBuilder private var sessionsSection: some View {
         CardHeader(icon: "rectangle.stack.fill", title: "세션별 · 최근")
         VStack(alignment: .leading, spacing: 9) {
             ForEach(snap.recentSessions.prefix(5)) { s in
-                let compact = isCompactCandidate(s)
+                let compact = CompactSuggestion.isHeavy(s)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(s.project).font(.callout.weight(.medium)).lineLimit(1)

@@ -88,6 +88,10 @@ struct UsageSnapshot {
     /// active conversation is. Large = each turn eats more of the limit, so /compact
     /// or a fresh session stretches the window.
     var currentContextTokens = 0
+    /// The session ID that most-recent turn belongs to — "which conversation am I
+    /// actually in right now" (best-effort: whichever session log was touched most
+    /// recently). Looks up into `recentSessions` for that session's own stats.
+    var currentSessionId = ""
 
     // Today (local calendar day), computed from the session logs.
     var todayTokens = TokenCounts()
@@ -124,6 +128,7 @@ struct UsageSnapshot {
         s.windowByModel = o.windowByModel; s.recentSessions = o.recentSessions
         s.weeklyProjectUsage = o.weeklyProjectUsage
         s.currentContextTokens = o.currentContextTokens
+        s.currentSessionId = o.currentSessionId
         s.todayTokens = o.todayTokens; s.todayCost = o.todayCost; s.todayByModel = o.todayByModel
         s.todayRequests = o.todayRequests; s.todaySessions = o.todaySessions; s.todayToolCalls = o.todayToolCalls
         return s
