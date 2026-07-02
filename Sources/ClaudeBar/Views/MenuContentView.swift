@@ -295,6 +295,15 @@ struct MenuContentView: View {
         }
     }
 
+    // Folds the re-read share into the SAME sentence as the /compact action (when
+    // it's the dominant driver), so the number always comes with a "so what" —
+    // a bare "재읽기 95%" stat doesn't tell you what to do about it.
+    private func heavyContextActionText(_ ce: CacheEfficiency.Verdict?) -> String {
+        let base = "/compact 하거나 새 대화로 시작하면 같은 한도로 더 오래 가요."
+        guard let ce, ce.cacheReadShare >= CacheEfficiency.heavyReuseThreshold else { return base }
+        return "한도 소모의 \(Int((ce.cacheReadShare * 100).rounded()))%가 과거 대화 재읽기예요 — " + base
+    }
+
     private func efficiencyColor(_ v: SessionCoach.EfficiencyVerdict) -> Color {
         switch v {
         case .optimal:    return .green
@@ -332,23 +341,23 @@ struct MenuContentView: View {
             if ctx >= SessionCoach.heavyContextTokens {
                 HStack(alignment: .top, spacing: 5) {
                     Image(systemName: "rectangle.compress.vertical").frame(width: 12)
-                    Text("/compact 하거나 새 대화로 시작하면 이 값이 내려가 같은 한도로 더 오래 가요.")
+                    Text(heavyContextActionText(store.cacheEfficiency))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .font(.caption2).foregroundStyle(Color.brand)
             }
         }
-        // Cache efficiency — new work vs re-reading old context, over the 5h window.
-        // Informational by default (a big cached system prompt makes some re-read
-        // normal); only tinted when paired with a heavy active conversation, where
-        // the re-read cost is actually compounding every turn.
+        // Cache mix — purely informational context for the number above. The action
+        // (if any) is already spelled out in the heavy-context line, so this never
+        // repeats it or implies a verdict on its own: a big cached system prompt
+        // makes a high re-read share normal even in a small conversation, so the
+        // raw % alone doesn't tell you what to do about it.
         if let ce = store.cacheEfficiency {
-            let heavy = ctx >= SessionCoach.heavyContextTokens && ce.cacheReadShare >= CacheEfficiency.heavyReuseThreshold
             HStack(alignment: .top, spacing: 5) {
                 Image(systemName: "arrow.triangle.2.circlepath").frame(width: 12)
                 Text("최근 5시간 새 작업 \(Int((ce.freshShare * 100).rounded()))% · 재읽기 \(Int((ce.cacheReadShare * 100).rounded()))%")
             }
-            .font(.caption2).foregroundStyle(heavy ? Color.orange : .secondary)
+            .font(.caption2).foregroundStyle(.secondary)
         }
         // Learning loop: how the last completed session was spent.
         if let r = store.lastSessionRecap {
