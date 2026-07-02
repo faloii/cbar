@@ -14,9 +14,17 @@ enum SettingsOpener {
 /// when it closes.
 /// A panel that never becomes key/main, so showing it doesn't make the menu-bar
 /// popover resign key (and dismiss). All Settings controls are mouse-operable.
+///
+/// `isKeyWindow` is overridden to `true` purely for appearance: AppKit tints
+/// controls (toggles, buttons, selected rows) using the muted "inactive window"
+/// palette whenever `window.isKeyWindow` is false, which made every toggle here
+/// look flat gray regardless of on/off state. Faking `isKeyWindow` restores full
+/// color for child controls without touching `canBecomeKey`, so the window still
+/// never actually steals key status (and the popover still doesn't dismiss).
 final class NonKeyPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
+    override var isKeyWindow: Bool { true }
 }
 
 @MainActor

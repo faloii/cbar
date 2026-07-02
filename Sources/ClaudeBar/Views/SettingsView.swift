@@ -221,6 +221,11 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 380, height: 700)
+        // Without an explicit tint, a toggle's ON state falls back to the system
+        // accent color — which under some accent-color settings (e.g. Graphite)
+        // renders ON/OFF almost indistinguishably. Match the popover's branding
+        // and guarantee a clearly-colored ON state regardless of system settings.
+        .tint(Color.brand)
     }
 
     private static var appVersion: String {
