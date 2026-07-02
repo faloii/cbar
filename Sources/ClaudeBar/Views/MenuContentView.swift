@@ -572,15 +572,31 @@ struct MenuContentView: View {
         v.downshiftTo != nil ? .orange : .green
     }
 
+    /// A session whose last known turn was both a heavy context AND dominated by
+    /// re-reading old context — the same bar the aggregate 5h card uses, applied
+    /// per-session so you can see WHICH conversation to /compact, not just that
+    /// "something" is heavy.
+    private func isCompactCandidate(_ s: SessionStat) -> Bool {
+        s.lastContextTokens >= SessionCoach.heavyContextTokens && s.cacheReadShare >= CacheEfficiency.heavyReuseThreshold
+    }
+
     // Recent conversations by cost — spot which sessions ran on which model so you
-    // can right-size the model next time.
+    // can right-size the model next time, and which ones are worth /compact-ing.
     @ViewBuilder private var sessionsSection: some View {
         CardHeader(icon: "rectangle.stack.fill", title: "세션별 · 최근")
         VStack(alignment: .leading, spacing: 9) {
             ForEach(snap.recentSessions.prefix(5)) { s in
+                let compact = isCompactCandidate(s)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(s.project).font(.callout.weight(.medium)).lineLimit(1)
+                        if compact {
+                            Text("compact 권장")
+                                .font(.caption2.weight(.semibold))
+                                .padding(.horizontal, 6).padding(.vertical, 1)
+                                .background(Capsule().fill(Color.orange.opacity(0.16)))
+                                .foregroundStyle(Color.orange)
+                        }
                         Spacer(minLength: 6)
                         Text("~\(Fmt.usd(s.cost))").font(.callout.weight(.semibold)).monospacedDigit()
                     }
@@ -596,11 +612,16 @@ struct MenuContentView: View {
                         Text(Fmt.time(s.lastActivity))
                     }
                     .font(.caption2).foregroundStyle(.secondary)
+                    if compact {
+                        Text("컨텍스트 ~\(Fmt.tokens(s.lastContextTokens)) · 재읽기 \(Int((s.cacheReadShare * 100).rounded()))% — 다음에 열면 /compact 하세요")
+                            .font(.caption2).foregroundStyle(Color.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
                 .accessibilityElement(children: .combine)
             }
         }
-        Text("비용이 큰 대화 순. 한 모델로만 비쌌다면 다음엔 작업에 맞춰 모델을 바꿔보세요.")
+        Text("비용이 큰 대화 순. 한 모델로만 비쌌다면 다음엔 작업에 맞춰 모델을 바꿔보세요. 주황 배지가 뜨면 그 대화를 다시 열 때 /compact부터 하세요.")
             .font(.caption2).foregroundStyle(.tertiary)
             .fixedSize(horizontal: false, vertical: true)
     }

@@ -108,7 +108,8 @@ struct ClaudeDataReader {
 
         // Per-conversation accumulation for the session breakdown.
         struct SessAcc { var cost = 0.0; var requests = 0; var last = Date.distantPast
-                         var project = "기타"; var modelCost: [String: Double] = [:] }
+                         var project = "기타"; var modelCost: [String: Double] = [:]
+                         var tokens = TokenCounts(); var lastContextTokens = 0 }
         var bySession: [String: SessAcc] = [:]
 
         // Per-project totals across the full 7-day scan (independent of the 5h/today
@@ -139,7 +140,11 @@ struct ClaudeDataReader {
                 var acc = bySession[r.sessionId] ?? SessAcc()
                 acc.cost += cost
                 acc.requests += 1
-                if r.timestamp > acc.last { acc.last = r.timestamp }
+                acc.tokens += tokens
+                if r.timestamp > acc.last {
+                    acc.last = r.timestamp
+                    acc.lastContextTokens = tokens.input + tokens.cacheRead + tokens.cacheWrite
+                }
                 if proj != "기타" { acc.project = proj }
                 acc.modelCost[key, default: 0] += cost
                 bySession[r.sessionId] = acc
@@ -176,7 +181,9 @@ struct ClaudeDataReader {
         snap.recentSessions = bySession.map { id, a in
             SessionStat(sessionId: id, project: a.project, cost: a.cost, requests: a.requests,
                         models: a.modelCost.sorted { $0.value > $1.value }.map(\.key),
-                        lastActivity: a.last)
+                        lastActivity: a.last,
+                        cacheReadShare: a.tokens.total > 0 ? Double(a.tokens.cacheRead) / Double(a.tokens.total) : 0,
+                        lastContextTokens: a.lastContextTokens)
         }
         .filter { $0.cost > 0 }
         .sorted { $0.cost > $1.cost }

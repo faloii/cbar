@@ -58,6 +58,11 @@ struct SessionStat: Identifiable {
     let requests: Int
     let models: [String]          // distinct models used, by cost desc (first = dominant)
     let lastActivity: Date
+    /// This session's own re-read share across all its turns (see `CacheEfficiency`)
+    /// and the context size of its most recent turn — lets you spot WHICH
+    /// conversation is worth /compact-ing, not just the account-wide 5h aggregate.
+    let cacheReadShare: Double     // 0...1
+    let lastContextTokens: Int
 }
 
 /// Everything the UI needs for one refresh.
