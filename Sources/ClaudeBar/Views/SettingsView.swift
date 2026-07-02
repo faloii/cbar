@@ -132,7 +132,7 @@ struct SettingsView: View {
                 Text("지금 속도면 한도에 막힐 시점이 이 시간 안으로 들어오면 ‘곧 막힘 · ~N분 후’ 알림을 한 번 보냅니다. 메뉴바 라벨도 ‘막힘 50m’처럼 남은 시간으로 바뀝니다.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("주간 사용 요약 알림", isOn: $store.weeklySummaryEnabled)
-                Text("매주 한 번 지난 7일 비용·Opus 비중 요약과 코칭을 알림으로 보냅니다.")
+                Text("주간 한도가 실제로 리셋되는 시점에 맞춰(라이브 한도가 꺼져 있으면 대략 7일마다) 지난 7일 비용·Opus 비중·재읽기 비율·가장 많이 쓴 프로젝트와 코칭을 한 번에 요약해 보냅니다.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("한도 많이 남길 때 알림 (더 쓰라고)", isOn: $store.notifyUnderpace)
                     .disabled(!store.enableLiveLimits)
@@ -141,7 +141,12 @@ struct SettingsView: View {
 
                 Toggle("지금 쓰는 대화가 무거워지면 알림", isOn: $store.notifyCompactSuggestion)
                     .disabled(!store.enableLiveLimits)
-                Text("컨텍스트가 크고 재읽기 비중이 높은 대화로 감지되면 그 세션 하나에 대해 한 번 알려줍니다(/compact 제안). 팝오버를 자주 열지 않으면 갱신이 늦을 수 있어요. 기본은 꺼져 있습니다.")
+                Text("컨텍스트가 크고 재읽기 비중이 높은 대화로 감지되면 그 세션 하나에 대해 한 번 알려줍니다(/compact 제안). 켜두면 새로고침 주기마다 대화 로그를 다시 확인해요(팝오버를 안 열어도 됨) — 그만큼 새로고침 비용이 살짝 늘어요. 기본은 꺼져 있습니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+
+                Toggle("가벼운 대화인데 Opus면 모델 전환 제안", isOn: $store.notifyModelDownshift)
+                    .disabled(!store.enableLiveLimits)
+                Text("5시간 창의 주력 모델이 Opus인데 최근 턴들의 출력이 가벼워 보이면, Sonnet으로 바꿔도 될 것 같다고 한 번 알려줍니다(‘모델·effort 회고’ 카드와 같은 판단). 한도 소모량은 그대로고 비용만 바뀝니다 — 모델 선택은 비용을 줄이는 수단이지 한도를 늘리는 수단은 아니에요. 기본은 꺼져 있습니다.")
                     .font(.caption).foregroundStyle(.secondary)
 
                 Toggle("조용한 시간", isOn: $store.quietHoursEnabled)

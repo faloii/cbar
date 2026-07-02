@@ -84,6 +84,10 @@ struct UsageSnapshot {
     /// is eating the weekly limit?"
     var weeklyProjectUsage: [ProjectWeeklyUsage] = []
 
+    /// Token totals across the full 7-day scan — feeds `CacheEfficiency` for the
+    /// weekly recap notification ("how much of the week was re-reading vs new work").
+    var weeklyTokens = TokenCounts()
+
     /// Context size (prompt tokens) of the most-recent assistant turn — how big the
     /// active conversation is. Large = each turn eats more of the limit, so /compact
     /// or a fresh session stretches the window.
@@ -127,6 +131,7 @@ struct UsageSnapshot {
         s.windowTokens = o.windowTokens; s.windowCost = o.windowCost; s.windowResetAt = o.windowResetAt
         s.windowByModel = o.windowByModel; s.recentSessions = o.recentSessions
         s.weeklyProjectUsage = o.weeklyProjectUsage
+        s.weeklyTokens = o.weeklyTokens
         s.currentContextTokens = o.currentContextTokens
         s.currentSessionId = o.currentSessionId
         s.todayTokens = o.todayTokens; s.todayCost = o.todayCost; s.todayByModel = o.todayByModel

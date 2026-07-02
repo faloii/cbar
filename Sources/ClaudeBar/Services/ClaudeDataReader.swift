@@ -117,6 +117,9 @@ struct ClaudeDataReader {
         // filters below) — "which project is eating the weekly limit?"
         struct ProjAcc { var tokens = 0; var cost = 0.0 }
         var byProject: [String: ProjAcc] = [:]
+        // Token totals across the same full 7-day scan (fresh vs re-read), for the
+        // weekly recap notification's cache-efficiency read.
+        var weeklyTokens = TokenCounts()
 
         for r in records {
             let isToday = r.timestamp >= todayStart
@@ -155,6 +158,7 @@ struct ClaudeDataReader {
             pAcc.tokens += tokens.total
             pAcc.cost += cost
             byProject[proj] = pAcc
+            weeklyTokens += tokens
 
             if r.timestamp >= windowStart {
                 windowTokens += tokens
@@ -193,6 +197,7 @@ struct ClaudeDataReader {
         snap.weeklyProjectUsage = byProject.map { ProjectWeeklyUsage(project: $0.key, tokens: $0.value.tokens, cost: $0.value.cost) }
             .filter { $0.cost > 0 }
             .sorted { $0.cost > $1.cost }
+        snap.weeklyTokens = weeklyTokens
 
         snap.windowTokens = windowTokens
         snap.windowCost = windowCost

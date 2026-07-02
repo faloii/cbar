@@ -203,13 +203,22 @@ final class UsageStore: ObservableObject {
     }
     /// Notify when the conversation you're CURRENTLY in gets heavy (big context +
     /// mostly re-reading old turns) — a nudge for THIS session, not just an in-app
-    /// stat. Best-effort: only as fresh as the last full session-log scan (popover
-    /// open, or the bar metric set to a token/cost display). Off by default — this
-    /// is an efficiency nudge, not a limit warning.
+    /// stat. While on, forces a full session-log scan every refresh tick (see the
+    /// `full` gate in `refresh()`) so this stays timely without requiring the
+    /// popover to be open. Off by default — this is an efficiency nudge, not a
+    /// limit warning.
     @AppStorage("notifyCompactSuggestion") var notifyCompactSuggestion: Bool = false {
         didSet { objectWillChange.send() }
     }
     private var compactSuggestState = CompactSuggestion.State()
+    /// Notify when the dominant model in the 5h window looks downshift-worthy
+    /// (top-tier model, but turns look light/moderate) — the same read as the
+    /// in-app "모델·effort 회고" card, promoted to a one-shot notification since
+    /// it's a concrete, actionable cost lever. Off by default.
+    @AppStorage("notifyModelDownshift") var notifyModelDownshift: Bool = false {
+        didSet { objectWillChange.send() }
+    }
+    private var modelDownshiftState = ModelDownshiftSuggestion.State()
     /// Keep the system awake while blocked so the reset (and auto-resume) isn't missed.
     @AppStorage("keepAwakeWhileBlocked") var keepAwakeWhileBlocked: Bool = false {
         didSet { objectWillChange.send(); updatePowerAssertion() }
@@ -259,8 +268,11 @@ final class UsageStore: ObservableObject {
         let live = enableLiveLimits
         // Always parse the cheap stats cache (for the menu-bar/weekly summary); skip
         // only the heavy session-log scan when the popover is closed and the bar metric
-        // is a limit % (driven by `limits` alone).
-        let full = popoverVisible || !barMetric.needsLiveLimits
+        // is a limit % (driven by `limits` alone). Exception: the "current conversation
+        // got heavy" nudge needs `currentSessionId` to stay fresh to be worth anything,
+        // so keep scanning every tick while that's on (the per-file parse cache makes
+        // repeat scans cheap — only the most recently modified log actually reparses).
+        let full = popoverVisible || !barMetric.needsLiveLimits || notifyCompactSuggestion
         let previous = snapshot
         // Near a limit, fetch fresher data (shorter cache TTL) so the warning is
         // timely; when safe, stay gentle on the rate-limited endpoint.
@@ -274,6 +286,7 @@ final class UsageStore: ObservableObject {
             self.recomputeProjections()
             self.processLimitAlerts()
             self.processCompactSuggestion()
+            self.processModelDownshiftSuggestion()
             self.maybeWeeklySummary()
             self.updatePowerAssertion()   // hold/release based on the fresh blocked state
             // If the risk level changed, re-arm the timer at the matching cadence.
@@ -286,21 +299,58 @@ final class UsageStore: ObservableObject {
     }
 
     @AppStorage("lastWeeklySummaryAt") private var lastWeeklySummaryAt: Double = 0
+    /// Last-seen weekly-limit `resetsAt`, to detect the moment the window actually
+    /// rolls over (see `WeeklyResetRecap`) instead of firing on an arbitrary timer.
+    private var lastSeenWeeklyResetsAt: Date?
 
-    /// Fire a weekly usage summary notification ~once every 7 days.
+    /// Fire a weekly usage recap notification: once per real weekly-limit reset
+    /// when live limits are on (so the recap lands right when last week wraps up),
+    /// falling back to a rolling ~7-day timer when they're off (no reset to observe).
     private func maybeWeeklySummary() {
         guard weeklySummaryEnabled, let r = snapshot.weeklyReview else { return }
-        let now = Date().timeIntervalSince1970
-        guard now - lastWeeklySummaryAt >= 7 * 86400 else { return }
-        lastWeeklySummaryAt = now
+        let newResetsAt = limits?.weekly7d?.resetsAt
+        if enableLiveLimits, newResetsAt != nil {
+            guard WeeklyResetRecap.justReset(old: lastSeenWeeklyResetsAt, new: newResetsAt) else {
+                lastSeenWeeklyResetsAt = newResetsAt
+                return
+            }
+        } else {
+            guard Date().timeIntervalSince1970 - lastWeeklySummaryAt >= 7 * 86400 else { return }
+        }
+        // Quiet hours/snooze: leave the reset "unconsumed" so this is retried (not
+        // lost) on the next non-quiet tick, rather than silently skipping the week.
+        guard !isQuietNow(Date()) else { return }
+        lastSeenWeeklyResetsAt = newResetsAt
+        lastWeeklySummaryAt = Date().timeIntervalSince1970
 
         var body = "지난 7일 ~\(Fmt.usd(r.thisCost))"
         if let d = r.costDeltaPct {
             body += d >= 0 ? " · 전주 ▲\(Int(d.rounded()))%" : " · 전주 ▼\(Int(abs(d).rounded()))%"
         }
         body += " · Opus 비중 \(Int((r.opusShareThis * 100).rounded()))%"
+        if let ce = CacheEfficiency.verdict(snapshot.weeklyTokens) {
+            body += " · 재읽기 \(Int((ce.cacheReadShare * 100).rounded()))%"
+        }
+        if let top = snapshot.weeklyProjectUsage.first {
+            body += " · 최다 사용 \(top.project)"
+        }
         if let coaching = r.coaching { body += "\n\(coaching)" }
-        Notifier.notify(title: "주간 사용 요약", body: body, id: "weekly-summary")
+        Notifier.notify(title: "주간 마감 리캡", body: body, id: "weekly-summary")
+    }
+
+    /// Notify once when the dominant model in the 5h window newly looks
+    /// downshift-worthy — see `ModelDownshiftSuggestion`. Independent of the
+    /// limit-alert system: this is a cost-efficiency nudge, not a quota warning,
+    /// so it has its own opt-in toggle.
+    private func processModelDownshiftSuggestion() {
+        guard notifyModelDownshift, enableLiveLimits else { return }
+        guard ModelDownshiftSuggestion.shouldNotify(modelRecap, state: &modelDownshiftState) else { return }
+        guard !isQuietNow(Date()), let v = modelRecap, let to = v.downshiftTo else { return }
+        let savingPct = Int(((v.downshiftSaving ?? 0) * 100).rounded())
+        Notifier.notify(
+            title: "\(v.model) 대신 \(to)면 충분해 보여요",
+            body: "최근 턴 출력이 가벼운 편이에요 — \(to)로 바꾸면 이 창에서 비용 \(savingPct)% 절감돼요 (한도 소모량은 동일).",
+            id: "model-downshift-\(v.model)")
     }
 
     private func recomputeProjections() {

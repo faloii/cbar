@@ -993,3 +993,62 @@ final class LimitAlertsTests: XCTestCase {
         XCTAssertFalse(eval(session: win(60, resetIn: 4 * 3600), sp: safe, state: &s).contains { $0.id == "pace-slow" })
     }
 }
+
+final class WeeklyResetRecapTests: XCTestCase {
+    let t = Date(timeIntervalSince1970: 1_000_000)
+
+    func testDetectsForwardJump() {
+        let old = t
+        let new = t.addingTimeInterval(7 * 24 * 3600)
+        XCTAssertTrue(WeeklyResetRecap.justReset(old: old, new: new))
+    }
+
+    func testUnchangedResetIsNotAReset() {
+        XCTAssertFalse(WeeklyResetRecap.justReset(old: t, new: t))
+    }
+
+    func testFirstObservationIsNeverAReset() {
+        XCTAssertFalse(WeeklyResetRecap.justReset(old: nil, new: t))
+        XCTAssertFalse(WeeklyResetRecap.justReset(old: t, new: nil))
+        XCTAssertFalse(WeeklyResetRecap.justReset(old: nil, new: nil))
+    }
+}
+
+final class ModelDownshiftSuggestionTests: XCTestCase {
+    private func verdict(model: String = "Opus", downshiftTo: String? = "Sonnet") -> ModelRecap.Verdict {
+        ModelRecap.Verdict(model: model, isTopTier: true, outputPerTurn: 300, requests: 10,
+                           intensity: .light, downshiftTo: downshiftTo,
+                           downshiftSaving: 0.8, downshiftSavingUSD: 4.0)
+    }
+
+    func testFiresOnceWhenDownshiftAvailable() {
+        var state = ModelDownshiftSuggestion.State()
+        let v = verdict()
+        XCTAssertTrue(ModelDownshiftSuggestion.shouldNotify(v, state: &state))
+        XCTAssertFalse(ModelDownshiftSuggestion.shouldNotify(v, state: &state))
+    }
+
+    func testNoDownshiftDoesNotNotify() {
+        var state = ModelDownshiftSuggestion.State()
+        XCTAssertFalse(ModelDownshiftSuggestion.shouldNotify(verdict(downshiftTo: nil), state: &state))
+    }
+
+    func testRearmsWhenNoLongerDownshiftWorthy() {
+        var state = ModelDownshiftSuggestion.State()
+        XCTAssertTrue(ModelDownshiftSuggestion.shouldNotify(verdict(), state: &state))
+        // Turns got heavier — same model, no more downshift suggestion.
+        XCTAssertFalse(ModelDownshiftSuggestion.shouldNotify(verdict(downshiftTo: nil), state: &state))
+        XCTAssertTrue(ModelDownshiftSuggestion.shouldNotify(verdict(), state: &state))
+    }
+
+    func testSwitchingModelsResetsState() {
+        var state = ModelDownshiftSuggestion.State()
+        XCTAssertTrue(ModelDownshiftSuggestion.shouldNotify(verdict(model: "Opus"), state: &state))
+        XCTAssertTrue(ModelDownshiftSuggestion.shouldNotify(verdict(model: "Opus-4"), state: &state))
+    }
+
+    func testNilVerdictDoesNotCrash() {
+        var state = ModelDownshiftSuggestion.State()
+        XCTAssertFalse(ModelDownshiftSuggestion.shouldNotify(nil, state: &state))
+    }
+}
