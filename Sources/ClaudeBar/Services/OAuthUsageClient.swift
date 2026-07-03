@@ -243,16 +243,27 @@ struct ClaudeCredentials: Codable {
     /// the old one we just used is now dead). Returns nil if no refresh token is held
     /// (e.g. right after an app restart) or the refresh failed.
     static func refreshSilently() async -> ClaudeCredentials? {
-        lock.lock(); let rt = cached?.refreshToken; lock.unlock()
-        guard let rt, !rt.isEmpty else { return nil }
+        guard let rt = cachedRefreshToken(), !rt.isEmpty else { return nil }
         guard let fresh = try? await performRefresh(refreshToken: rt) else { return nil }
         // Keep Claude Code in sync first (it owns the credential); then our caches.
         writeBackToKeychain(access: fresh.accessToken,
                             refresh: fresh.refreshToken ?? rt,
                             expiresAt: fresh.expiresAt)
-        lock.lock(); cached = fresh; lock.unlock()
+        setCached(fresh)
         writeFile(fresh)            // access token only (refreshToken excluded by CodingKeys)
         return fresh
+    }
+
+    // `NSLock.lock()/unlock()` are flagged unavailable when called directly inside
+    // an `async` function body (Swift 6 strict concurrency) — wrapping each in a
+    // plain synchronous function (as `load()`/`invalidate()` above already do)
+    // sidesteps that without changing the locking behavior at all.
+    private static func cachedRefreshToken() -> String? {
+        lock.lock(); defer { lock.unlock() }
+        return cached?.refreshToken
+    }
+    private static func setCached(_ c: ClaudeCredentials) {
+        lock.lock(); cached = c; lock.unlock()
     }
 
     private static func performRefresh(refreshToken: String) async throws -> ClaudeCredentials {

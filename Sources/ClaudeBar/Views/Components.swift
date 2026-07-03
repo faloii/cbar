@@ -6,6 +6,25 @@ extension Color {
     static let brandTop = Color(red: 0.93, green: 0.59, blue: 0.45)
 }
 
+/// Tiny ring gauge for the menu-bar label — replaces the idle "sparkle" glyph with
+/// an at-a-glance progress read (the worse of session/weekly %) so you don't need
+/// to open the popover just to see roughly how much room is left. Reserved for the
+/// safe/nominal state; blocked/warning keep their own unambiguous SF Symbols.
+struct MenuBarMiniGauge: View {
+    let fraction: Double   // 0...1
+
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.secondary.opacity(0.3), lineWidth: 2)
+            Circle()
+                .trim(from: 0, to: max(0.03, min(1, fraction)))
+                .stroke(style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+        }
+        .frame(width: 12, height: 12)
+    }
+}
+
 /// A rounded, subtly-filled panel that groups one section's content.
 struct Card<Content: View>: View {
     @ViewBuilder var content: Content

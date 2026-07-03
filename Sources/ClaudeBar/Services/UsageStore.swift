@@ -395,7 +395,7 @@ final class UsageStore: ObservableObject {
         Notifier.notify(
             title: "\(v.model) 대신 \(to)면 충분해 보여요",
             body: "최근 턴 출력이 가벼운 편이에요 — \(to)로 바꾸면 이 창에서 비용 \(savingPct)% 절감돼요 (한도 소모량은 동일).",
-            id: "model-downshift-\(v.model)", urgency: .nudge)
+            id: "model-downshift-\(v.model)", urgency: .nudge, category: .limit)
     }
 
     private func recomputeProjections() {
@@ -459,21 +459,33 @@ final class UsageStore: ObservableObject {
             // triggers (e.g. skipping two weekly tiers at once) doesn't post a stack
             // of separate banners.
             for a in NotificationBundler.bundle(toPost) {
-                Notifier.notify(title: a.title, body: a.body, id: a.id, urgency: a.urgency)
+                // "한도 풀렸어요" gets a one-tap resume action; every other limit
+                // nudge/danger gets a one-tap snooze — fyi (the weekly recap, posted
+                // separately) carries neither, nothing to act on right now.
+                let category: Notifier.Category? =
+                    a.id.contains("reset-after-block") ? .freed : (a.urgency != .fyi ? .limit : nil)
+                Notifier.notify(title: a.title, body: a.body, id: a.id, urgency: a.urgency, category: category)
             }
         }
         // Auto-resume on the "freed after being blocked" reset (opt-in). With no
         // custom command, default to continuing the last conversation — so just
-        // flipping the toggle is enough; no button press needed. Built + run off the
-        // main actor (resolving the binary/dir spawns a short-lived process).
+        // flipping the toggle is enough; no button press needed.
         if autoResumeEnabled, alerts.contains(where: { $0.id == "reset-after-block" }) {
-            let custom = resumeCommand.trimmingCharacters(in: .whitespacesAndNewlines)
-            Task.detached(priority: .utility) {
-                // Empty → safe built-in (argv, no shell injection). Filled → the user's
-                // own shell command (their responsibility), run via the login shell.
-                if custom.isEmpty { ResumeCommand.runContinueLast() }
-                else { CommandRunner.run(custom) }
-            }
+            resumeNow()
+        }
+    }
+
+    /// Runs the configured resume command (or the built-in "continue last
+    /// conversation" default) right now — the auto-resume toggle's action, also
+    /// triggered manually via the "지금 이어가기" notification button. Off the main
+    /// actor since resolving the binary/dir spawns a short-lived process.
+    func resumeNow() {
+        let custom = resumeCommand.trimmingCharacters(in: .whitespacesAndNewlines)
+        Task.detached(priority: .utility) {
+            // Empty → safe built-in (argv, no shell injection). Filled → the user's
+            // own shell command (their responsibility), run via the login shell.
+            if custom.isEmpty { ResumeCommand.runContinueLast() }
+            else { CommandRunner.run(custom) }
         }
     }
 
@@ -499,7 +511,7 @@ final class UsageStore: ObservableObject {
         Notifier.notify(
             title: "이 대화, 슬슬 무거워요",
             body: "컨텍스트 ~\(Fmt.tokens(s.lastContextTokens)) · 재읽기 \(Int((s.cacheReadShare * 100).rounded()))% — /compact 하면 같은 한도로 더 오래 가요.",
-            id: "compact-suggest-\(s.sessionId)", urgency: .nudge)
+            id: "compact-suggest-\(s.sessionId)", urgency: .nudge, category: .limit)
     }
 
     /// Idle cadence when the popover is closed — kept at the limits cache TTL (180s)
