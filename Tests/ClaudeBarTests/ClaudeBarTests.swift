@@ -132,6 +132,13 @@ final class NotificationBundlerTests: XCTestCase {
         let out2 = NotificationBundler.bundle([alert("a"), alert("b")])
         XCTAssertEqual(out1[0].id, out2[0].id)
     }
+
+    func testBundleDeliversAsLoudAsItsMostUrgentMember() {
+        let nudge = LimitAlert(id: "a", title: "t", body: "b", urgency: .nudge)
+        let danger = LimitAlert(id: "b", title: "t", body: "b", urgency: .danger)
+        XCTAssertEqual(NotificationBundler.bundle([nudge, danger]).first?.urgency, .danger)
+        XCTAssertEqual(NotificationBundler.bundle([nudge, nudge]).first?.urgency, .nudge)
+    }
 }
 
 final class QuietHoursTests: XCTestCase {
@@ -364,6 +371,28 @@ final class DailyAllowanceTests: XCTestCase {
                                        now: t, todayStartUtil: nil)
         XCTAssertNotNil(v)
         XCTAssertGreaterThanOrEqual(v?.daysRemaining ?? 0, 1.0 / 24)
+    }
+
+    func testTodayBaselinePicksLastPreMidnightSample() {
+        let pts = [(at: t.addingTimeInterval(-3 * 3600), util: 30.0),
+                   (at: t.addingTimeInterval(-600), util: 42.0),
+                   (at: t.addingTimeInterval(600), util: 50.0)]   // post-midnight, ignored
+        XCTAssertEqual(DailyAllowance.todayBaseline(points: pts, midnight: t) ?? 0, 42, accuracy: 0.001)
+    }
+
+    func testTodayBaselineNilWhenSampleTooOldOrMissing() {
+        // Mac was off all evening — a 7h-old sample doesn't describe midnight.
+        let stale = [(at: t.addingTimeInterval(-7 * 3600), util: 30.0)]
+        XCTAssertNil(DailyAllowance.todayBaseline(points: stale, midnight: t))
+        XCTAssertNil(DailyAllowance.todayBaseline(points: [], midnight: t))
+    }
+
+    func testOvernightResetCountsCurrentUtilAsToday() {
+        // Baseline 80 but the meter reads 12 → the week reset overnight; today's
+        // usage is ~12%P, not a clamped 0.
+        let v = DailyAllowance.verdict(util: 12, resetsAt: t.addingTimeInterval(5 * 86400),
+                                       now: t, todayStartUtil: 80)
+        XCTAssertEqual(v?.usedTodayPct ?? -1, 12, accuracy: 0.001)
     }
 }
 
@@ -992,6 +1021,81 @@ final class LimitAlertsTests: XCTestCase {
                               verdict: .safe, projectedAtReset: 85)
         XCTAssertFalse(eval(session: win(60, resetIn: 4 * 3600), sp: safe, state: &s).contains { $0.id == "pace-slow" })
     }
+
+    // MARK: expired windows (reset boundary passed, no fresh fetch yet)
+
+    func testExpiredBlockedWindowFiresFreedAlertByTheClock() {
+        var s = LimitAlertState()
+        // Blocked at 100% with a future reset…
+        XCTAssertTrue(eval(session: win(100, resetIn: 600), status: "rejected", state: &s)
+            .contains { $0.id == "blocked" })
+        // …then evaluated after the boundary passed but before a fresh fetch:
+        // freed by the clock — the auto-resume trigger fires without waiting.
+        let out = eval(session: win(100, resetIn: -60), state: &s)
+        XCTAssertTrue(out.contains { $0.id == "reset-after-block" })
+        XCTAssertFalse(s.wasBlocked)
+        // The eventual fresh low reading must not fire the reset alerts again.
+        let after = eval(session: win(2, resetIn: 5 * 3600), state: &s)
+        XCTAssertFalse(after.contains { $0.id == "reset-after-block" || $0.id == "reset-done" })
+    }
+
+    func testExpiredWindowDoesNotCountAsBlockedOrThreshold() {
+        var s = LimitAlertState()
+        let out = eval(session: win(100, resetIn: -60), weekly: win(95, resetIn: -60),
+                       status: "rejected", state: &s)
+        XCTAssertFalse(out.contains { $0.id == "blocked" })
+        XCTAssertFalse(out.contains { $0.id == "limit-session" })
+        XCTAssertFalse(out.contains { $0.id.hasPrefix("weekly-tier") })
+    }
+
+    func testExpiredSessionWhileWeeklyStillBlocksIsNotFreed() {
+        var s = LimitAlertState()
+        // Blocked with BOTH maxed…
+        _ = eval(session: win(100, resetIn: 600), weekly: win(100, resetIn: 3 * 86400),
+                 status: "rejected", state: &s)
+        XCTAssertTrue(s.wasBlocked)
+        // …session boundary passes but the weekly window still rejects: NOT freed —
+        // no "다시 시작하세요" (which would also spawn auto-resume), and no refire loop.
+        for _ in 0..<3 {
+            let out = eval(session: win(100, resetIn: -60), weekly: win(100, resetIn: 3 * 86400),
+                           status: "rejected", state: &s)
+            XCTAssertFalse(out.contains { $0.id == "reset-after-block" || $0.id == "reset-done" })
+        }
+        XCTAssertTrue(s.wasBlocked)   // still armed for when the real unblock comes
+        // Weekly finally resets → freed fires exactly once.
+        let freed = eval(session: win(100, resetIn: -60), weekly: win(2, resetIn: 7 * 86400), state: &s)
+        XCTAssertTrue(freed.contains { $0.id == "reset-after-block" })
+        XCTAssertFalse(s.wasBlocked)
+        let again = eval(session: win(100, resetIn: -60), weekly: win(2, resetIn: 7 * 86400), state: &s)
+        XCTAssertFalse(again.contains { $0.id == "reset-after-block" })
+    }
+
+    func testExpiredWeeklyZeroesTierForTheNewWeek() {
+        var s = LimitAlertState()
+        // Last week ended at the top tier…
+        _ = eval(weekly: win(92, resetIn: 600), state: &s)
+        XCTAssertEqual(s.weeklyTier, 3)
+        // …boundary passes (offline, no fresh fetch): tier zeroes for the new week.
+        _ = eval(weekly: win(92, resetIn: -60), state: &s)
+        XCTAssertEqual(s.weeklyTier, 0)
+        // First fresh reading of the new week is already 55% → tier-50 must fire.
+        let out = eval(weekly: win(55, resetIn: 6 * 86400), state: &s)
+        XCTAssertTrue(out.contains { $0.id == "weekly-tier-50" })
+    }
+
+    func testUrgencyMapping() {
+        var s = LimitAlertState()
+        let blocked = eval(session: win(100, resetIn: 600), status: "rejected", state: &s)
+            .first { $0.id == "blocked" }
+        XCTAssertEqual(blocked?.urgency, .danger)
+
+        var s2 = LimitAlertState()
+        let tiers = eval(weekly: win(78), state: &s2).filter { $0.id.hasPrefix("weekly-tier") }
+        XCTAssertEqual(tiers.count, 2)                                    // 50 + 75 crossed at once
+        XCTAssertTrue(tiers.allSatisfy { $0.urgency == .nudge })          // pace info, not danger
+        let t90 = eval(weekly: win(92), state: &s2).first { $0.id == "weekly-tier-90" }
+        XCTAssertEqual(t90?.urgency, .danger)
+    }
 }
 
 final class WeeklyResetRecapTests: XCTestCase {
@@ -1050,5 +1154,56 @@ final class ModelDownshiftSuggestionTests: XCTestCase {
     func testNilVerdictDoesNotCrash() {
         var state = ModelDownshiftSuggestion.State()
         XCTAssertFalse(ModelDownshiftSuggestion.shouldNotify(nil, state: &state))
+    }
+}
+
+final class LimitWindowExpiryTests: XCTestCase {
+    let t = Date(timeIntervalSince1970: 1_000_000)
+
+    func testExpiredOnceResetBoundaryPasses() {
+        XCTAssertTrue(LimitWindow(utilization: 100, resetsAt: t.addingTimeInterval(-1)).expired(asOf: t))
+        XCTAssertTrue(LimitWindow(utilization: 100, resetsAt: t).expired(asOf: t))
+        XCTAssertFalse(LimitWindow(utilization: 100, resetsAt: t.addingTimeInterval(60)).expired(asOf: t))
+    }
+
+    func testNoResetDateNeverExpires() {
+        XCTAssertFalse(LimitWindow(utilization: 50, resetsAt: nil).expired(asOf: t))
+    }
+}
+
+final class LogDedupeTests: XCTestCase {
+    let t = Date(timeIntervalSince1970: 1_000_000)
+
+    private func rec(_ key: String?, at: Date, session: String = "s", output: Int = 1) -> ClaudeDataReader.LogRecord {
+        ClaudeDataReader.LogRecord(timestamp: at, type: "assistant", sessionId: session, cwd: "",
+                                   model: "m", tokens: TokenCounts(input: 1, output: output, cacheWrite: 0, cacheRead: 0),
+                                   toolUseCount: 0, dedupKey: key)
+    }
+
+    func testIdenticalForkCopiesKeepEarliestAttribution() {
+        let out = ClaudeDataReader.dedupe([rec("a", at: t.addingTimeInterval(60), session: "fork"),
+                                           rec("a", at: t, session: "orig"),
+                                           rec("b", at: t.addingTimeInterval(30))])
+        XCTAssertEqual(out.count, 2)
+        XCTAssertEqual(out.first?.sessionId, "orig")   // tie on tokens → earliest copy wins
+    }
+
+    func testStreamingInterimCopyLosesToCompletedOne() {
+        // Streaming logs interim copies whose output is still growing — the earlier,
+        // SMALLER copy must lose or output tokens are undercounted.
+        let out = ClaudeDataReader.dedupe([rec("a", at: t, output: 5),
+                                           rec("a", at: t.addingTimeInterval(2), output: 900)])
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out.first?.tokens?.output, 900)
+    }
+
+    func testKeylessRecordsAllPassThrough() {
+        let out = ClaudeDataReader.dedupe([rec(nil, at: t), rec(nil, at: t.addingTimeInterval(1))])
+        XCTAssertEqual(out.count, 2)
+    }
+
+    func testResultSortedByTimestamp() {
+        let out = ClaudeDataReader.dedupe([rec("x", at: t.addingTimeInterval(10)), rec("y", at: t)])
+        XCTAssertEqual(out.map(\.dedupKey), ["y", "x"])
     }
 }

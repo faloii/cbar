@@ -219,7 +219,7 @@ struct ClaudeDataReader {
     }
 
     /// One parsed line from a session log.
-    private struct LogRecord {
+    struct LogRecord {
         let timestamp: Date
         let type: String        // "user" | "assistant" | ...
         let sessionId: String
@@ -227,6 +227,35 @@ struct ClaudeDataReader {
         let model: String
         let tokens: TokenCounts? // assistant turns only
         let toolUseCount: Int
+        /// "message.id:requestId" — the identity of one API response. The same
+        /// response is written to the logs again whenever a conversation is
+        /// resumed/forked into a new session file, so summing raw lines counts the
+        /// same tokens repeatedly (measured ~2× on real logs). nil when either id
+        /// is missing (no dedup possible for that line).
+        let dedupKey: String?
+    }
+
+    /// Drops repeated copies of the same API response (see `LogRecord.dedupKey`),
+    /// keeping the copy with the MOST tokens: streaming logs interim copies whose
+    /// output_tokens are still growing (measured on real logs: every diverging
+    /// duplicate's earliest copy is the smaller one), so keeping the earliest would
+    /// systematically undercount output. Ties (identical fork/resume copies) break
+    /// to the earliest timestamp, preserving the original session's attribution.
+    /// Key-less records pass through. Result is sorted by timestamp.
+    static func dedupe(_ records: [LogRecord]) -> [LogRecord] {
+        var best: [String: LogRecord] = [:]
+        var out: [LogRecord] = []
+        for r in records {
+            guard let k = r.dedupKey else { out.append(r); continue }
+            if let cur = best[k] {
+                let rT = r.tokens?.total ?? 0, cT = cur.tokens?.total ?? 0
+                if rT > cT || (rT == cT && r.timestamp < cur.timestamp) { best[k] = r }
+            } else {
+                best[k] = r
+            }
+        }
+        out.append(contentsOf: best.values)
+        return out.sorted { $0.timestamp < $1.timestamp }
     }
 
     // Per-file parse cache so a refresh re-parses only files that actually changed
@@ -298,7 +327,9 @@ struct ClaudeDataReader {
                 results[i] = parsed
             }
         }
-        return results.flatMap { $0 }
+        // Dedup must happen at merge time (the copies live in DIFFERENT files), so
+        // the per-file cache keeps raw lines and this collapses them per refresh.
+        return Self.dedupe(results.flatMap { $0 })
     }
 
     private static func cachedRecords(key: String, mtime: Date, size: Int) -> [LogRecord]? {
@@ -367,6 +398,12 @@ struct ClaudeDataReader {
             }
         }
 
+        var dedupKey: String?
+        if let mid = message?["id"] as? String, !mid.isEmpty,
+           let rid = obj["requestId"] as? String, !rid.isEmpty {
+            dedupKey = "\(mid):\(rid)"
+        }
+
         return LogRecord(
             timestamp: date,
             type: type,
@@ -374,7 +411,8 @@ struct ClaudeDataReader {
             cwd: obj["cwd"] as? String ?? "",
             model: message?["model"] as? String ?? "unknown",
             tokens: tokens,
-            toolUseCount: toolUses
+            toolUseCount: toolUses,
+            dedupKey: dedupKey
         )
     }
 

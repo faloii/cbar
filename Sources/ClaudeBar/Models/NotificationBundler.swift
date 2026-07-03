@@ -11,6 +11,9 @@ enum NotificationBundler {
         guard alerts.count > 1 else { return alerts }
         let body = alerts.map { "· \($0.title)" }.joined(separator: "\n")
         let id = "bundle-" + alerts.map(\.id).sorted().joined(separator: "-")
-        return [LimitAlert(id: id, title: "한도 알림 \(alerts.count)건", body: body)]
+        // The bundle is delivered as loudly as its most urgent member — a stack of
+        // whispers stays a whisper; one danger alert makes the whole bundle ring.
+        return [LimitAlert(id: id, title: "한도 알림 \(alerts.count)건", body: body,
+                           urgency: alerts.map(\.urgency).max() ?? .danger)]
     }
 }

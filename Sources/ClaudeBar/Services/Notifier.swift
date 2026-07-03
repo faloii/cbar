@@ -15,12 +15,15 @@ enum Notifier {
             .requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    static func notify(title: String, body: String, id: String) {
+    static func notify(title: String, body: String, id: String, urgency: AlertUrgency = .danger) {
         guard isBundled else { return }
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
-        content.sound = .default
+        // Quiet-coach delivery: only danger makes a sound, and fyi doesn't even
+        // banner (notification list only) — see `AlertUrgency`.
+        if urgency == .danger { content.sound = .default }
+        content.interruptionLevel = urgency == .fyi ? .passive : .active
         let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
     }

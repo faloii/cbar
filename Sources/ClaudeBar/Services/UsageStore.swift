@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
+import AppKit
 
 /// Popover cards the user can show/hide and reorder (Settings → 섹션).
 /// Declaration order is the default layout order.
@@ -254,8 +255,44 @@ final class UsageStore: ObservableObject {
 
     init() {
         if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() }
+        // A plain Timer doesn't fire while the Mac sleeps, so the first tick after
+        // lid-open could be minutes away — refresh immediately on wake instead.
+        // `force` because the cached limits are exactly what's stale after sleep.
+        NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refresh(force: true) }
+        }
         refresh()
         restartTimer()
+    }
+
+    /// Live-limit windows filtered through their reset boundary: once `resetsAt`
+    /// passes, the cached reading describes the PREVIOUS window (possibly "blocked
+    /// at 100%" held all night through sleep) — treat it as unknown until the next
+    /// fetch instead of displaying it as current truth.
+    var liveSession: LimitWindow? {
+        limits?.session5h.flatMap { $0.expired(asOf: Date()) ? nil : $0 }
+    }
+    var liveWeekly: LimitWindow? {
+        limits?.weekly7d.flatMap { $0.expired(asOf: Date()) ? nil : $0 }
+    }
+
+    /// One-shot timer pinned just past the nearest limit-window reset, so the app
+    /// notices the rollover (freed alert, auto-resume, fresh %) within seconds
+    /// instead of waiting out the idle tick + cache TTL.
+    private var resetBoundaryTimer: Timer?
+    private func scheduleResetBoundaryRefresh() {
+        resetBoundaryTimer?.invalidate()
+        resetBoundaryTimer = nil
+        let now = Date()
+        guard let next = [limits?.session5h?.resetsAt, limits?.weekly7d?.resetsAt]
+            .compactMap({ $0 }).filter({ $0 > now }).min() else { return }
+        let timer = Timer(fire: next.addingTimeInterval(5), interval: 0, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.refresh(force: true) }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        resetBoundaryTimer = timer
     }
 
     /// Refresh local usage and (if enabled) the live limits. `force` bypasses the
@@ -283,6 +320,7 @@ final class UsageStore: ObservableObject {
             if !full { snap = snap.mergingSession(from: previous) }
             self.snapshot = snap
             if live { self.limits = lim } else { self.limits = nil }
+            self.scheduleResetBoundaryRefresh()
             self.recomputeProjections()
             self.processLimitAlerts()
             self.processCompactSuggestion()
@@ -299,9 +337,16 @@ final class UsageStore: ObservableObject {
     }
 
     @AppStorage("lastWeeklySummaryAt") private var lastWeeklySummaryAt: Double = 0
-    /// Last-seen weekly-limit `resetsAt`, to detect the moment the window actually
-    /// rolls over (see `WeeklyResetRecap`) instead of firing on an arbitrary timer.
-    private var lastSeenWeeklyResetsAt: Date?
+    /// Last-seen weekly-limit `resetsAt` (epoch seconds; 0 = never observed), to
+    /// detect the moment the window actually rolls over (see `WeeklyResetRecap`)
+    /// instead of firing on an arbitrary timer. Persisted: weekly resets usually
+    /// land overnight while the app is quit — an in-memory marker would restart at
+    /// nil, swallow the jump, and silently skip the recap.
+    @AppStorage("lastSeenWeeklyResetsAt") private var lastSeenWeeklyResetsAtEpoch: Double = 0
+    private var lastSeenWeeklyResetsAt: Date? {
+        get { lastSeenWeeklyResetsAtEpoch > 0 ? Date(timeIntervalSince1970: lastSeenWeeklyResetsAtEpoch) : nil }
+        set { lastSeenWeeklyResetsAtEpoch = newValue?.timeIntervalSince1970 ?? 0 }
+    }
 
     /// Fire a weekly usage recap notification: once per real weekly-limit reset
     /// when live limits are on (so the recap lands right when last week wraps up),
@@ -335,7 +380,7 @@ final class UsageStore: ObservableObject {
             body += " · 최다 사용 \(top.project)"
         }
         if let coaching = r.coaching { body += "\n\(coaching)" }
-        Notifier.notify(title: "주간 마감 리캡", body: body, id: "weekly-summary")
+        Notifier.notify(title: "주간 마감 리캡", body: body, id: "weekly-summary", urgency: .fyi)
     }
 
     /// Notify once when the dominant model in the 5h window newly looks
@@ -350,7 +395,7 @@ final class UsageStore: ObservableObject {
         Notifier.notify(
             title: "\(v.model) 대신 \(to)면 충분해 보여요",
             body: "최근 턴 출력이 가벼운 편이에요 — \(to)로 바꾸면 이 창에서 비용 \(savingPct)% 절감돼요 (한도 소모량은 동일).",
-            id: "model-downshift-\(v.model)")
+            id: "model-downshift-\(v.model)", urgency: .nudge)
     }
 
     private func recomputeProjections() {
@@ -369,8 +414,8 @@ final class UsageStore: ObservableObject {
         lastSessionRecap = SessionCoach.lastSessionRecap(samples: samples, now: now)
         // Session = rolling 5h window → recent burst rate.
         sessionProjection = Projection.compute(points: samples.compactMap { s in s.session.map { (s.at, $0) } },
-                                               resetsAt: limits?.session5h?.resetsAt, now: now)
-        if let w = limits?.weekly7d {
+                                               resetsAt: liveSession?.resetsAt, now: now)
+        if let w = liveWeekly {
             // Weekly = fixed 7-day bucket → realized average pace since the week started,
             // blended with a short-burst trajectory so a fast start doesn't go unnoticed
             // for the first 6h (see `Projection.combinedWeekly`).
@@ -379,7 +424,12 @@ final class UsageStore: ObservableObject {
                                                           resetsAt: w.resetsAt,
                                                           windowSeconds: 7 * 24 * 3600, now: now)
             let midnight = Calendar.current.startOfDay(for: now)
-            let todayStartUtil = weeklyPoints.filter { $0.0 < midnight }.max { $0.0 < $1.0 }?.1
+            // Baseline from the 8-day WeeklyHistory, not the ~12h UsageHistory ring
+            // buffer — by afternoon that buffer has evicted every pre-midnight sample
+            // and "오늘 사용" silently vanished exactly when it mattered most.
+            let todayStartUtil = DailyAllowance.todayBaseline(
+                points: weeklyTrend.compactMap { s in s.weekly.map { (at: s.at, util: $0) } },
+                midnight: midnight)
             weeklyAllowance = DailyAllowance.verdict(util: w.utilization, resetsAt: w.resetsAt, now: now,
                                                      todayStartUtil: todayStartUtil)
         } else {
@@ -409,7 +459,7 @@ final class UsageStore: ObservableObject {
             // triggers (e.g. skipping two weekly tiers at once) doesn't post a stack
             // of separate banners.
             for a in NotificationBundler.bundle(toPost) {
-                Notifier.notify(title: a.title, body: a.body, id: a.id)
+                Notifier.notify(title: a.title, body: a.body, id: a.id, urgency: a.urgency)
             }
         }
         // Auto-resume on the "freed after being blocked" reset (opt-in). With no
@@ -449,7 +499,7 @@ final class UsageStore: ObservableObject {
         Notifier.notify(
             title: "이 대화, 슬슬 무거워요",
             body: "컨텍스트 ~\(Fmt.tokens(s.lastContextTokens)) · 재읽기 \(Int((s.cacheReadShare * 100).rounded()))% — /compact 하면 같은 한도로 더 오래 가요.",
-            id: "compact-suggest-\(s.sessionId)")
+            id: "compact-suggest-\(s.sessionId)", urgency: .nudge)
     }
 
     /// Idle cadence when the popover is closed — kept at the limits cache TTL (180s)
@@ -482,7 +532,7 @@ final class UsageStore: ObservableObject {
     /// Working-time budget for the current session window — drives the menu-bar
     /// "block in N" warning and the in-popover coach.
     var sessionWorkBudget: SessionCoach.WorkBudget? {
-        guard enableLiveLimits, let w = limits?.session5h else { return nil }
+        guard enableLiveLimits, let w = liveSession else { return nil }
         return SessionCoach.workBudget(session: sessionProjection, util: w.utilization,
                                        resetsAt: w.resetsAt, now: Date())
     }
@@ -490,14 +540,14 @@ final class UsageStore: ObservableObject {
     /// Estimated session-limit cost of one more exchange, from the current conversation
     /// size — the tangible "efficiency" number.
     var perExchangePct: Double? {
-        guard enableLiveLimits, let u = limits?.session5h?.utilization else { return nil }
+        guard enableLiveLimits, let u = liveSession?.utilization else { return nil }
         return SessionCoach.perExchangeLimitPct(contextTokens: snapshot.currentContextTokens,
                                                 windowTokens: snapshot.windowTokens.total, sessionUtil: u)
     }
 
     /// One-glance "am I spending this session efficiently?" verdict.
     var efficiencyVerdict: SessionCoach.EfficiencyVerdict {
-        SessionCoach.efficiency(util: limits?.session5h?.utilization, projection: sessionProjection)
+        SessionCoach.efficiency(util: liveSession?.utilization, projection: sessionProjection)
     }
 
     /// Whether the efficiency card has anything worth showing.
@@ -508,7 +558,7 @@ final class UsageStore: ObservableObject {
     /// The next few session-window reset times — plan heavy work around today's
     /// rhythm instead of only reacting when the current window is about to flip.
     var upcomingResets: [Date] {
-        guard let next = limits?.session5h?.resetsAt else { return [] }
+        guard let next = liveSession?.resetsAt else { return [] }
         return UpcomingResets.compute(nextReset: next, now: snapshot.generatedAt)
     }
 
@@ -529,18 +579,30 @@ final class UsageStore: ObservableObject {
         return "\(Int(util.rounded()))%"
     }
 
+    /// When the OTHER limit window (not the one the bar is showing) is past the
+    /// warn threshold, surface it compactly — otherwise the bar can raise a warning
+    /// triangle for a window whose number isn't even on screen.
+    private func crossWindowSuffix(other: LimitWindow?, prefix: String) -> String {
+        guard let u = other?.utilization, u >= Double(warnThreshold) else { return "" }
+        return " · \(prefix)\(Int(u.rounded()))%"
+    }
+
     var barText: String {
         let s = snapshot
         switch barMetric {
         case .sessionLimit:
-            if let u = limits?.session5h?.utilization { return sessionBarText(util: u) }
+            if let u = liveSession?.utilization {
+                return sessionBarText(util: u) + crossWindowSuffix(other: liveWeekly, prefix: "W")
+            }
             return enableLiveLimits ? "—" : Fmt.tokens(s.windowTokens.total)
         case .weeklyLimit:
-            if let u = limits?.weekly7d?.utilization { return "\(Int(u.rounded()))%" }
+            if let u = liveWeekly?.utilization {
+                return "\(Int(u.rounded()))%" + crossWindowSuffix(other: liveSession, prefix: "S")
+            }
             return enableLiveLimits ? "—" : Fmt.tokens(s.windowTokens.total)
         case .bothLimits:
-            let sPart = limits?.session5h.map { "S \(sessionBarText(util: $0.utilization))" }
-            let wPart = limits?.weekly7d.map { "W \(Int($0.utilization.rounded()))%" }
+            let sPart = liveSession.map { "S \(sessionBarText(util: $0.utilization))" }
+            let wPart = liveWeekly.map { "W \(Int($0.utilization.rounded()))%" }
             let joined = [sPart, wPart].compactMap { $0 }.joined(separator: " · ")
             return joined.isEmpty ? (enableLiveLimits ? "—" : Fmt.tokens(s.windowTokens.total)) : joined
         case .windowTokens: return Fmt.tokens(s.windowTokens.total)
@@ -580,8 +642,9 @@ final class UsageStore: ObservableObject {
     }
 
     /// Highest of the live session/weekly utilizations, or nil if unavailable.
+    /// Expired windows (reset boundary passed) don't count — see `liveSession`.
     var maxLimitUtilization: Double? {
-        let vals = [limits?.session5h?.utilization, limits?.weekly7d?.utilization].compactMap { $0 }
+        let vals = [liveSession?.utilization, liveWeekly?.utilization].compactMap { $0 }
         return vals.max()
     }
 
@@ -592,10 +655,13 @@ final class UsageStore: ObservableObject {
     }
 
     /// True when you're currently rate-limited: a `rejected` status or a window at
-    /// 100%. Drives the menu-bar "blocked" glyph and red tint.
+    /// 100%. Drives the menu-bar "blocked" glyph, red tint, and the keep-awake
+    /// assertion. A cached `rejected` is only trusted while some un-expired window
+    /// backs it — a stale overnight "blocked" otherwise held keep-awake all night
+    /// for a limit that had already reset.
     var isBlocked: Bool {
-        if limits?.status == "rejected" { return true }
-        return (maxLimitUtilization ?? 0) >= 100
+        if (maxLimitUtilization ?? 0) >= 100 { return true }
+        return limits?.status == "rejected" && (liveSession != nil || liveWeekly != nil)
     }
 
     /// Whether we're close enough to a limit to warrant the tighter refresh cadence
@@ -608,14 +674,18 @@ final class UsageStore: ObservableObject {
     /// the utilization relevant to the chosen bar metric.
     var barColor: Color {
         if isBlocked { return .red }
-        let util: Double?
+        let shown: Double?
         switch barMetric {
-        case .sessionLimit: util = limits?.session5h?.utilization
-        case .weeklyLimit:  util = limits?.weekly7d?.utilization
-        case .bothLimits:   util = maxLimitUtilization
+        case .sessionLimit: shown = liveSession?.utilization
+        case .weeklyLimit:  shown = liveWeekly?.utilization
+        case .bothLimits:   shown = maxLimitUtilization
         default:            return isOverThreshold ? .orange : .primary
         }
-        guard let u = util else { return .primary }
+        // The warning glyph keys on the WORST window (isOverThreshold) — don't let
+        // the tint contradict it by following only the displayed metric (a safe-green
+        // "12%" next to a triangle raised by the weekly window at 85%).
+        let effective: Double? = isOverThreshold ? max(shown ?? 0, maxLimitUtilization ?? 0) : shown
+        guard let u = effective else { return .primary }
         if u >= 95 { return .red }
         if u >= Double(warnThreshold) { return .orange }
         return .green

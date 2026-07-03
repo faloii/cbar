@@ -245,32 +245,43 @@ struct MenuContentView: View {
             }
         }
         if let l = store.limits, l.hasData {
+            // Live windows only (reset boundary not yet passed) — the menu bar
+            // already hides expired readings; rendering them here as "지금 막힘"
+            // would contradict the bar's "—" with the same stale data.
+            let session = store.liveSession
+            let weekly = store.liveWeekly
             HStack(alignment: .top, spacing: 10) {
-                if let w = l.session5h {
+                if let w = session {
                     RingGauge(title: "세션", window: w, now: snap.generatedAt,
                               paceFraction: Pace.elapsedFraction(windowSeconds: 5 * 3600,
                                                                  secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt)),
                               preciseReset: true)
                 }
-                if let w = l.weekly7d {
+                if let w = weekly {
                     RingGauge(title: "주간", window: w, now: snap.generatedAt,
                               paceFraction: Pace.elapsedFraction(windowSeconds: 7 * 24 * 3600,
                                                                  secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt)))
                 }
-                if let w = l.weeklyOpus { RingGauge(title: "Opus", window: w, now: snap.generatedAt) }
+                if let w = l.weeklyOpus, !w.expired(asOf: snap.generatedAt) {
+                    RingGauge(title: "Opus", window: w, now: snap.generatedAt)
+                }
             }
             .padding(.top, 2)
+            if session == nil, weekly == nil {
+                Text("한도 리셋 직후 — 새 수치 불러오는 중…")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             // Hero: the one-glance "can I keep working?" answer.
-            if let w = l.session5h {
+            if let w = session {
                 WorkTimeLine(window: w, projection: store.sessionProjection, now: snap.generatedAt)
                     .padding(.top, 4)
             }
             // Supporting detail, visually subordinate to the hero line.
             VStack(alignment: .leading, spacing: 2) {
-                if let w = l.session5h {
+                if let w = session {
                     PaceLine(window: w, projection: store.sessionProjection, now: snap.generatedAt)
                 }
-                if let w = l.weekly7d {
+                if let w = weekly {
                     ProjectionLine(tag: "주간", window: w, projection: store.weeklyProjection, now: snap.generatedAt)
                     if let budget = store.weeklyAllowance {
                         WeeklyAllowanceLine(budget: budget)
@@ -278,12 +289,12 @@ struct MenuContentView: View {
                 }
                 UpcomingResetsLine(resets: store.upcomingResets)
             }
-            if let w = l.session5h {
+            if let w = session {
                 SessionTrendChart(samples: store.sessionTrend, now: snap.generatedAt,
                                   secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt))
                     .padding(.top, 4)
             }
-            if let w = l.weekly7d {
+            if let w = weekly {
                 WeeklyTrendChart(samples: store.weeklyTrend, now: snap.generatedAt,
                                  secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt))
                     .padding(.top, 4)

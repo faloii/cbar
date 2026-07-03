@@ -149,6 +149,9 @@ struct SettingsView: View {
                 Text("5시간 창의 주력 모델이 Opus인데 최근 턴들의 출력이 가벼워 보이면, Sonnet으로 바꿔도 될 것 같다고 한 번 알려줍니다(‘모델·effort 회고’ 카드와 같은 판단). 한도 소모량은 그대로고 비용만 바뀝니다 — 모델 선택은 비용을 줄이는 수단이지 한도를 늘리는 수단은 아니에요. 기본은 꺼져 있습니다.")
                     .font(.caption).foregroundStyle(.secondary)
 
+                Text("한도 위험 알림만 소리가 나요. 코칭성 알림(페이스·/compact·모델 제안)은 소리 없는 배너로, 주간 리캡은 알림 센터에만 조용히 쌓여요.")
+                    .font(.caption).foregroundStyle(.secondary)
+
                 Toggle("조용한 시간", isOn: $store.quietHoursEnabled)
                 if store.quietHoursEnabled {
                     HStack {

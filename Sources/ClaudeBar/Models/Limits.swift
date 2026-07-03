@@ -6,6 +6,15 @@ struct LimitWindow: Codable, Equatable {
     let resetsAt: Date?
 
     var fraction: Double { max(0, min(1, utilization / 100)) }
+
+    /// True once the reset boundary has passed: the server has rolled the window
+    /// over, so this cached utilization describes the PREVIOUS window (e.g. a
+    /// "blocked at 100%" reading held all night through sleep) — treat it as
+    /// unknown until a fresh fetch, don't display or alert on it as current truth.
+    func expired(asOf now: Date) -> Bool {
+        guard let r = resetsAt else { return false }
+        return r <= now
+    }
 }
 
 /// The session (5h) + weekly (7d) limit picture, plus metadata about the fetch.
