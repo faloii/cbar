@@ -589,9 +589,9 @@ final class UsageStore: ObservableObject {
     /// the cap) when on track to block before reset, "막힘" when already blocked, else
     /// the plain %. So you see trouble coming without opening the popover.
     private func sessionBarText(util: Double) -> String {
-        if util >= 100 { return "막힘" }
+        if util >= 100 { return "막힘 100%" }
         if let b = sessionWorkBudget, b.willBlock, let at = b.blockAt {
-            return "막힘 \(Fmt.shortCountdown(to: at, from: Date()))"
+            return "막힘 \(Fmt.shortCountdown(to: at, from: Date())) · \(Int(util.rounded()))%"
         }
         return "\(Int(util.rounded()))%"
     }
@@ -600,9 +600,9 @@ final class UsageStore: ObservableObject {
     /// self-warning. A weekly block is the expensive one (days, not hours), so
     /// seeing it coming without opening the popover matters just as much here.
     private func weeklyBarText(util: Double) -> String {
-        if util >= 100 { return "막힘" }
+        if util >= 100 { return "막힘 100%" }
         if let p = weeklyProjection, p.verdict == .atRisk, let ttf = p.timeToFull {
-            return "막힘 \(Fmt.shortCountdown(to: Date().addingTimeInterval(ttf), from: Date()))"
+            return "막힘 \(Fmt.shortCountdown(to: Date().addingTimeInterval(ttf), from: Date())) · \(Int(util.rounded()))%"
         }
         return "\(Int(util.rounded()))%"
     }
