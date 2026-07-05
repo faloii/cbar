@@ -190,6 +190,26 @@ struct MenuContentView: View {
             if store.opusShareTarget > 0, !snap.weeklyOpusShares.isEmpty { Card { goalsSection } }
         case .budget:
             if let b = store.budgetStatus { Card { budgetSection(b) } }
+        case .notificationLog:
+            if !store.recentNotifications.isEmpty { Card { notificationLogSection } }
+        }
+    }
+
+    @ViewBuilder private var notificationLogSection: some View {
+        CardHeader(icon: "bell", title: "최근 알림")
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(store.recentNotifications.prefix(5)) { n in
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack {
+                        Text(n.title).font(.caption.weight(.medium))
+                        Spacer()
+                        Text(Fmt.age(n.at, from: snap.generatedAt))
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    Text(n.body).font(.caption2).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
     }
 

@@ -6,7 +6,7 @@ import AppKit
 /// Popover cards the user can show/hide and reorder (Settings → 섹션).
 /// Declaration order is the default layout order.
 enum PanelSection: String, CaseIterable, Identifiable {
-    case advice, limits, efficiency, recent, perModel, modelGuide, modelRecap, sessions, today, weeklyReview, goals, budget
+    case advice, limits, efficiency, recent, perModel, modelGuide, modelRecap, sessions, today, weeklyReview, goals, budget, notificationLog
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -22,6 +22,7 @@ enum PanelSection: String, CaseIterable, Identifiable {
         case .weeklyReview:   return "주간 리뷰"
         case .goals:          return "습관 목표"
         case .budget:         return "월 예산"
+        case .notificationLog: return "최근 알림"
         }
     }
 }
@@ -146,7 +147,7 @@ final class UsageStore: ObservableObject {
     /// core (advice, limits, recent, today); the analysis cards (per-model burn,
     /// model guide, per-session) are opt-in.
     @AppStorage("hiddenSections") private var hiddenSectionsRaw: String =
-        "modelGuide,modelRecap,perModel,sessions" {
+        "modelGuide,modelRecap,perModel,sessions,notificationLog" {
         didSet { objectWillChange.send() }
     }
     /// Comma-joined raw values defining card order (missing ones append in default order).
@@ -591,6 +592,17 @@ final class UsageStore: ObservableObject {
         return "\(Int(util.rounded()))%"
     }
 
+    /// The weekly part of the bar label — mirrors `sessionBarText`'s "막힘 Nh/Nd"
+    /// self-warning. A weekly block is the expensive one (days, not hours), so
+    /// seeing it coming without opening the popover matters just as much here.
+    private func weeklyBarText(util: Double) -> String {
+        if util >= 100 { return "막힘" }
+        if let p = weeklyProjection, p.verdict == .atRisk, let ttf = p.timeToFull {
+            return "막힘 \(Fmt.shortCountdown(to: Date().addingTimeInterval(ttf), from: Date()))"
+        }
+        return "\(Int(util.rounded()))%"
+    }
+
     /// When the OTHER limit window (not the one the bar is showing) is past the
     /// warn threshold, surface it compactly — otherwise the bar can raise a warning
     /// triangle for a window whose number isn't even on screen.
@@ -599,22 +611,33 @@ final class UsageStore: ObservableObject {
         return " · \(prefix)\(Int(u.rounded()))%"
     }
 
+    /// Menu-bar space is shared with the system's other extras, and a "막힘 6d
+    /// 23h"-style primary reading is already long — drop the cross-window suffix
+    /// rather than let the label balloon past a sane budget.
+    private static let maxBarTextLength = 16
+    private func withCrossWindowSuffix(_ primary: String, other: LimitWindow?, prefix: String) -> String {
+        let suffix = crossWindowSuffix(other: other, prefix: prefix)
+        guard !suffix.isEmpty else { return primary }
+        let combined = primary + suffix
+        return combined.count <= Self.maxBarTextLength ? combined : primary
+    }
+
     var barText: String {
         let s = snapshot
         switch barMetric {
         case .sessionLimit:
             if let u = liveSession?.utilization {
-                return sessionBarText(util: u) + crossWindowSuffix(other: liveWeekly, prefix: "W")
+                return withCrossWindowSuffix(sessionBarText(util: u), other: liveWeekly, prefix: "W")
             }
             return enableLiveLimits ? "—" : Fmt.tokens(s.windowTokens.total)
         case .weeklyLimit:
             if let u = liveWeekly?.utilization {
-                return "\(Int(u.rounded()))%" + crossWindowSuffix(other: liveSession, prefix: "S")
+                return withCrossWindowSuffix(weeklyBarText(util: u), other: liveSession, prefix: "S")
             }
             return enableLiveLimits ? "—" : Fmt.tokens(s.windowTokens.total)
         case .bothLimits:
             let sPart = liveSession.map { "S \(sessionBarText(util: $0.utilization))" }
-            let wPart = liveWeekly.map { "W \(Int($0.utilization.rounded()))%" }
+            let wPart = liveWeekly.map { "W \(weeklyBarText(util: $0.utilization))" }
             let joined = [sPart, wPart].compactMap { $0 }.joined(separator: " · ")
             return joined.isEmpty ? (enableLiveLimits ? "—" : Fmt.tokens(s.windowTokens.total)) : joined
         case .windowTokens: return Fmt.tokens(s.windowTokens.total)
@@ -640,6 +663,10 @@ final class UsageStore: ObservableObject {
         guard monthlyBudget > 0 else { return nil }
         return Budget.status(history: snapshot.dailyCostHistory, now: Date(), budget: monthlyBudget)
     }
+
+    /// The last few notifications CBar has posted (newest first) — a safety net
+    /// for passive/no-banner ones and anything missed while away. See `NotificationLog`.
+    var recentNotifications: [NotificationLogEntry] { NotificationLog.load().reversed() }
 
     /// Per-model burn comparison for the current 5-hour window.
     var modelBurnRows: [ModelBurnRow] {

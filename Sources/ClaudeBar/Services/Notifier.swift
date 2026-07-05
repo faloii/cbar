@@ -58,5 +58,8 @@ enum Notifier {
         if let category { content.categoryIdentifier = category.rawValue }
         let request = UNNotificationRequest(identifier: id, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+        // A safety net for passive (no-banner) and easily-missed notifications —
+        // see `NotificationLog`.
+        NotificationLog.append(id: id, title: title, body: body, at: Date())
     }
 }
