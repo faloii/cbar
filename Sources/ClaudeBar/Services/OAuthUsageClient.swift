@@ -329,9 +329,13 @@ struct ClaudeCredentials: Codable {
         guard let data = try? Data(contentsOf: fileURL) else { return nil }
         let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
         guard let c = try? dec.decode(ClaudeCredentials.self, from: data), !c.accessToken.isEmpty else { return nil }
-        // If the cached token is already expired, skip it so we go straight to the
-        // source (keychain) now — before the API call triggers a 401-invalidate cycle.
-        if let exp = c.expiresAt, exp < Date() { return nil }
+        // Deliberately NOT gating on `expiresAt` here, for the same reason
+        // `fetchRemote()` doesn't: it's unreliable and a still-valid token can look
+        // expired. Gating here used to discard a perfectly good cached token on
+        // every refresh past that (possibly wrong) instant, forcing a fresh
+        // Keychain read — and its password prompt — far more often than an actual
+        // 401 ever would. A real expiry surfaces as a 401 in `fetchRemote()`, which
+        // already refreshes silently (no Keychain) or invalidates correctly.
         return c
     }
     private static func writeFile(_ c: ClaudeCredentials) {

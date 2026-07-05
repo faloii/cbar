@@ -258,11 +258,15 @@ final class UsageStore: ObservableObject {
         if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() }
         // A plain Timer doesn't fire while the Mac sleeps, so the first tick after
         // lid-open could be minutes away — refresh immediately on wake instead.
-        // `force` because the cached limits are exactly what's stale after sleep.
+        // NOT `force: true`: after any real sleep the cache TTL (60-180s) has long
+        // since lapsed anyway, so this still fetches fresh; forcing would only
+        // matter for a sleep shorter than the TTL, where it'd uselessly bypass a
+        // still-fresh cache. Waking is also the moment the login Keychain is most
+        // likely to be locked again, so skip forcing a Keychain-touching fetch here.
         NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.refresh(force: true) }
+            Task { @MainActor in self?.refresh() }
         }
         refresh()
         restartTimer()
