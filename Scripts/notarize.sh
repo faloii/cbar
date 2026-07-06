@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-APP_NAME="ClaudeBar"
+APP_NAME="CBar"
 VERSION="${CLAUDEBAR_VERSION:-$(cat VERSION 2>/dev/null || echo 1.0.0)}"
 DMG="build/${APP_NAME}-${VERSION}.dmg"
 PROFILE="${CLAUDEBAR_NOTARY_PROFILE:-claudebar-notary}"
