@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build-dmg:
+    name: Build & publish DMG
+    runs-on: macos-15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build DMG
+        # No Developer ID cert on the runner → package_app.sh falls back to an
+        # ad-hoc signature. Same Gatekeeper story as any un-notarized build: a
+        # one-time right-click → Open, documented in the DMG's own README.
+        run: CLAUDEBAR_VERSION="${{ steps.version.outputs.version }}" ./Scripts/make_dmg.sh
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/CBar-${{ steps.version.outputs.version }}.dmg
+          generate_release_notes: true
