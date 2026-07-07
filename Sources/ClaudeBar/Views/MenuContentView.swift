@@ -260,7 +260,7 @@ struct MenuContentView: View {
                 if l.stale {
                     Image(systemName: "wifi.exclamationmark")
                         .font(.caption2).foregroundStyle(.orange)
-                        .help("캐시된 값 표시 중 — 마지막 새로고침 실패")
+                        .help("캐시된 값 표시 중 — 마지막 새로고침 실패\n\(l.error ?? "원인 미상")")
                 }
             }
         }
