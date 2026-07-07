@@ -205,6 +205,36 @@ struct SettingsView: View {
                 }
             }
 
+            Section("진단 (플랜 한도)") {
+                if store.enableLiveLimits {
+                    diagnosticsRow("마지막 시도",
+                        store.lastRefreshAttemptAt.map { Fmt.age($0) } ?? "아직 없음")
+                    diagnosticsRow("마지막 성공",
+                        (store.limits?.hasData == true) ? Fmt.age(store.limits!.fetchedAt) : "없음")
+                    if store.isRefreshing {
+                        diagnosticsNote("지금 새로고침 진행 중…", icon: "arrow.triangle.2.circlepath", color: .blue)
+                    }
+                    if store.lastRefreshTimedOut {
+                        diagnosticsNote("마지막 시도가 20초 안에 응답이 없어 건너뜀 — 키체인 응답 대기 등으로 멈췄을 수 있어요. 다음 시도 때 정상화됩니다.",
+                                       icon: "hourglass", color: .orange)
+                    }
+                    if store.liveLimitsBackoff.isBackingOff, let retry = store.liveLimitsBackoff.retryAt {
+                        diagnosticsNote("반복 실패로 재시도를 미루는 중 — \(Fmt.countdown(to: retry)) 후 다시 시도해요.",
+                                       icon: "clock.arrow.circlepath", color: .orange)
+                    }
+                    if let err = store.limits?.error {
+                        diagnosticsNote(err, icon: "exclamationmark.triangle", color: .red)
+                    } else if store.limits?.stale != true, store.limits?.hasData == true {
+                        diagnosticsNote("정상", icon: "checkmark.circle", color: .green)
+                    }
+                    Text("문제가 반복되면 이 화면을 캡처해서 알려주세요 — 원인을 바로 알 수 있어요.")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                } else {
+                    Text("라이브 한도가 꺼져 있어요 — 진단할 대상이 없습니다.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+
             Section {
                 Text("비용은 공개 정가 기준 추정치입니다. 모델별 단가는 ~/.claudebar/pricing.json 에서 덮어쓸 수 있습니다.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -233,5 +263,18 @@ struct SettingsView: View {
 
     private static var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+    }
+
+    @ViewBuilder private func diagnosticsRow(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text(value).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder private func diagnosticsNote(_ text: String, icon: String, color: Color) -> some View {
+        Label(text, systemImage: icon)
+            .font(.caption).foregroundStyle(color)
     }
 }

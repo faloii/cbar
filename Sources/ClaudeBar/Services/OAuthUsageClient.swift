@@ -72,6 +72,15 @@ struct OAuthUsageClient: Sendable {
         throttleLock.lock(); defer { throttleLock.unlock() }
         return Date() < nextAllowedFetch
     }
+
+    /// Exposed read-only for the Settings diagnostics panel — "정직하게" means the
+    /// user shouldn't have to guess whether a stale reading is a rare hiccup or the
+    /// endpoint actively refusing every attempt right now.
+    static func backoffStatus() -> (isBackingOff: Bool, retryAt: Date?) {
+        throttleLock.lock(); defer { throttleLock.unlock() }
+        let now = Date()
+        return (now < nextAllowedFetch, nextAllowedFetch > now ? nextAllowedFetch : nil)
+    }
     private static func recordSuccess() {
         throttleLock.lock(); consecutiveFailures = 0; nextAllowedFetch = .distantPast; throttleLock.unlock()
     }

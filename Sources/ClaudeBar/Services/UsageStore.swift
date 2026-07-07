@@ -85,6 +85,16 @@ final class UsageStore: ObservableObject {
     /// "How much can I safely use today?" reading on the weekly limit.
     @Published private(set) var weeklyAllowance: DailyAllowance.Verdict?
     @Published private(set) var isRefreshing = false
+    /// When the current/most-recent refresh cycle started — lets the Settings
+    /// diagnostics panel tell "actively retrying but failing" apart from "hasn't
+    /// tried in a while" (e.g. if `isRefreshing` were ever stuck, this timestamp
+    /// would stop advancing — the smoking gun for exactly that class of bug).
+    @Published private(set) var lastRefreshAttemptAt: Date?
+    /// True when the live-limits fetch itself didn't finish within the timeout in
+    /// the last cycle (see `withTimeout`) — the specific "a system call is hung"
+    /// signature, distinct from an ordinary network/auth failure (which still
+    /// returns promptly with `limits?.error` set).
+    @Published private(set) var lastRefreshTimedOut = false
 
     @AppStorage("refreshIntervalSeconds") var refreshInterval: Double = 60 {
         didSet { restartTimer() }
@@ -326,6 +336,7 @@ final class UsageStore: ObservableObject {
     func refresh(force: Bool = false) {
         guard !isRefreshing else { return }
         isRefreshing = true
+        lastRefreshAttemptAt = Date()
         let reader = self.reader
         let client = self.limitsClient
         let live = enableLiveLimits
@@ -351,9 +362,13 @@ final class UsageStore: ObservableObject {
                 // (not nil'd) — this cycle produced nothing new, not "no data."
                 if let fresh = await self.withTimeout(seconds: 20, operation: { await client.loadLimits(force: force, ttl: ttl) }) {
                     self.limits = fresh
+                    self.lastRefreshTimedOut = false
+                } else {
+                    self.lastRefreshTimedOut = true
                 }
             } else {
                 self.limits = nil
+                self.lastRefreshTimedOut = false
             }
             self.scheduleResetBoundaryRefresh()
             self.recomputeProjections()
@@ -697,6 +712,11 @@ final class UsageStore: ObservableObject {
         guard monthlyBudget > 0 else { return nil }
         return Budget.status(history: snapshot.dailyCostHistory, now: Date(), budget: monthlyBudget)
     }
+
+    /// Whether the live-limits endpoint is currently being backed off from after
+    /// consecutive failures, and when the next attempt is allowed — see
+    /// `OAuthUsageClient.backoffStatus()`.
+    var liveLimitsBackoff: (isBackingOff: Bool, retryAt: Date?) { OAuthUsageClient.backoffStatus() }
 
     /// The last few notifications CBar has posted (newest first) — a safety net
     /// for passive/no-banner ones and anything missed while away. See `NotificationLog`.
