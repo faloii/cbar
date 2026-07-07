@@ -32,6 +32,7 @@ struct MenuContentView: View {
             // reachable no matter how tall the content gets.
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
+                    if !store.hasSeenOnboarding { Card { onboardingSection } }
                     if hasAnyData {
                         ForEach(store.orderedSections) { section in
                             if store.isVisible(section) { reorderableCard(section) }
@@ -211,6 +212,21 @@ struct MenuContentView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder private var onboardingSection: some View {
+        CardHeader(icon: "hand.wave", title: "CBar 사용법")
+        VStack(alignment: .leading, spacing: 6) {
+            Text("메뉴바 아이콘 색이 초록 → 주황 → 빨강 순으로 한도 여유를 알려줘요. 클릭하면 이 화면이 열려요.")
+            Text("‘플랜 한도’는 계정 전체 기준 실제 세션(5시간)·주간(7일) 사용률이에요 — 다른 기기에서 쓴 것도 포함돼요.")
+            Text("그 외 카드(효율·최근 5시간·오늘 등)는 이 Mac에 저장된 Claude Code 로그만 봐요 — 다른 기기 사용량은 안 잡혀요.")
+            Text("표시할 카드·순서·알림은 설정(⚙︎)에서 조절할 수 있고, 뭔가 안 맞으면 설정 → 진단에서 원인을 볼 수 있어요.")
+        }
+        .font(.caption).foregroundStyle(.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+        Button("확인했어요") { store.hasSeenOnboarding = true }
+            .buttonStyle(.borderedProminent).tint(Color.brand)
+            .controlSize(.small)
     }
 
     @ViewBuilder private var emptyStateSection: some View {

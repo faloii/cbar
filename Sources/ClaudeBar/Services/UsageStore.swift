@@ -242,6 +242,12 @@ final class UsageStore: ObservableObject {
     @AppStorage("barMetric") private var barMetricRaw: String = BarMetric.sessionLimit.rawValue {
         didSet { objectWillChange.send() }
     }
+    /// Shown once, the very first time the popover opens on a fresh install —
+    /// colleagues receiving a shared build see a dense stats panel with no
+    /// context otherwise. Dismissing it persists so it never reappears.
+    @AppStorage("hasSeenOnboarding") var hasSeenOnboarding: Bool = false {
+        didSet { objectWillChange.send() }
+    }
     @AppStorage("appearance") private var appearanceRaw: String = Appearance.system.rawValue {
         didSet { objectWillChange.send() }
     }
