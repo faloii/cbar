@@ -358,9 +358,17 @@ final class UsageStore: ObservableObject {
         // timely; when safe, stay gentle on the rate-limited endpoint.
         let ttl: TimeInterval = isAtLimitRisk ? 60 : OAuthUsageClient.cacheTTL
         Task {
-            var snap = await Task.detached(priority: .utility) { reader.load(includeSessionLogs: full) }.value
-            if !full { snap = snap.mergingSession(from: previous) }
-            self.snapshot = snap
+            // Timeout-wrapped too (not just the live-limits fetch below): this is
+            // plain file I/O and shouldn't hang, but "shouldn't" is exactly what we
+            // assumed about the Keychain call before finding out otherwise — nothing
+            // in this Task may block `isRefreshing` from resetting indefinitely.
+            if let loaded = await self.withTimeout(seconds: 20, operation: {
+                await Task.detached(priority: .utility) { reader.load(includeSessionLogs: full) }.value
+            }) {
+                var snap = loaded
+                if !full { snap = snap.mergingSession(from: previous) }
+                self.snapshot = snap
+            }
             if live {
                 // 20s: comfortably past the network layer's own 15s timeout, so this
                 // only ever kicks in for the un-timeoutable case (a blocked Keychain
@@ -760,6 +768,13 @@ final class UsageStore: ObservableObject {
     func resetCredentialsAndRetry() {
         ClaudeCredentials.invalidate()
         OAuthUsageClient.resetBackoff()
+        // Force-clear a possibly-stuck in-flight cycle: this button exists
+        // specifically for when the automatic recovery hasn't kicked in, so it
+        // must not be silently swallowed by refresh()'s own `!isRefreshing` guard
+        // the way every other caller correctly is. Safe — the abandoned old Task,
+        // if one is still running, simply has its result discarded when it
+        // eventually (if ever) finishes, same as any other timed-out cycle.
+        isRefreshing = false
         refresh(force: true)
     }
 
