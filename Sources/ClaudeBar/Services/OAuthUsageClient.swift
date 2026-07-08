@@ -62,9 +62,17 @@ struct OAuthUsageClient: Sendable {
             if var c = cached {
                 c.stale = true
                 c.error = message
+                // Persisted, not just returned in-memory: otherwise the very next
+                // tick's backoff branch (line ~47) re-reads the ORIGINAL on-disk
+                // cache — which still has the last SUCCESS's nil `.error` — and
+                // the real failure reason silently vanishes after one tick even
+                // though the failures keep happening underneath.
+                writeCache(c)
                 return c
             }
-            return LimitsSnapshot(fetchedAt: Date(), error: message)
+            let empty = LimitsSnapshot(fetchedAt: Date(), error: message)
+            writeCache(empty)
+            return empty
         }
     }
 
