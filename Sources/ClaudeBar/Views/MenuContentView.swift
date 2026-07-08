@@ -456,6 +456,7 @@ struct MenuContentView: View {
         let projects = snap.weeklyProjectUsage
         if projects.count >= 2 {
             let total = max(1, projects.reduce(0) { $0 + $1.tokens })
+            let forecast = Dictionary(uniqueKeysWithValues: store.projectWeeklyForecast.map { ($0.project, $0) })
             Divider().padding(.vertical, 2)
             Text("프로젝트별 · 최근 7일").font(.caption2).foregroundStyle(.tertiary)
                 .help("이 Mac의 Claude Code 로그 기준이에요 — 다른 기기에서 쓴 프로젝트는 빠져 있어요.")
@@ -469,6 +470,10 @@ struct MenuContentView: View {
                             .font(.caption).monospacedDigit().foregroundStyle(.secondary)
                     }
                     MeterBar(fraction: share)
+                    if let f = forecast[p.project], f.projectedAdditionalPct >= 0.5 {
+                        Text("이 페이스면 리셋까지 주간 한도 \(String(format: "%.1f", f.usedPct))%P + 추가 \(String(format: "%.1f", f.projectedAdditionalPct))%P")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                    }
                 }
             }
         }

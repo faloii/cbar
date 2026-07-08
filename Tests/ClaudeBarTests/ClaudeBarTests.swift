@@ -1207,3 +1207,62 @@ final class LogDedupeTests: XCTestCase {
         XCTAssertEqual(out.map(\.dedupKey), ["y", "x"])
     }
 }
+
+final class BurnAnomalyTests: XCTestCase {
+    func testFlagsPaceWellAboveTypicalDay() {
+        // $2/day typical; 3h in and already at $6 → projected ~$48/day = 24x.
+        let v = BurnAnomaly.verdict(todayCost: 6, hoursElapsedToday: 3, pastDailyCosts: [2, 1.8, 2.2, 1.9])
+        XCTAssertNotNil(v)
+        XCTAssertEqual(v?.typicalDailyCost ?? 0, 2, accuracy: 0.01)
+        XCTAssertGreaterThanOrEqual(v?.multiplier ?? 0, BurnAnomaly.minMultiplier)
+    }
+
+    func testSilentWhenPaceIsNormal() {
+        // 3h in at $0.3 → projected $2.4/day, typical $2/day → 1.2x, below threshold.
+        XCTAssertNil(BurnAnomaly.verdict(todayCost: 0.3, hoursElapsedToday: 3, pastDailyCosts: [2, 1.8, 2.2, 1.9]))
+    }
+
+    func testSilentWithTooLittleHistory() {
+        XCTAssertNil(BurnAnomaly.verdict(todayCost: 20, hoursElapsedToday: 3, pastDailyCosts: [1, 1]))
+    }
+
+    func testSilentWithNegligibleBaseline() {
+        // Typical days near-zero — any real usage would look like "∞x", not useful.
+        XCTAssertNil(BurnAnomaly.verdict(todayCost: 5, hoursElapsedToday: 3, pastDailyCosts: [0.01, 0.02, 0]))
+    }
+
+    func testSilentTooEarlyInTheDay() {
+        XCTAssertNil(BurnAnomaly.verdict(todayCost: 10, hoursElapsedToday: 0.2, pastDailyCosts: [2, 2, 2]))
+    }
+
+    func testSilentWithNoUsageToday() {
+        XCTAssertNil(BurnAnomaly.verdict(todayCost: 0, hoursElapsedToday: 5, pastDailyCosts: [2, 2, 2]))
+    }
+}
+
+final class ProjectWeeklyForecastTests: XCTestCase {
+    func testUsedAndProjectedShareByTokens() {
+        // 100 total tokens = 20% weekly util → 5 tokens/percent.
+        // Project A: 60 tokens used (12%P), 60/7=8.57 tokens/day × 3.5 days remaining ≈ 30 tokens ≈ 6%P.
+        let projects = [ProjectWeeklyUsage(project: "A", tokens: 60, cost: 6),
+                        ProjectWeeklyUsage(project: "B", tokens: 40, cost: 4)]
+        let out = ProjectWeeklyForecast.forecast(projects: projects, weeklyUtilPct: 20, daysRemaining: 3.5)
+        let a = out.first { $0.project == "A" }
+        XCTAssertEqual(a?.usedPct ?? 0, 12, accuracy: 0.01)
+        XCTAssertEqual(a?.projectedAdditionalPct ?? 0, 6, accuracy: 0.05)
+    }
+
+    func testSortedByTotalProjectedDescending() {
+        let projects = [ProjectWeeklyUsage(project: "small", tokens: 10, cost: 1),
+                        ProjectWeeklyUsage(project: "big", tokens: 90, cost: 9)]
+        let out = ProjectWeeklyForecast.forecast(projects: projects, weeklyUtilPct: 50, daysRemaining: 2)
+        XCTAssertEqual(out.first?.project, "big")
+    }
+
+    func testEmptyWhenNoLiveWeeklyData() {
+        let projects = [ProjectWeeklyUsage(project: "A", tokens: 60, cost: 6)]
+        XCTAssertEqual(ProjectWeeklyForecast.forecast(projects: projects, weeklyUtilPct: 0, daysRemaining: 3), [])
+        XCTAssertEqual(ProjectWeeklyForecast.forecast(projects: projects, weeklyUtilPct: 20, daysRemaining: 0), [])
+        XCTAssertEqual(ProjectWeeklyForecast.forecast(projects: [], weeklyUtilPct: 20, daysRemaining: 3), [])
+    }
+}

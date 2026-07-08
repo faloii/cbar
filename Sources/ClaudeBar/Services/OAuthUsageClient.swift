@@ -81,6 +81,10 @@ struct OAuthUsageClient: Sendable {
         let now = Date()
         return (now < nextAllowedFetch, nextAllowedFetch > now ? nextAllowedFetch : nil)
     }
+
+    /// Manual escape hatch for the diagnostics panel's "초기화 후 재시도" — clears the
+    /// exponential backoff so a forced retry isn't immediately turned away by it.
+    static func resetBackoff() { recordSuccess() }
     private static func recordSuccess() {
         throttleLock.lock(); consecutiveFailures = 0; nextAllowedFetch = .distantPast; throttleLock.unlock()
     }

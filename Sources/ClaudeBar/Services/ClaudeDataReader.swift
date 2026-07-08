@@ -444,6 +444,9 @@ enum DateParse {
     }()
     /// Parse a "yyyy-MM-dd" day string (as used by Claude's stats cache).
     static func day(_ s: String) -> Date? { dayFormatter.date(from: s) }
+    /// Format a Date as the same "yyyy-MM-dd" day string, for comparing against
+    /// `DailyCost.date` (e.g. to exclude "today" from a history lookup).
+    static func dayString(_ d: Date) -> String { dayFormatter.string(from: d) }
 }
 
 enum ModelName {

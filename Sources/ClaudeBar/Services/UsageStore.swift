@@ -704,19 +704,55 @@ final class UsageStore: ObservableObject {
 
     /// Dynamic, situational advice from the current projections + per-model burn.
     var adviceTips: [AdviceTip] {
-        Advice.compute(session: sessionProjection, weekly: weeklyProjection,
-                       sessionUtil: limits?.session5h?.utilization,
-                       weeklyUtil: limits?.weekly7d?.utilization,
+        var tips = Advice.compute(session: sessionProjection, weekly: weeklyProjection,
+                       sessionUtil: liveSession?.utilization,
+                       weeklyUtil: liveWeekly?.utilization,
                        models: snapshot.windowByModel,
                        contextTokens: snapshot.currentContextTokens,
                        warnThreshold: warnThreshold,
                        now: snapshot.generatedAt)
+        if let a = burnAnomaly {
+            let multText = a.multiplier >= 10 ? "10배 넘게" : String(format: "%.1f배", a.multiplier)
+            tips.insert(AdviceTip(kind: .burnAnomaly, level: .warn, icon: "flame",
+                text: "오늘 이 페이스면 평소(하루 ~\(Fmt.usd(a.typicalDailyCost))) 대비 \(multText) 쓰게 돼요"
+                    + "(예상 ~\(Fmt.usd(a.projectedToday))). 계획한 작업이면 괜찮지만, 아니라면 한번 확인해보세요."),
+                at: 0)
+        }
+        return Array(tips.prefix(3))
+    }
+
+    /// Per-project forward-looking share of the weekly limit — see `ProjectWeeklyForecast`.
+    var projectWeeklyForecast: [ProjectWeeklyForecast.Item] {
+        guard let w = liveWeekly, let allowance = weeklyAllowance else { return [] }
+        return ProjectWeeklyForecast.forecast(projects: snapshot.weeklyProjectUsage,
+                                              weeklyUtilPct: w.utilization,
+                                              daysRemaining: allowance.daysRemaining)
+    }
+
+    /// "You're burning unusually fast today, FOR YOU" — a personal-baseline nudge
+    /// (see `BurnAnomaly`), distinct from the fixed-threshold advice above.
+    var burnAnomaly: BurnAnomaly.Verdict? {
+        let now = snapshot.generatedAt
+        let todayStr = DateParse.dayString(now)
+        let hoursElapsed = now.timeIntervalSince(Calendar.current.startOfDay(for: now)) / 3600
+        let past = snapshot.dailyCostHistory.filter { $0.date != todayStr }.map(\.cost)
+        return BurnAnomaly.verdict(todayCost: snapshot.todayCost, hoursElapsedToday: hoursElapsed, pastDailyCosts: past)
     }
 
     /// Month-to-date spend vs the monthly budget, or nil when no budget is set.
     var budgetStatus: BudgetStatus? {
         guard monthlyBudget > 0 else { return nil }
         return Budget.status(history: snapshot.dailyCostHistory, now: Date(), budget: monthlyBudget)
+    }
+
+    /// Diagnostics panel's manual fix: clears the cached access token (forcing a
+    /// fresh Keychain read next time) and any exponential backoff, then retries
+    /// immediately — for when the automatic recovery (timeout + next tick) isn't
+    /// enough and the user just wants to force a clean attempt right now.
+    func resetCredentialsAndRetry() {
+        ClaudeCredentials.invalidate()
+        OAuthUsageClient.resetBackoff()
+        refresh(force: true)
     }
 
     /// Whether the live-limits endpoint is currently being backed off from after

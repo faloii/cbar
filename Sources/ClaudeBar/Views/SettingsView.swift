@@ -227,7 +227,9 @@ struct SettingsView: View {
                     } else if store.limits?.stale != true, store.limits?.hasData == true {
                         diagnosticsNote("정상", icon: "checkmark.circle", color: .green)
                     }
-                    Text("문제가 반복되면 이 화면을 캡처해서 알려주세요 — 원인을 바로 알 수 있어요.")
+                    Button("자격증명 캐시 초기화 후 재시도") { store.resetCredentialsAndRetry() }
+                        .controlSize(.small)
+                    Text("멈춘 것처럼 계속 안 풀리면 눌러보세요 — 캐시된 토큰을 지우고 새로 가져옵니다(키체인 확인 창이 다시 뜰 수 있어요). 문제가 반복되면 이 화면을 캡처해서 알려주세요.")
                         .font(.caption2).foregroundStyle(.tertiary)
                 } else {
                     Text("라이브 한도가 꺼져 있어요 — 진단할 대상이 없습니다.")
