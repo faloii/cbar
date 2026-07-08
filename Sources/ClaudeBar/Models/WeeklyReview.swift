@@ -12,9 +12,21 @@ struct WeeklyReview: Equatable {
     let lastCost: Double
     let opusShareThis: Double   // 0...1 of this week's cost from Opus
     let opusShareLast: Double
+    /// Average cost over the last 4 completed weeks (this week excluded, since
+    /// it's still in progress), skipping weeks with zero usage. A single "last
+    /// week" can be misleadingly quiet (vacation) or heavy (a crunch) on its
+    /// own — this gives a steadier baseline to compare against too. nil when no
+    /// past week had any usage.
+    let avgPast4WeeksCost: Double?
 
     /// Week-over-week cost change (%), nil when last week had no spend.
     var costDeltaPct: Double? { lastCost > 0 ? (thisCost - lastCost) / lastCost * 100 : nil }
+    /// This week vs the steadier 4-week average — nil when there's nothing to
+    /// compare against.
+    var costDeltaVsAvgPct: Double? {
+        guard let avg = avgPast4WeeksCost, avg > 0 else { return nil }
+        return (thisCost - avg) / avg * 100
+    }
     /// Change in Opus cost share, in percentage points.
     var opusShareDeltaPts: Double { (opusShareThis - opusShareLast) * 100 }
 
@@ -83,9 +95,26 @@ struct WeeklyReview: Equatable {
             }
         }
         guard thisCost > 0 || lastCost > 0 else { return nil }
+
+        // Past 4 completed weeks (bucket 0 = last week, matching `lastCost`'s
+        // window, through bucket 3 = 4 weeks ago), for the steadier baseline.
+        var pastWeekCosts = Array(repeating: 0.0, count: 4)
+        for (date, byModel) in entries {
+            let day = calendar.startOfDay(for: date)
+            guard day < thisStart,
+                  let daysAgo = calendar.dateComponents([.day], from: day, to: thisStart).day,
+                  daysAgo >= 1 else { continue }
+            let w = (daysAgo - 1) / 7
+            guard w < 4 else { continue }
+            pastWeekCosts[w] += cost(byModel).total
+        }
+        let nonZeroPastWeeks = pastWeekCosts.filter { $0 > 0 }
+        let avgPast4 = nonZeroPastWeeks.isEmpty ? nil : nonZeroPastWeeks.reduce(0, +) / Double(nonZeroPastWeeks.count)
+
         return WeeklyReview(
             thisCost: thisCost, lastCost: lastCost,
             opusShareThis: thisCost > 0 ? thisOpus / thisCost : 0,
-            opusShareLast: lastCost > 0 ? lastOpus / lastCost : 0)
+            opusShareLast: lastCost > 0 ? lastOpus / lastCost : 0,
+            avgPast4WeeksCost: avgPast4)
     }
 }

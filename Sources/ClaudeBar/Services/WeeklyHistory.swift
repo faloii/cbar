@@ -5,8 +5,11 @@ import Foundation
 /// for the session trend, but nowhere near enough to draw a within-week chart).
 /// Stored at `~/.claudebar/weekly-history.json`.
 enum WeeklyHistory {
-    static let maxSamples = 800                        // ~8 days at one sample / ~15min
-    static let minSampleGap: TimeInterval = 12 * 60     // throttle so 8 days stays small
+    // ~5 weeks at one sample/hour — enough for both the within-week trend chart
+    // (which doesn't need sub-hour resolution) and `PlanFitSignal`'s multi-week
+    // peak-utilization read, which needs several completed weeks of history.
+    static let maxSamples = 840
+    static let minSampleGap: TimeInterval = 3600
 
     private static var fileURL: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claudebar/weekly-history.json")

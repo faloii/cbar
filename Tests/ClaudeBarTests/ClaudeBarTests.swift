@@ -547,6 +547,67 @@ final class WeeklyReviewTests: XCTestCase {
         ]
         XCTAssertNil(WeeklyReview.compute(entries: entries, rates: [:], fallback: 0.0001, now: now))
     }
+
+    func testAvgPast4WeeksExcludesCurrentAndZeroWeeks() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let rates = ["m": 0.0001]
+        let entries: [(date: Date, byModel: [String: Int])] = [
+            (now.addingTimeInterval(-1 * 86400), ["m": 1_000_000]),    // this week: $100 — excluded from the avg
+            (now.addingTimeInterval(-8 * 86400), ["m": 500_000]),      // last week (bucket 0): $50
+            (now.addingTimeInterval(-22 * 86400), ["m": 300_000]),     // 3 weeks ago (bucket 2): $30
+            // bucket 1 (2 weeks ago) and bucket 3 (4 weeks ago): no usage, excluded from the average
+        ]
+        let r = WeeklyReview.compute(entries: entries, rates: rates, fallback: 0, now: now)!
+        XCTAssertEqual(r.avgPast4WeeksCost ?? 0, 40, accuracy: 0.001)   // (50 + 30) / 2
+        XCTAssertEqual(r.costDeltaVsAvgPct ?? 0, 150, accuracy: 0.1)    // 100 vs 40 avg
+    }
+
+    func testNilAvgWhenNoPastWeekHasUsage() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let entries: [(date: Date, byModel: [String: Int])] = [
+            (now.addingTimeInterval(-1 * 86400), ["m": 1_000_000]),   // only this week
+        ]
+        let r = WeeklyReview.compute(entries: entries, rates: ["m": 0.0001], fallback: 0, now: now)!
+        XCTAssertNil(r.avgPast4WeeksCost)
+        XCTAssertNil(r.costDeltaVsAvgPct)
+    }
+}
+
+final class PlanFitSignalTests: XCTestCase {
+    func testConsistentlyHighAcrossAllWeeks() {
+        let v = PlanFitSignal.evaluate(weeklyPeaks: [95, 92, 98])
+        XCTAssertEqual(v?.verdict, .consistentlyHigh)
+        XCTAssertEqual(v?.weeksObserved, 3)
+    }
+
+    func testConsistentlyLowAcrossAllWeeks() {
+        let v = PlanFitSignal.evaluate(weeklyPeaks: [10, 25, 5, 15])
+        XCTAssertEqual(v?.verdict, .consistentlyLow)
+    }
+
+    func testMixedPatternStaysSilent() {
+        XCTAssertNil(PlanFitSignal.evaluate(weeklyPeaks: [95, 20, 92]))
+    }
+
+    func testTooFewWeeksStaysSilent() {
+        XCTAssertNil(PlanFitSignal.evaluate(weeklyPeaks: [95, 98]))
+    }
+
+    func testWeeklyPeaksBucketsByWeekAndExcludesCurrentWeek() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let samples = [
+            UsageSample(at: now.addingTimeInterval(-1 * 86400), session: nil, weekly: 99),   // this week — excluded
+            UsageSample(at: now.addingTimeInterval(-8 * 86400), session: nil, weekly: 40),
+            UsageSample(at: now.addingTimeInterval(-9 * 86400), session: nil, weekly: 55),    // same bucket, higher peak
+            UsageSample(at: now.addingTimeInterval(-22 * 86400), session: nil, weekly: 20),
+        ]
+        let peaks = PlanFitSignal.weeklyPeaks(samples: samples, now: now, weeks: 5)
+        XCTAssertEqual(peaks, [55, 20])   // bucket "2 weeks ago" had no samples, skipped entirely
+    }
+
+    func testWeeklyPeaksEmptyWithNoHistory() {
+        XCTAssertEqual(PlanFitSignal.weeklyPeaks(samples: [], now: Date(), weeks: 5), [])
+    }
 }
 
 final class AdviceTests: XCTestCase {

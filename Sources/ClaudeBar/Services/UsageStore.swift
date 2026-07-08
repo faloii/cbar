@@ -721,6 +721,14 @@ final class UsageStore: ObservableObject {
         return Array(tips.prefix(3))
     }
 
+    /// Multi-week "is your plan tier a good fit" read — see `PlanFitSignal`. Needs
+    /// several completed weeks of live-limit history, so this stays nil for a
+    /// while after a fresh install (nothing dishonest to say yet).
+    var planFitSignal: PlanFitSignal.Result? {
+        let peaks = PlanFitSignal.weeklyPeaks(samples: weeklyTrend, now: Date(), weeks: 5)
+        return PlanFitSignal.evaluate(weeklyPeaks: peaks)
+    }
+
     /// Per-project forward-looking share of the weekly limit — see `ProjectWeeklyForecast`.
     var projectWeeklyForecast: [ProjectWeeklyForecast.Item] {
         guard let w = liveWeekly, let allowance = weeklyAllowance else { return [] }

@@ -444,6 +444,20 @@ struct MenuContentView: View {
             StatRow(label: "Opus 비중", value: "\(Int((r.opusShareThis * 100).rounded()))%",
                     secondary: opusDeltaText(r.opusShareDeltaPts))
         }
+        // Last week alone can be misleadingly quiet or heavy — the 4-week average
+        // is a steadier read on whether THIS week is actually unusual.
+        if let avg = r.avgPast4WeeksCost, let vsAvgText = vsAvgText(r.costDeltaVsAvgPct) {
+            Text("최근 4주 평균 ~\(Fmt.usd(avg)) 대비 \(vsAvgText)")
+                .font(.caption2).foregroundStyle(.tertiary)
+        }
+        if let fit = store.planFitSignal {
+            HStack(alignment: .top, spacing: 7) {
+                Image(systemName: "chart.bar").font(.caption).foregroundStyle(Color.brand)
+                Text(planFitText(fit)).font(.caption)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 2)
+        }
         if let coaching = r.coaching {
             HStack(alignment: .top, spacing: 7) {
                 Image(systemName: "lightbulb").font(.caption).foregroundStyle(Color.brand)
@@ -483,6 +497,20 @@ struct MenuContentView: View {
         guard let p = pct else { return nil }
         if abs(p) < 1 { return "지난주와 비슷" }
         return p > 0 ? "지난주 ▲\(Int(p.rounded()))%" : "지난주 ▼\(Int(abs(p).rounded()))%"
+    }
+    private func vsAvgText(_ pct: Double?) -> String? {
+        guard let p = pct else { return nil }
+        if abs(p) < 1 { return "비슷해요" }
+        return p > 0 ? "▲\(Int(p.rounded()))%" : "▼\(Int(abs(p).rounded()))%"
+    }
+    private func planFitText(_ fit: PlanFitSignal.Result) -> String {
+        let avg = Int(fit.avgPeakPct.rounded())
+        switch fit.verdict {
+        case .consistentlyHigh:
+            return "최근 \(fit.weeksObserved)주 연속 주간 한도를 거의 다 썼어요(평균 최고 \(avg)%) — 상위 플랜이면 더 여유로울 수 있어요."
+        case .consistentlyLow:
+            return "최근 \(fit.weeksObserved)주 연속 주간 한도를 여유 있게 썼어요(평균 최고 \(avg)%) — 지금보다 낮은 플랜도 충분할 수 있어요."
+        }
     }
     private func opusDeltaText(_ pts: Double) -> String? {
         if abs(pts) < 1 { return nil }
