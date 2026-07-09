@@ -578,10 +578,12 @@ final class UsageStore: ObservableObject {
             id: "compact-suggest-\(s.sessionId)", urgency: .nudge, category: .limit)
     }
 
-    /// Idle cadence when the popover is closed — kept at the limits cache TTL (180s)
-    /// so the menu-bar warning icon stays reasonably fresh without scanning every 60s.
-    /// Tightened to `urgentIdleInterval` while near a limit so the warning is timely.
-    private static let idleInterval: TimeInterval = 180
+    /// Idle cadence when the popover is closed — deliberately looser than the
+    /// limits cache TTL (180s): when nothing is at risk there's no need to wake up
+    /// and hit the network/disk that often just to keep a background number fresh
+    /// a user isn't even looking at right now. Tightened to `urgentIdleInterval`
+    /// while near a limit so the warning icon still stays timely.
+    private static let idleInterval: TimeInterval = 300
     private static let urgentIdleInterval: TimeInterval = 60
     private var popoverVisible = false
 
