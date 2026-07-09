@@ -15,16 +15,17 @@ enum SettingsOpener {
 /// A panel that never becomes key/main, so showing it doesn't make the menu-bar
 /// popover resign key (and dismiss). All Settings controls are mouse-operable.
 ///
-/// `isKeyWindow` is overridden to `true` purely for appearance: AppKit tints
-/// controls (toggles, buttons, selected rows) using the muted "inactive window"
-/// palette whenever `window.isKeyWindow` is false, which made every toggle here
-/// look flat gray regardless of on/off state. Faking `isKeyWindow` restores full
-/// color for child controls without touching `canBecomeKey`, so the window still
-/// never actually steals key status (and the popover still doesn't dismiss).
+/// NOTE: an earlier version also overrode `isKeyWindow` to `true`, purely to fix
+/// toggles rendering in the muted "inactive window" gray regardless of on/off
+/// state. That override was reverted — it made AppKit's focus/key-window
+/// bookkeeping inconsistent (this panel claiming to be key while genuinely
+/// unable to become key), which reintroduced itself as a worse bug: clicking a
+/// toggle could cause the real key window (the popover) to resign key and
+/// dismiss, closing Settings along with it. A correct fix for the color issue,
+/// if revisited, needs to not misrepresent `isKeyWindow`.
 final class NonKeyPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
-    override var isKeyWindow: Bool { true }
 }
 
 @MainActor
