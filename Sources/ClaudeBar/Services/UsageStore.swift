@@ -303,10 +303,35 @@ final class UsageStore: ObservableObject {
     /// notices the rollover (freed alert, auto-resume, fresh %) within seconds
     /// instead of waiting out the idle tick + cache TTL.
     private var resetBoundaryTimer: Timer?
+    /// The server can lag a few seconds past the predicted reset before it
+    /// actually reflects the new window — the first forced refetch right after a
+    /// reset can still come back with the OLD (now-expired) window. Without this,
+    /// `scheduleResetBoundaryRefresh` would then only find a FUTURE reset to wait
+    /// for (the next one, hours/days away) and fall back to the idle cadence —
+    /// leaving the session ring missing from the popover for up to several
+    /// minutes after every single reset. Bounded quick retries close that gap.
+    private var resetConfirmAttempts = 0
+    private static let maxResetConfirmAttempts = 6           // ~1 minute of quick retries
+    private static let resetConfirmRetryInterval: TimeInterval = 10
+
     private func scheduleResetBoundaryRefresh() {
         resetBoundaryTimer?.invalidate()
         resetBoundaryTimer = nil
         let now = Date()
+
+        let sessionStillStale = limits?.session5h.map { $0.expired(asOf: now) } ?? false
+        let weeklyStillStale = limits?.weekly7d.map { $0.expired(asOf: now) } ?? false
+        if sessionStillStale || weeklyStillStale, resetConfirmAttempts < Self.maxResetConfirmAttempts {
+            resetConfirmAttempts += 1
+            let timer = Timer(fire: now.addingTimeInterval(Self.resetConfirmRetryInterval), interval: 0, repeats: false) { [weak self] _ in
+                Task { @MainActor in self?.refresh(force: true) }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            resetBoundaryTimer = timer
+            return
+        }
+        resetConfirmAttempts = 0
+
         guard let next = [limits?.session5h?.resetsAt, limits?.weekly7d?.resetsAt]
             .compactMap({ $0 }).filter({ $0 > now }).min() else { return }
         let timer = Timer(fire: next.addingTimeInterval(5), interval: 0, repeats: false) { [weak self] _ in
