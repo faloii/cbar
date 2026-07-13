@@ -23,7 +23,8 @@ enum BurnAnomaly {
         guard todayCost > 0, hoursElapsedToday >= minHoursElapsed else { return nil }
         let usable = pastDailyCosts.filter { $0 > 0.01 }.sorted()
         guard usable.count >= minHistoryDays else { return nil }
-        let median = usable[usable.count / 2]
+        let mid = usable.count / 2
+        let median = usable.count.isMultiple(of: 2) ? (usable[mid - 1] + usable[mid]) / 2 : usable[mid]
         guard median >= minTypicalCost else { return nil }
         let projected = todayCost / hoursElapsedToday * 24
         let multiplier = projected / median

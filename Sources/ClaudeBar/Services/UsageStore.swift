@@ -705,6 +705,11 @@ final class UsageStore: ObservableObject {
                        contextTokens: snapshot.currentContextTokens,
                        warnThreshold: warnThreshold,
                        now: snapshot.generatedAt)
+        // Advice.compute already caps itself at 3, so simply appending here would
+        // almost always get sliced off by a naive prefix(3) below — this tip would
+        // silently never show in the common case. Widen the cap to 4 instead of
+        // dropping it: it's real but lower-urgency (.info) than an active
+        // risk/pacing warning, so it still yields to those when things are tight.
         if let t = cacheEfficiencyTrend {
             tips.append(AdviceTip(kind: .cacheEfficiencyTrend, level: .info, icon: "arrow.trianglehead.2.clockwise",
                 text: "최근 재읽기 비율이 늘고 있어요(예전 평균 \(Int((t.baselineFreshShare * 100).rounded()))% 새 작업 → 최근 \(Int((t.recentFreshShare * 100).rounded()))%). "
@@ -717,7 +722,7 @@ final class UsageStore: ObservableObject {
                     + "(예상 ~\(Fmt.usd(a.projectedToday))). 계획한 작업이면 괜찮지만, 아니라면 한번 확인해보세요."),
                 at: 0)
         }
-        return Array(tips.prefix(3))
+        return Array(tips.prefix(4))
     }
 
     /// Multi-week "is your plan tier a good fit" read — see `PlanFitSignal`. Needs

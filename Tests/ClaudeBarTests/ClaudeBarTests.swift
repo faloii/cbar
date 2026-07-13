@@ -1271,11 +1271,21 @@ final class LogDedupeTests: XCTestCase {
 
 final class BurnAnomalyTests: XCTestCase {
     func testFlagsPaceWellAboveTypicalDay() {
-        // $2/day typical; 3h in and already at $6 → projected ~$48/day = 24x.
+        // Sorted [1.8, 1.9, 2.0, 2.2] → even-count median = (1.9+2.0)/2 = 1.95/day
+        // typical; 3h in and already at $6 → projected ~$48/day, well above 2x.
         let v = BurnAnomaly.verdict(todayCost: 6, hoursElapsedToday: 3, pastDailyCosts: [2, 1.8, 2.2, 1.9])
         XCTAssertNotNil(v)
-        XCTAssertEqual(v?.typicalDailyCost ?? 0, 2, accuracy: 0.01)
+        XCTAssertEqual(v?.typicalDailyCost ?? 0, 1.95, accuracy: 0.01)
         XCTAssertGreaterThanOrEqual(v?.multiplier ?? 0, BurnAnomaly.minMultiplier)
+    }
+
+    func testMedianIsTrueAverageForEvenCount() {
+        // Odd count → the middle element (unambiguous).
+        let odd = BurnAnomaly.verdict(todayCost: 10, hoursElapsedToday: 5, pastDailyCosts: [1, 2, 3])
+        XCTAssertEqual(odd?.typicalDailyCost ?? 0, 2, accuracy: 0.01)
+        // Even count → average of the two middle elements, not just the upper one.
+        let even = BurnAnomaly.verdict(todayCost: 10, hoursElapsedToday: 5, pastDailyCosts: [1, 2, 3, 4])
+        XCTAssertEqual(even?.typicalDailyCost ?? 0, 2.5, accuracy: 0.01)
     }
 
     func testSilentWhenPaceIsNormal() {
@@ -1290,6 +1300,12 @@ final class BurnAnomalyTests: XCTestCase {
     func testSilentWithNegligibleBaseline() {
         // Typical days near-zero — any real usage would look like "∞x", not useful.
         XCTAssertNil(BurnAnomaly.verdict(todayCost: 5, hoursElapsedToday: 3, pastDailyCosts: [0.01, 0.02, 0]))
+    }
+
+    func testSilentWhenTypicalCostJustBelowMinimum() {
+        // Distinct from testSilentWithNegligibleBaseline: enough real history (passes
+        // minHistoryDays), but the median itself ($0.20) is still under minTypicalCost.
+        XCTAssertNil(BurnAnomaly.verdict(todayCost: 5, hoursElapsedToday: 3, pastDailyCosts: [0.15, 0.2, 0.25]))
     }
 
     func testSilentTooEarlyInTheDay() {
