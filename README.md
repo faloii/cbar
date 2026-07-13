@@ -73,6 +73,21 @@ Plus an **optional live fetch** of your real plan limits (see
   menu-bar icon and popover still show real state).
 - **최근 알림 (Notification history)** — opt-in card listing the last few notifications
   CBar posted, a safety net for passive ones you might not have seen banner for.
+- **Burn anomaly nudge** — "burning unusually fast today, for you": compares today's
+  pace against *your own* trailing daily-cost median (not a fixed threshold), so a heavy
+  user's normal day doesn't trip it and a light user's normal day never does either.
+- **Per-project weekly forecast** — extends the per-project weekly-share view with a
+  forward-looking read: each project's trailing-7-day pace extrapolated to the reset,
+  in points of the weekly limit (derived from your live tokens÷utilization%, not a
+  hardcoded cap).
+- **4-week baseline + plan-fit signal** — "이번 주" is compared against the last 4 weeks'
+  average, not just a single (possibly unusual) last week; and when every one of the
+  last 3-4 completed weeks peaked consistently ≥90% or ≤30%, a one-line note suggests
+  the plan tier might not fit well (never naming a specific plan — no way to know pricing).
+- **Settings → 진단 (diagnostics)** — last refresh attempt/success, whether a refresh
+  timed out (the "a system call is hung" signature vs. an ordinary failure), backoff
+  status, the actual last error, and a "clear cached credentials & retry" button — so a
+  stuck live-limits fetch is diagnosable and fixable from the UI, not a black box.
 
 > Costs are **estimates** from public list prices. Override per-model rates by creating
 > `~/.claudebar/pricing.json` (see [Pricing](#pricing)).
