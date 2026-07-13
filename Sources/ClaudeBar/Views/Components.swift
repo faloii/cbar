@@ -6,6 +6,37 @@ extension Color {
     static let brandTop = Color(red: 0.93, green: 0.59, blue: 0.45)
 }
 
+/// A fully custom-drawn switch, independent of AppKit's native `NSSwitch`
+/// rendering — which ties its ON-state color to whether the containing window
+/// is currently key. The Settings panel is deliberately never key (so opening
+/// it doesn't dismiss the menu-bar popover — see `NonKeyPanel`), which made
+/// every native toggle render in the muted "inactive window" gray regardless of
+/// on/off state. An earlier fix faked `isKeyWindow` to work around that, but it
+/// destabilized AppKit's focus bookkeeping and caused Settings to close
+/// unexpectedly when a toggle was clicked. Drawing the switch ourselves sidesteps
+/// the whole problem: it has no notion of window key state to get wrong.
+struct BrandToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack {
+            configuration.label
+            Spacer()
+            Capsule()
+                .fill(configuration.isOn ? Color.brand : Color.secondary.opacity(0.35))
+                .frame(width: 34, height: 20)
+                .overlay(
+                    Circle()
+                        .fill(.white)
+                        .padding(2)
+                        .offset(x: configuration.isOn ? 7 : -7)
+                )
+                .animation(.easeInOut(duration: 0.15), value: configuration.isOn)
+                .onTapGesture { configuration.isOn.toggle() }
+                .accessibilityAddTraits(.isButton)
+        }
+        .contentShape(Rectangle())
+    }
+}
+
 /// Tiny ring gauge for the menu-bar label — replaces the idle "sparkle" glyph with
 /// an at-a-glance progress read (the worse of session/weekly %) so you don't need
 /// to open the popover just to see roughly how much room is left. Reserved for the

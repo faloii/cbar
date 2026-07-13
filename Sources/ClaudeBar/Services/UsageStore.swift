@@ -316,28 +316,7 @@ final class UsageStore: ObservableObject {
         resetBoundaryTimer = timer
     }
 
-/// Races `operation` against a timeout so a hung call deep in the awaited chain can't
-    /// block the caller forever — observed cause: macOS's Keychain `SecItemCopyMatching`
-    /// blocks indefinitely while a system authorization dialog is pending, and if that
-    /// fires while the Mac is asleep/locked (nobody around to answer it), it never
-    /// returns. The abandoned call keeps running in the background (harmless — its
-    /// result, if it ever arrives, is simply discarded) so this only stops *waiting*,
-    /// it doesn't cancel the underlying work.
-    private func withTimeout<T: Sendable>(seconds: TimeInterval,
-                                          operation: @escaping @Sendable () async -> T) async -> T? {
-        await withTaskGroup(of: T?.self) { group in
-            group.addTask { await operation() }
-            group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
-                return nil
-            }
-            let result = await group.next() ?? nil
-            group.cancelAll()
-            return result
-        }
-    }
-
-    /// Refresh local usage and (if enabled) the live limits. `force` bypasses the
+/// Refresh local usage and (if enabled) the live limits. `force` bypasses the
     /// limits cache TTL — used when the user explicitly hits Refresh.
     func refresh(force: Bool = false) {
         guard !isRefreshing else { return }
@@ -362,7 +341,7 @@ final class UsageStore: ObservableObject {
             // plain file I/O and shouldn't hang, but "shouldn't" is exactly what we
             // assumed about the Keychain call before finding out otherwise — nothing
             // in this Task may block `isRefreshing` from resetting indefinitely.
-            if let loaded = await self.withTimeout(seconds: 20, operation: {
+            if let loaded = await withTimeout(seconds: 20, operation: {
                 await Task.detached(priority: .utility) { reader.load(includeSessionLogs: full) }.value
             }) {
                 var snap = loaded
@@ -374,7 +353,7 @@ final class UsageStore: ObservableObject {
                 // only ever kicks in for the un-timeoutable case (a blocked Keychain
                 // prompt). On timeout, deliberately leave `self.limits` untouched
                 // (not nil'd) — this cycle produced nothing new, not "no data."
-                if let fresh = await self.withTimeout(seconds: 20, operation: { await client.loadLimits(force: force, ttl: ttl) }) {
+                if let fresh = await withTimeout(seconds: 20, operation: { await client.loadLimits(force: force, ttl: ttl) }) {
                     self.limits = fresh
                     self.lastRefreshTimedOut = false
                 } else {

@@ -1327,3 +1327,25 @@ final class ProjectWeeklyForecastTests: XCTestCase {
         XCTAssertEqual(ProjectWeeklyForecast.forecast(projects: [], weeklyUtilPct: 20, daysRemaining: 3), [])
     }
 }
+
+final class AsyncTimeoutTests: XCTestCase {
+    func testReturnsResultWhenOperationFinishesInTime() async {
+        let result = await withTimeout(seconds: 1) { 42 }
+        XCTAssertEqual(result, 42)
+    }
+
+    /// Regression guard: an earlier implementation used `withTaskGroup`, which is
+    /// structured concurrency and MUST await every child task before returning —
+    /// so it silently waited for the full 3s "hung" operation below instead of
+    /// giving up at the 0.2s timeout. This asserts the timeout is actually honored.
+    func testReturnsNilWithoutWaitingForSlowOperation() async {
+        let start = Date()
+        let result: Int? = await withTimeout(seconds: 0.2) {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            return 99
+        }
+        let elapsed = Date().timeIntervalSince(start)
+        XCTAssertNil(result)
+        XCTAssertLessThan(elapsed, 1.0)
+    }
+}
