@@ -347,6 +347,11 @@ final class UsageStore: ObservableObject {
                 var snap = loaded
                 if !full { snap = snap.mergingSession(from: previous) }
                 self.snapshot = snap
+                // Feeds CacheEfficiencyTrend's multi-week "재읽기 비율이 늘고 있어요"
+                // read — a single 5h-window snapshot in isolation can't show a trend.
+                if let ce = CacheEfficiency.verdict(snap.windowTokens) {
+                    CacheEfficiencyHistory.append(freshShare: ce.freshShare, at: snap.generatedAt)
+                }
             }
             if live {
                 // 20s: comfortably past the network layer's own 15s timeout, so this
@@ -554,7 +559,7 @@ final class UsageStore: ObservableObject {
         Notifier.notify(
             title: "이 대화, 슬슬 무거워요",
             body: "컨텍스트 ~\(Fmt.tokens(s.lastContextTokens)) · 재읽기 \(Int((s.cacheReadShare * 100).rounded()))% — /compact 하면 같은 한도로 더 오래 가요.",
-            id: "compact-suggest-\(s.sessionId)", urgency: .nudge, category: .limit)
+            id: "compact-suggest-\(s.sessionId)", urgency: .nudge, category: .compactSuggest)
     }
 
     /// Idle cadence when the popover is closed — deliberately looser than the
@@ -700,6 +705,11 @@ final class UsageStore: ObservableObject {
                        contextTokens: snapshot.currentContextTokens,
                        warnThreshold: warnThreshold,
                        now: snapshot.generatedAt)
+        if let t = cacheEfficiencyTrend {
+            tips.append(AdviceTip(kind: .cacheEfficiencyTrend, level: .info, icon: "arrow.trianglehead.2.clockwise",
+                text: "최근 재읽기 비율이 늘고 있어요(예전 평균 \(Int((t.baselineFreshShare * 100).rounded()))% 새 작업 → 최근 \(Int((t.recentFreshShare * 100).rounded()))%). "
+                    + "/compact를 더 자주 쓰거나 새 대화로 자주 시작해보세요."))
+        }
         if let a = burnAnomaly {
             let multText = a.multiplier >= 10 ? "10배 넘게" : String(format: "%.1f배", a.multiplier)
             tips.insert(AdviceTip(kind: .burnAnomaly, level: .warn, icon: "flame",
@@ -734,6 +744,17 @@ final class UsageStore: ObservableObject {
         let hoursElapsed = now.timeIntervalSince(Calendar.current.startOfDay(for: now)) / 3600
         let past = snapshot.dailyCostHistory.filter { $0.date != todayStr }.map(\.cost)
         return BurnAnomaly.verdict(todayCost: snapshot.todayCost, hoursElapsedToday: hoursElapsed, pastDailyCosts: past)
+    }
+
+    /// "Re-read share has been creeping up lately" — see `CacheEfficiencyTrend`.
+    var cacheEfficiencyTrend: CacheEfficiencyTrend.Verdict? {
+        let now = Date()
+        let samples = CacheEfficiencyHistory.load()
+        let recentCutoff = now.addingTimeInterval(-3 * 86400)      // last 3 days
+        let baselineCutoff = now.addingTimeInterval(-28 * 86400)   // the 4 weeks before that
+        let recent = samples.filter { $0.at >= recentCutoff }.map(\.freshShare)
+        let baseline = samples.filter { $0.at >= baselineCutoff && $0.at < recentCutoff }.map(\.freshShare)
+        return CacheEfficiencyTrend.verdict(recentShares: recent, baselineShares: baseline)
     }
 
     /// Month-to-date spend vs the monthly budget, or nil when no budget is set.

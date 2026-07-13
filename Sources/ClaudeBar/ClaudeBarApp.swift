@@ -62,6 +62,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 if !UsageStore.shared.isSnoozed { UsageStore.shared.toggleSnooze() }
             case Notifier.Action.resumeNow.rawValue:
                 UsageStore.shared.resumeNow()
+            case Notifier.Action.copyCompact.rawValue:
+                let pb = NSPasteboard.general
+                pb.clearContents()
+                pb.setString("/compact", forType: .string)
             default: break
             }
             completionHandler()

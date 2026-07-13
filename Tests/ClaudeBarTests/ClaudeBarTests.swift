@@ -1349,3 +1349,31 @@ final class AsyncTimeoutTests: XCTestCase {
         XCTAssertLessThan(elapsed, 1.0)
     }
 }
+
+final class CacheEfficiencyTrendTests: XCTestCase {
+    func testFlagsMeaningfulDrift() {
+        // Baseline ~70% fresh, recent ~40% fresh → 30pt worse, well past the 15pt bar.
+        let baseline = [0.72, 0.68, 0.70, 0.69, 0.71]
+        let recent = [0.42, 0.38, 0.40, 0.41, 0.39]
+        let v = CacheEfficiencyTrend.verdict(recentShares: recent, baselineShares: baseline)
+        XCTAssertNotNil(v)
+        XCTAssertEqual(v?.deltaPts ?? 0, 30, accuracy: 1)
+    }
+
+    func testSilentOnSmallDrift() {
+        let baseline = [0.70, 0.69, 0.71, 0.70, 0.69]
+        let recent = [0.65, 0.64, 0.66, 0.65, 0.63]   // ~5pt worse — below the 15pt bar
+        XCTAssertNil(CacheEfficiencyTrend.verdict(recentShares: recent, baselineShares: baseline))
+    }
+
+    func testSilentWhenRecentIsBetter() {
+        let baseline = [0.40, 0.42, 0.38, 0.41, 0.39]
+        let recent = [0.70, 0.72, 0.68, 0.71, 0.69]   // improved, not worsened
+        XCTAssertNil(CacheEfficiencyTrend.verdict(recentShares: recent, baselineShares: baseline))
+    }
+
+    func testSilentWithTooFewSamples() {
+        XCTAssertNil(CacheEfficiencyTrend.verdict(recentShares: [0.3, 0.3], baselineShares: [0.7, 0.7, 0.7, 0.7, 0.7]))
+        XCTAssertNil(CacheEfficiencyTrend.verdict(recentShares: [0.3, 0.3, 0.3, 0.3, 0.3], baselineShares: [0.7, 0.7]))
+    }
+}

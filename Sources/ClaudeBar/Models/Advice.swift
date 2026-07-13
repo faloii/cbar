@@ -2,7 +2,7 @@ import Foundation
 
 /// One piece of dynamic, situational guidance shown in the popover.
 struct AdviceTip: Identifiable, Equatable {
-    enum Kind { case sessionPacing, resetImminent, headroom, contextHeavy, weeklyDefer, costModel, watch, healthy, burnAnomaly }
+    enum Kind { case sessionPacing, resetImminent, headroom, contextHeavy, weeklyDefer, costModel, watch, healthy, burnAnomaly, cacheEfficiencyTrend }
     enum Level { case good, info, warn, critical }
 
     let kind: Kind
