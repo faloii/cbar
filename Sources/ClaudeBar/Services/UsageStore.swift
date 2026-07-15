@@ -548,11 +548,27 @@ final class UsageStore: ObservableObject {
         }
     }
 
+    private var lastAutoResumeAt: Date?
+    /// Guards against launching several `claude` processes in a short burst —
+    /// observed after the reset-boundary retry (fires refresh(force:true) every
+    /// ~10s near a reset): if "reset-after-block" ends up qualifying on more than
+    /// one of those quick retries, each would otherwise independently relaunch
+    /// the resume command, and if that command itself reads the shared Keychain
+    /// credential (Claude Code's CLI does, via a `security` subprocess — a
+    /// different requesting process than CBar, so it needs its own Keychain
+    /// grant), several concurrent launches show up as several stacked
+    /// "security..." access prompts. One resume attempt per cooldown window is
+    /// enough; a genuinely new block-then-reset cycle is always well outside it.
+    private static let autoResumeCooldown: TimeInterval = 90
+
     /// Runs the configured resume command (or the built-in "continue last
     /// conversation" default) right now — the auto-resume toggle's action, also
     /// triggered manually via the "지금 이어가기" notification button. Off the main
     /// actor since resolving the binary/dir spawns a short-lived process.
     func resumeNow() {
+        let now = Date()
+        guard now.timeIntervalSince(lastAutoResumeAt ?? .distantPast) >= Self.autoResumeCooldown else { return }
+        lastAutoResumeAt = now
         let custom = resumeCommand.trimmingCharacters(in: .whitespacesAndNewlines)
         Task.detached(priority: .utility) {
             // Empty → safe built-in (argv, no shell injection). Filled → the user's
