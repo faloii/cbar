@@ -174,7 +174,9 @@ struct MenuContentView: View {
         case .efficiency:
             if store.hasEfficiencyData { Card { efficiencySection } }
         case .recent:
-            Card { windowSection }
+            // Gate on real local data: with only live-limit data (this Mac has no
+            // Claude Code logs), an unconditional card just shows "~$0.00 / 0 토큰".
+            if snap.windowTokens.total > 0 { Card { windowSection } }
         case .perModel:
             if !store.modelBurnRows.isEmpty { Card { perModelSection } }
         case .modelGuide:
@@ -184,7 +186,9 @@ struct MenuContentView: View {
         case .sessions:
             if !snap.recentSessions.isEmpty { Card { sessionsSection } }
         case .today:
-            Card { todaySection }
+            // Same as .recent — don't show an all-zero card when there's no local
+            // activity today (e.g. live limits on, but nothing run on this Mac yet).
+            if snap.todayRequests > 0 { Card { todaySection } }
         case .weeklyReview:
             if let r = snap.weeklyReview { Card { weeklyReviewSection(r) } }
         case .goals:
@@ -199,7 +203,12 @@ struct MenuContentView: View {
     @ViewBuilder private var notificationLogSection: some View {
         CardHeader(icon: "bell", title: "최근 알림")
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(store.recentNotifications.prefix(5)) { n in
+            // Key by array position, NOT by NotificationLogEntry.id: that id is the
+            // notification identifier ("risk-session" etc.), reused on every firing,
+            // so it's not unique across log rows. A ForEach keyed on it collides and
+            // renders entries duplicated / out of order. The list is already deduped
+            // and sorted, so positional identity is stable and unique here.
+            ForEach(Array(store.recentNotifications.prefix(5).enumerated()), id: \.offset) { _, n in
                 VStack(alignment: .leading, spacing: 1) {
                     HStack {
                         Text(n.title).font(.caption.weight(.medium))
@@ -421,14 +430,19 @@ struct MenuContentView: View {
         let current = shares.first?.opusShare ?? 0
         let used = shares.filter { $0.hasUsage }
         let compliant = used.filter { $0.opusShare * 100 <= Double(store.opusShareTarget) }.count
-        let over = (shares.first?.hasUsage ?? false) && current * 100 > Double(store.opusShareTarget)
+        let hasUsageThisWeek = shares.first?.hasUsage ?? false
+        let over = hasUsageThisWeek && current * 100 > Double(store.opusShareTarget)
         CardHeader(icon: "target", title: "습관 목표")
         HStack(alignment: .firstTextBaseline) {
             Text("Opus 비중 ≤ \(store.opusShareTarget)%").font(.callout.weight(.medium))
             Spacer()
             Text("이번 주 \(Int((current * 100).rounded()))%").font(.callout).monospacedDigit()
-            Text(over ? "초과" : "준수")
-                .font(.caption2.weight(.medium)).foregroundStyle(over ? .red : .green)
+            // Don't claim "준수" (compliant) before any usage this week — there's
+            // nothing to be compliant about yet. Only judge once there's real usage.
+            if hasUsageThisWeek {
+                Text(over ? "초과" : "준수")
+                    .font(.caption2.weight(.medium)).foregroundStyle(over ? .red : .green)
+            }
         }
         MeterBar(fraction: current)
         if !used.isEmpty {

@@ -30,10 +30,17 @@ struct BrandToggleStyle: ToggleStyle {
                         .offset(x: configuration.isOn ? 7 : -7)
                 )
                 .animation(.easeInOut(duration: 0.15), value: configuration.isOn)
-                .onTapGesture { configuration.isOn.toggle() }
-                .accessibilityAddTraits(.isButton)
         }
+        // Tap anywhere on the row — the label (often multi-line Korean) and the gap
+        // between it and the switch, not just the 34pt capsule — toggles it. The
+        // gesture lives on the whole HStack so those dead zones aren't dead.
         .contentShape(Rectangle())
+        .onTapGesture { configuration.isOn.toggle() }
+        // Expose it to VoiceOver as a single labeled switch (the label + the
+        // on/off state together), rather than an unlabeled button on the capsule.
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(configuration.isOn ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction { configuration.isOn.toggle() }
     }
 }
 

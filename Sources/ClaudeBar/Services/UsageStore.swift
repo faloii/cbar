@@ -757,6 +757,13 @@ final class UsageStore: ObservableObject {
                     + "/compact를 더 자주 쓰거나 새 대화로 자주 시작해보세요."))
         }
         if let a = burnAnomaly {
+            // The burn-anomaly warning ("you're on track to spend ~10× your usual
+            // day") and the healthy fallback ("plenty of headroom — feel free to
+            // use more") read as directly contradictory side by side, even though
+            // one is about daily cost and the other about session-limit pacing.
+            // Drop the reassuring fallback when the anomaly is showing — a "slow
+            // down and check" nudge shouldn't sit next to "go ahead and use more".
+            tips.removeAll { $0.kind == .healthy }
             let multText = a.multiplier >= 10 ? "10배 넘게" : String(format: "%.1f배", a.multiplier)
             tips.insert(AdviceTip(kind: .burnAnomaly, level: .warn, icon: "flame",
                 text: "오늘 이 페이스면 평소(하루 ~\(Fmt.usd(a.typicalDailyCost))) 대비 \(multText) 쓰게 돼요"
@@ -833,7 +840,11 @@ final class UsageStore: ObservableObject {
 
     /// The last few notifications CBar has posted (newest first) — a safety net
     /// for passive/no-banner ones and anything missed while away. See `NotificationLog`.
-    var recentNotifications: [NotificationLogEntry] { NotificationLog.load().reversed() }
+    var recentNotifications: [NotificationLogEntry] {
+        // compacted() so pre-dedup historical duplicates already on disk disappear
+        // from the list on next open, not only after the next new notification.
+        NotificationLog.compacted(NotificationLog.load()).reversed()
+    }
 
     /// Per-model burn comparison for the current 5-hour window.
     var modelBurnRows: [ModelBurnRow] {

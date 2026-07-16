@@ -1393,3 +1393,53 @@ final class CacheEfficiencyTrendTests: XCTestCase {
         XCTAssertNil(CacheEfficiencyTrend.verdict(recentShares: [0.3, 0.3, 0.3, 0.3, 0.3], baselineShares: [0.7, 0.7]))
     }
 }
+
+final class NotificationLogDedupTests: XCTestCase {
+    let t = Date(timeIntervalSince1970: 1_000_000)
+    private func entry(_ title: String, _ body: String, at: Date) -> NotificationLogEntry {
+        NotificationLogEntry(id: "x", title: title, body: body, at: at)
+    }
+
+    func testCatchesAlternatingDuplicates() {
+        // The exact reported pattern: 주간→세션→주간, interleaved. A last-only
+        // check would miss the third (its predecessor is 세션, not 주간).
+        let entries = [
+            entry("주간 한도 곧 소진", "약 25h 뒤", at: t),
+            entry("세션 한도 곧 소진", "약 3h 뒤", at: t.addingTimeInterval(60)),
+        ]
+        XCTAssertTrue(NotificationLog.isDuplicate(of: entries, title: "주간 한도 곧 소진",
+                                                  body: "약 25h 뒤", at: t.addingTimeInterval(120)))
+    }
+
+    func testDistinctBodyIsNotDuplicate() {
+        let entries = [entry("주간 한도 곧 소진", "약 25h 뒤", at: t)]
+        // Same title, different countdown text → a genuinely new alert, keep it.
+        XCTAssertFalse(NotificationLog.isDuplicate(of: entries, title: "주간 한도 곧 소진",
+                                                   body: "약 20h 뒤", at: t.addingTimeInterval(60)))
+    }
+
+    func testReoccurrencePastWindowIsNotDuplicate() {
+        let entries = [entry("주간 한도 곧 소진", "약 25h 뒤", at: t)]
+        let later = t.addingTimeInterval(NotificationLog.dedupWindow + 1)
+        XCTAssertFalse(NotificationLog.isDuplicate(of: entries, title: "주간 한도 곧 소진",
+                                                   body: "약 25h 뒤", at: later))
+    }
+
+    func testEmptyLogIsNeverDuplicate() {
+        XCTAssertFalse(NotificationLog.isDuplicate(of: [], title: "x", body: "y", at: t))
+    }
+
+    func testCompactedCollapsesWithinWindowKeepsOutsideWindow() {
+        let entries = [
+            entry("주간 곧 소진", "약 25h", at: t),
+            entry("세션 곧 소진", "약 3h", at: t.addingTimeInterval(60)),
+            entry("주간 곧 소진", "약 25h", at: t.addingTimeInterval(120)),   // within window → dropped
+            entry("세션 곧 소진", "약 3h", at: t.addingTimeInterval(180)),    // within window → dropped
+            entry("주간 곧 소진", "약 25h", at: t.addingTimeInterval(NotificationLog.dedupWindow + 200)),  // far later → kept
+        ]
+        let out = NotificationLog.compacted(entries)
+        XCTAssertEqual(out.count, 3)
+        XCTAssertEqual(out.filter { $0.title == "주간 곧 소진" }.count, 2)   // first + the far-later one
+        XCTAssertEqual(out.filter { $0.title == "세션 곧 소진" }.count, 1)
+    }
+}
