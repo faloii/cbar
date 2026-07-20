@@ -291,6 +291,19 @@ final class ProjectionTests: XCTestCase {
         XCTAssertEqual(p.projectedAtReset ?? 0, 70, accuracy: 1.0)
     }
 
+    func testPacedMeasuringWithoutReset() {
+        XCTAssertEqual(Projection.paced(util: 40, resetsAt: nil, windowSeconds: 7 * 24 * 3600, now: t).verdict,
+                       .measuring)
+    }
+
+    func testPacedIdleWhenZeroUsage() {
+        let week: TimeInterval = 7 * 24 * 3600
+        let p = Projection.paced(util: 0, resetsAt: t.addingTimeInterval(6 * 24 * 3600),
+                                 windowSeconds: week, now: t)
+        XCTAssertEqual(p.verdict, .idle)
+        XCTAssertNil(p.timeToFull)
+    }
+
     func testResetBoundaryIgnoresPreDropSamples() {
         // A reset (95→10) means the slope must come from the post-reset rise (10→20),
         // not the overall negative trend — i.e. a positive burn, not idle.
@@ -507,6 +520,25 @@ final class BudgetTests: XCTestCase {
 }
 
 final class WeeklyReviewTests: XCTestCase {
+    private func review(this: Double, last: Double, opusThis: Double, opusLast: Double) -> WeeklyReview {
+        WeeklyReview(thisCost: this, lastCost: last, opusShareThis: opusThis,
+                     opusShareLast: opusLast, avgPast4WeeksCost: nil)
+    }
+
+    func testCoachingBranches() {
+        // Opus share high AND rising ≥5pt → the Opus-trim coaching.
+        XCTAssertEqual(review(this: 100, last: 100, opusThis: 0.7, opusLast: 0.6).coaching,
+                       "Opus 비중이 늘었어요 — 루틴 작업은 더 가벼운 모델로 옮겨보세요.")
+        // Cost up ≥25% (and Opus not the trigger) → the pace-check coaching.
+        XCTAssertEqual(review(this: 130, last: 100, opusThis: 0.2, opusLast: 0.2).coaching,
+                       "지난주보다 비용이 늘었어요. 페이스를 점검해 보세요.")
+        // Cost down ≥20% → the saved-money coaching.
+        XCTAssertEqual(review(this: 70, last: 100, opusThis: 0.2, opusLast: 0.2).coaching,
+                       "지난주보다 절약했어요 👍")
+        // Nothing notable → nil.
+        XCTAssertNil(review(this: 105, last: 100, opusThis: 0.2, opusLast: 0.2).coaching)
+    }
+
     func testThisVsLastWeek() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let entries: [(date: Date, byModel: [String: Int])] = [
@@ -868,6 +900,16 @@ final class SessionCoachTests: XCTestCase {
         let waste = Projection(ratePerHour: 2, timeToFull: 99999, secondsToReset: 7200, verdict: .safe, projectedAtReset: 40)
         XCTAssertEqual(SessionCoach.efficiency(util: 30, projection: waste), .underusing)
         XCTAssertEqual(SessionCoach.efficiency(util: nil, projection: nil), .measuring)
+        // The middle band (55–80 projected) → .fair, and the two non-safe verdicts.
+        let fair = Projection(ratePerHour: 6, timeToFull: 12000, secondsToReset: 7200, verdict: .safe, projectedAtReset: 65)
+        XCTAssertEqual(SessionCoach.efficiency(util: 40, projection: fair), .fair)
+        let idle = Projection(ratePerHour: 0, timeToFull: nil, secondsToReset: 7200, verdict: .idle)
+        XCTAssertEqual(SessionCoach.efficiency(util: 20, projection: idle), .idle)
+        let measuring = Projection(ratePerHour: 0, timeToFull: nil, secondsToReset: 7200, verdict: .measuring)
+        XCTAssertEqual(SessionCoach.efficiency(util: 20, projection: measuring), .measuring)
+        // .safe with no projectedAtReset falls back to util for the band decision.
+        let noProj = Projection(ratePerHour: 5, timeToFull: 99999, secondsToReset: 7200, verdict: .safe)
+        XCTAssertEqual(SessionCoach.efficiency(util: 90, projection: noProj), .optimal)
     }
 }
 
@@ -910,6 +952,17 @@ final class ModelRecapTests: XCTestCase {
         let v = ModelRecap.verdict(window: [win("claude-sonnet-4-6", output: 300, cacheRead: 50_000, requests: 5, cost: 2)])
         XCTAssertEqual(v?.isTopTier, false)
         XCTAssertNil(v?.downshiftTo)
+    }
+
+    func testModerateOpusStillSuggestsDownshift() {
+        // 5000 output / 5 turns = 1000/turn → moderate band [600,1500) → the nudge's
+        // core intended zone: Opus that isn't clearly heavy still gets a downshift.
+        let tokens = TokenCounts(input: 0, output: 5000, cacheWrite: 0, cacheRead: 100_000)
+        let v = ModelRecap.verdict(window: [
+            ModelWindowUsage(model: "claude-opus-4-8", tokens: tokens, cost: Pricing.cost(for: tokens, model: "opus"), requests: 5)
+        ])
+        XCTAssertEqual(v?.intensity, .moderate)
+        XCTAssertEqual(v?.downshiftTo, "Sonnet")
     }
 
     func testPicksDominantModelByCost() {
@@ -1081,6 +1134,36 @@ final class LimitAlertsTests: XCTestCase {
         let safe = Projection(ratePerHour: 10, timeToFull: 5000, secondsToReset: 4 * 3600,
                               verdict: .safe, projectedAtReset: 85)
         XCTAssertFalse(eval(session: win(60, resetIn: 4 * 3600), sp: safe, state: &s).contains { $0.id == "pace-slow" })
+    }
+
+    func testNoUnderpaceWhenWeeklyIsBinding() {
+        // Session has headroom, but the weekly limit is over the warn threshold —
+        // "run heavy work now" would contradict the weekly-defer reality. Suppress it.
+        var s = LimitAlertState()
+        let safe = Projection(ratePerHour: 3, timeToFull: 99999, secondsToReset: 4 * 3600,
+                              verdict: .safe, projectedAtReset: 40)
+        XCTAssertFalse(eval(session: win(30, resetIn: 4 * 3600), weekly: win(85), sp: safe, state: &s)
+            .contains { $0.id == "pace-slow" })
+        // Also suppressed when weekly is at risk (even below the static threshold).
+        var s2 = LimitAlertState()
+        let weeklyRisk = Projection(ratePerHour: 20, timeToFull: 3600, secondsToReset: 7200, verdict: .atRisk)
+        XCTAssertFalse(eval(session: win(30, resetIn: 4 * 3600), weekly: win(50), sp: safe, wp: weeklyRisk, state: &s2)
+            .contains { $0.id == "pace-slow" })
+    }
+
+    // MARK: weekly trajectory alert (the more consequential limit — a weekly block costs days)
+
+    func testWeeklyTrajectoryFiresOnceThenReArms() {
+        var s = LimitAlertState()
+        let atRisk = Projection(ratePerHour: 5, timeToFull: 3600, secondsToReset: 7200, verdict: .atRisk)
+        let out = eval(weekly: win(60), wp: atRisk, state: &s)
+        XCTAssertTrue(out.contains { $0.id == "risk-weekly" })
+        // Silent on the next tick while still at risk (rising-edge).
+        XCTAssertFalse(eval(weekly: win(62), wp: atRisk, state: &s).contains { $0.id == "risk-weekly" })
+        // Verdict leaves .atRisk → re-arms.
+        let safe = Projection(ratePerHour: 1, timeToFull: 99999, secondsToReset: 7200, verdict: .safe)
+        _ = eval(weekly: win(62), wp: safe, state: &s)
+        XCTAssertTrue(eval(weekly: win(64), wp: atRisk, state: &s).contains { $0.id == "risk-weekly" })
     }
 
     // MARK: expired windows (reset boundary passed, no fresh fetch yet)

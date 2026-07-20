@@ -25,7 +25,7 @@ if [ -n "$(git status --porcelain)" ]; then
     exit 1
 fi
 
-echo "==> Bumping VERSION: $(cat VERSION 2>/dev/null || echo '(none)') → ${VERSION}"
+echo "==> Bumping VERSION: $(cat VERSION 2>/dev/null || echo '(none)') -> ${VERSION}"
 echo "$VERSION" > VERSION
 git add VERSION
 git commit -m "Release ${TAG}"
@@ -36,7 +36,11 @@ CLAUDEBAR_VERSION="$VERSION" ./Scripts/make_dmg.sh
 
 echo ""
 echo "==> Done."
-echo "    Tag ${TAG} created locally — push it with:  git push origin main --tags"
-echo "    DMG ready at: build/CBar-${VERSION}.dmg"
-echo "    Share it directly (Slack/Drive/AirDrop), or run:"
-echo "      gh release create ${TAG} build/CBar-${VERSION}.dmg --title \"CBar ${VERSION}\" --generate-notes"
+echo "    DMG ready at: build/CBar-${VERSION}.dmg (share directly via Slack/Drive/AirDrop)."
+echo ""
+echo "    To publish a GitHub Release, just push the tag — the release workflow"
+echo "    (.github/workflows/release.yml) builds the DMG and publishes it automatically:"
+echo "      git push origin main && git push origin ${TAG}"
+echo ""
+echo "    Do NOT also run 'gh release create ${TAG}' — that collides with CI's own"
+echo "    publish for this tag. CI is the single publish path."

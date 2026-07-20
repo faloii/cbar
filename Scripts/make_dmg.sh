@@ -7,7 +7,21 @@ cd "$(dirname "$0")/.."
 APP_NAME="CBar"
 APP="build/${APP_NAME}.app"
 VERSION="${CLAUDEBAR_VERSION:-$(cat VERSION 2>/dev/null || echo 1.0.0)}"
-DMG="build/${APP_NAME}-${VERSION}.dmg"
+
+# Provenance guard: if HEAD isn't exactly the matching release tag (i.e. this is an
+# ad-hoc rebuild past a release), tag the DMG name with the short sha so it can't
+# silently impersonate the released vX.Y.Z build when shared. Released builds (CI on
+# a v* tag, or a clean checkout of the tag) keep the plain CBar-X.Y.Z.dmg name.
+DMG_VERSION="$VERSION"
+if git rev-parse --git-dir >/dev/null 2>&1; then
+    if ! git describe --exact-match --match "v${VERSION}" HEAD >/dev/null 2>&1; then
+        SHA=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
+        DIRTY=""
+        [ -n "$(git status --porcelain 2>/dev/null)" ] && DIRTY="-dirty"
+        DMG_VERSION="${VERSION}-dev.${SHA}${DIRTY}"
+    fi
+fi
+DMG="build/${APP_NAME}-${DMG_VERSION}.dmg"
 
 ./Scripts/package_app.sh
 
@@ -42,7 +56,7 @@ CBar는 이 Mac에 저장된 Claude Code 사용 기록만 읽습니다 — 계�
 EOF
 
 rm -f "$DMG"
-hdiutil create -volname "${APP_NAME} ${VERSION}" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+hdiutil create -volname "${APP_NAME} ${DMG_VERSION}" -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
 rm -rf "$STAGE"
 
 echo "==> Done: ${DMG}"

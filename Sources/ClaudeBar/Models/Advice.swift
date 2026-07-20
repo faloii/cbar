@@ -66,9 +66,15 @@ enum Advice {
                 text: "리셋 \(dur(toReset)) 전 — 조금만 버티면 한도가 새로 채워져요. 큰 작업은 그때 돌리세요."))
         }
 
-        // 3) Under-use — you'll leave the allowance on the table (it doesn't roll over).
+        // 3) Under-use — you'll leave the (session) allowance on the table (it doesn't
+        //    roll over). BUT only encourage "run heavy work now" when the WEEKLY limit
+        //    isn't the binding constraint: a fresh session inside a heavy week is common,
+        //    and "지금 돌리세요" next to tip #4's "리셋 후로 미루세요" is contradictory —
+        //    and actively wrong, since the weekly cap is what you'd actually hit. Defer
+        //    to the weekly-defer advice whenever weekly is at/over threshold or at risk.
+        let weeklyBinding = (weeklyUtil ?? 0) >= t || weekly?.verdict == .atRisk
         if let s = session, s.verdict == .safe, let left = s.headroomAtReset, left >= 25,
-           let toReset = s.secondsToReset, toReset >= 3600 {
+           let toReset = s.secondsToReset, toReset >= 3600, !weeklyBinding {
             let turnPart = turns(left).map { "남은 한도로 약 \($0)턴 더 쓸 수 있어요. " } ?? ""
             tips.append(AdviceTip(kind: .headroom, level: .info, icon: "gauge.medium",
                 text: "이 속도면 리셋 때 한도의 약 \(Int(left.rounded()))%가 그냥 날아가요. "

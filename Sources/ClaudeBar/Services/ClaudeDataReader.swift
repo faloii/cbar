@@ -87,6 +87,13 @@ struct ClaudeDataReader {
         let records = recentRecords(now: now, since: 7 * 24 * 3600)
         let windowStart = now.addingTimeInterval(-Self.windowDuration)
         let todayStart = Calendar.current.startOfDay(for: now)
+        // recentRecords selects FILES by mtime (touched in the last 7d), but a file
+        // can contain records with much older timestamps: resuming a >7-day-old
+        // conversation replays its original turns into a fresh file. The window/today
+        // sums are already timestamp-gated, but the weekly/session/project aggregates
+        // below were not — those stale turns inflated the weekly recap's top project,
+        // cost, cache mix, and per-project forecast. Floor them to a true trailing 7d.
+        let weekFloor = now.addingTimeInterval(-7 * 24 * 3600)
 
         var windowTokens = TokenCounts()
         var windowCost = 0.0
@@ -140,25 +147,29 @@ struct ClaudeDataReader {
                 currentSessionId = r.sessionId
             }
 
-            let proj = Self.projectName(r.cwd)
-            if !r.sessionId.isEmpty {
-                var acc = bySession[r.sessionId] ?? SessAcc()
-                acc.cost += cost
-                acc.requests += 1
-                acc.tokens += tokens
-                if r.timestamp > acc.last {
-                    acc.last = r.timestamp
-                    acc.lastContextTokens = tokens.input + tokens.cacheRead + tokens.cacheWrite
+            // Trailing-7-day aggregates only (see `weekFloor` above) — skip records
+            // whose own timestamp is older than 7 days even if their file is recent.
+            if r.timestamp >= weekFloor {
+                let proj = Self.projectName(r.cwd)
+                if !r.sessionId.isEmpty {
+                    var acc = bySession[r.sessionId] ?? SessAcc()
+                    acc.cost += cost
+                    acc.requests += 1
+                    acc.tokens += tokens
+                    if r.timestamp > acc.last {
+                        acc.last = r.timestamp
+                        acc.lastContextTokens = tokens.input + tokens.cacheRead + tokens.cacheWrite
+                    }
+                    if proj != "기타" { acc.project = proj }
+                    acc.modelCost[key, default: 0] += cost
+                    bySession[r.sessionId] = acc
                 }
-                if proj != "기타" { acc.project = proj }
-                acc.modelCost[key, default: 0] += cost
-                bySession[r.sessionId] = acc
+                var pAcc = byProject[proj] ?? ProjAcc()
+                pAcc.tokens += tokens.total
+                pAcc.cost += cost
+                byProject[proj] = pAcc
+                weeklyTokens += tokens
             }
-            var pAcc = byProject[proj] ?? ProjAcc()
-            pAcc.tokens += tokens.total
-            pAcc.cost += cost
-            byProject[proj] = pAcc
-            weeklyTokens += tokens
 
             if r.timestamp >= windowStart {
                 windowTokens += tokens

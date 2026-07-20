@@ -163,15 +163,20 @@ enum LimitAlerts {
         // unused (it doesn't roll over). Opt-in; gated in UsageStore by its own toggle.
         // Hysteresis (fire ≤55%, clear ≥70%) avoids flapping; idle verdict won't fire,
         // so simply stepping away doesn't nag.
+        // Don't tell the user to "run heavy work now" (session headroom) while the
+        // WEEKLY limit is the binding constraint — that's the same contradiction the
+        // advice card guards against, just in notification form. Weekly at/over the
+        // warn threshold or at risk suppresses the under-pace nudge.
+        let weeklyBinding = (liveWeekly?.utilization ?? 0) >= t || weeklyProjection?.verdict == .atRisk
         if let sp = sessionProjection, sp.verdict == .safe,
            let proj = sp.projectedAtReset,
            let toReset = sp.secondsToReset, toReset >= 3600,
-           (liveSession?.utilization ?? 0) >= 10, proj <= 55, !state.paceSlow {
+           (liveSession?.utilization ?? 0) >= 10, proj <= 55, !weeklyBinding, !state.paceSlow {
             state.paceSlow = true
             out.append(LimitAlert(id: "pace-slow", title: "한도 여유 많아요",
                 body: "이 페이스면 리셋 때 한도의 약 \(Int((100 - proj).rounded()))%가 남아요. 무거운 작업을 지금 돌려도 좋아요.",
                 urgency: .nudge))
-        } else if (sessionProjection?.projectedAtReset ?? 100) >= 70 || sessionProjection?.verdict != .safe {
+        } else if weeklyBinding || (sessionProjection?.projectedAtReset ?? 100) >= 70 || sessionProjection?.verdict != .safe {
             state.paceSlow = false
         }
 
