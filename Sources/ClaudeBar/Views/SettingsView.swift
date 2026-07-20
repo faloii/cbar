@@ -24,6 +24,9 @@ struct SettingsView: View {
                         // 등록 실패(예: 번들 아닌 실행) 시 토글을 되돌립니다.
                         if !LoginItem.setEnabled(on) { launchAtLogin = LoginItem.isEnabled }
                     }
+                Toggle("글씨 크게", isOn: $store.largeText)
+                Text("팝오버 글자를 한 단계 더 키웁니다. 카드가 많이 켜져 있으면 팝오버가 세로로 길어질 수 있어요.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("메뉴바") {

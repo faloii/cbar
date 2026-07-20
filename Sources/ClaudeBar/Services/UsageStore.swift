@@ -255,6 +255,13 @@ final class UsageStore: ObservableObject {
         get { Appearance(rawValue: appearanceRaw) ?? .system }
         set { appearanceRaw = newValue.rawValue }
     }
+    /// The popover is already bumped one step (.xLarge) for readability, but with
+    /// many cards enabled it becomes a very tall, narrow column — screenshotted or
+    /// viewed shrunk, the smallest body text (captions/notification log) can read
+    /// as tiny/blurry even though it renders crisp at 100%. Opt-in second bump.
+    @AppStorage("largeText") var largeText: Bool = false {
+        didSet { objectWillChange.send() }
+    }
 
     // Rising-edge state so each limit alert fires once per episode (see LimitAlerts).
     private var alertState = LimitAlertState()

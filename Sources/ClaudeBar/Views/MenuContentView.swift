@@ -58,7 +58,11 @@ struct MenuContentView: View {
         }
         .frame(width: 350)
         .tint(Color.brand)
-        .dynamicTypeSize(.xLarge)   // bump all text-style fonts one step up for readability
+        // Bump all text-style fonts up for readability — one step by default, two
+        // (an accessibility size) when "글씨 크게" is on in Settings. Crisp at 100%
+        // regardless, but a narrow 350pt popover packed with cards gets very tall,
+        // and the smallest body text can read as tiny once screenshotted/shrunk.
+        .dynamicTypeSize(store.largeText ? .accessibility1 : .xLarge)
         .preferredColorScheme(store.appearance.colorScheme)   // System / Light / Dark
         .onAppear { store.setPopoverVisible(true) }
         .onDisappear {
