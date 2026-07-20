@@ -1385,6 +1385,12 @@ final class BurnAnomalyTests: XCTestCase {
         XCTAssertNil(BurnAnomaly.verdict(todayCost: 5, hoursElapsedToday: 3, pastDailyCosts: [0.01, 0.02, 0]))
     }
 
+    func testWeekdaySpecificVerdictCarriesTheFlag() {
+        let v = BurnAnomaly.verdict(todayCost: 6, hoursElapsedToday: 3, pastDailyCosts: [2, 1.8, 2.2, 1.9],
+                                    isWeekdaySpecific: true)
+        XCTAssertEqual(v?.isWeekdaySpecific, true)
+    }
+
     func testSilentWhenTypicalCostJustBelowMinimum() {
         // Distinct from testSilentWithNegligibleBaseline: enough real history (passes
         // minHistoryDays), but the median itself ($0.20) is still under minTypicalCost.
@@ -1397,6 +1403,36 @@ final class BurnAnomalyTests: XCTestCase {
 
     func testSilentWithNoUsageToday() {
         XCTAssertNil(BurnAnomaly.verdict(todayCost: 0, hoursElapsedToday: 5, pastDailyCosts: [2, 2, 2]))
+    }
+}
+
+final class BurnAnomalyPersonalBaselineTests: XCTestCase {
+    let cal = Calendar(identifier: .gregorian)
+    let today = Date(timeIntervalSince1970: 1_700_000_000)
+
+    private func daysAgo(_ n: Int) -> Date { cal.date(byAdding: .day, value: -n, to: today)! }
+
+    func testUsesSameWeekdayWhenEnoughSamples() {
+        // 3 prior same-weekday days (multiples of 7 — guaranteed same weekday),
+        // heavy ($10), plus several lighter recent days that are NOT the same
+        // weekday ($2) — an all-days average would look nothing like a typical
+        // "this weekday", so the personal baseline should isolate the $10 days.
+        var costs: [(date: Date, cost: Double)] = []
+        for w in [7, 14, 21] { costs.append((daysAgo(w), 10)) }
+        for d in [1, 2, 3, 4, 5] { costs.append((daysAgo(d), 2)) }
+        let (baseline, isWeekdaySpecific) = BurnAnomaly.personalBaseline(dailyCosts: costs, today: today, calendar: cal)
+        XCTAssertTrue(isWeekdaySpecific)
+        XCTAssertEqual(baseline.sorted(), [10, 10, 10])
+    }
+
+    func testFallsBackToAllDaysWithTooFewSameWeekday() {
+        // Only 1 prior same-weekday day — below minWeekdaySamples (3) — so the
+        // fallback is ALL recent days, not a misleadingly small weekday sample.
+        var costs: [(date: Date, cost: Double)] = [(daysAgo(7), 10)]
+        for d in [1, 2, 3] { costs.append((daysAgo(d), 2)) }
+        let (baseline, isWeekdaySpecific) = BurnAnomaly.personalBaseline(dailyCosts: costs, today: today, calendar: cal)
+        XCTAssertFalse(isWeekdaySpecific)
+        XCTAssertEqual(baseline.count, costs.count)
     }
 }
 
