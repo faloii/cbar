@@ -100,16 +100,6 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("월 예산") {
-                HStack {
-                    Slider(value: $store.monthlyBudget, in: 0...1000, step: 10)
-                    Text(store.monthlyBudget <= 0 ? "끔" : Fmt.usd(store.monthlyBudget))
-                        .monospacedDigit().frame(width: 56, alignment: .trailing)
-                }
-                Text("이번 달 추정 비용과 월말 예상을 예산 대비로 표시합니다. 0이면 끕니다.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-
             Section("알림") {
                 HStack {
                     Text("경고 임계값")
@@ -137,40 +127,13 @@ struct SettingsView: View {
                 Toggle("주간 사용 요약 알림", isOn: $store.weeklySummaryEnabled)
                 Text("주간 한도가 실제로 리셋되는 시점에 맞춰(라이브 한도가 꺼져 있으면 대략 7일마다) 지난 7일 비용·Opus 비중·재읽기 비율·가장 많이 쓴 프로젝트와 코칭을 한 번에 요약해 보냅니다.")
                     .font(.caption).foregroundStyle(.secondary)
-                Toggle("한도 많이 남길 때 알림 (더 쓰라고)", isOn: $store.notifyUnderpace)
-                    .disabled(!store.enableLiveLimits)
-                Text("지금 페이스면 리셋 때 한도가 크게 남을 것 같을 때 한 번 알려줍니다. 자리를 비우면(사용 없음) 울리지 않아요. 기본은 꺼져 있습니다.")
-                    .font(.caption).foregroundStyle(.secondary)
-
-                Toggle("지금 쓰는 대화가 무거워지면 알림", isOn: $store.notifyCompactSuggestion)
-                    .disabled(!store.enableLiveLimits)
-                Text("컨텍스트가 크고 재읽기 비중이 높은 대화로 감지되면 그 세션 하나에 대해 한 번 알려줍니다(/compact 제안). 켜두면 새로고침 주기마다 대화 로그를 다시 확인해요(팝오버를 안 열어도 됨) — 그만큼 새로고침 비용이 살짝 늘어요. 기본은 꺼져 있습니다.")
-                    .font(.caption).foregroundStyle(.secondary)
 
                 Toggle("가벼운 대화인데 Opus면 모델 전환 제안", isOn: $store.notifyModelDownshift)
                     .disabled(!store.enableLiveLimits)
-                Text("5시간 창의 주력 모델이 Opus인데 최근 턴들의 출력이 가벼워 보이면, Sonnet으로 바꿔도 될 것 같다고 한 번 알려줍니다(‘모델·effort 회고’ 카드와 같은 판단). 한도 소모량은 그대로고 비용만 바뀝니다 — 모델 선택은 비용을 줄이는 수단이지 한도를 늘리는 수단은 아니에요. 기본은 꺼져 있습니다.")
+                Text("5시간 창의 주력 모델이 Opus인데 최근 턴들의 출력이 가벼워 보이면, Sonnet으로 바꿔도 될 것 같다고 한 번 알려줍니다. 한도 소모량은 그대로고 비용만 바뀝니다 — 모델 선택은 비용을 줄이는 수단이지 한도를 늘리는 수단은 아니에요. 기본은 꺼져 있습니다.")
                     .font(.caption).foregroundStyle(.secondary)
 
-                Text("한도 위험 알림만 소리가 나요. 코칭성 알림(페이스·/compact·모델 제안)은 소리 없는 배너로, 주간 리캡은 알림 센터에만 조용히 쌓여요. 한도 관련 알림은 배너에서 바로 '2시간 조용히'를, '한도 풀렸어요' 알림은 '지금 이어가기'를 눌러 팝오버를 안 열어도 대응할 수 있어요.")
-                    .font(.caption).foregroundStyle(.secondary)
-
-                Toggle("조용한 시간", isOn: $store.quietHoursEnabled)
-                if store.quietHoursEnabled {
-                    HStack {
-                        Text("시작")
-                        Picker("", selection: $store.quietHoursStart) {
-                            ForEach(0..<24) { Text(String(format: "%02d:00", $0)).tag($0) }
-                        }
-                        .labelsHidden().pickerStyle(.menu)
-                        Text("~ 종료")
-                        Picker("", selection: $store.quietHoursEnd) {
-                            ForEach(0..<24) { Text(String(format: "%02d:00", $0)).tag($0) }
-                        }
-                        .labelsHidden().pickerStyle(.menu)
-                    }
-                }
-                Text("이 시간대엔 알림을 보내지 않아요. 메뉴바 아이콘 색상·팝오버는 그대로 실제 상태를 보여줘요 — 숨기는 게 아니라 방해만 안 하는 거예요.")
+                Text("한도 위험 알림만 소리가 나요. 코칭성 알림(모델 제안)은 소리 없는 배너로, 주간 리캡은 알림 센터에만 조용히 쌓여요. 한도 관련 알림은 배너에서 바로 '2시간 조용히'를, '한도 풀렸어요' 알림은 '지금 이어가기'를 눌러 팝오버를 안 열어도 대응할 수 있어요.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -178,11 +141,6 @@ struct SettingsView: View {
                 Toggle("한도가 풀리면 이전 대화 자동 이어가기", isOn: $store.autoResumeEnabled)
                     .disabled(!store.enableLiveLimits)
                 Text("이것만 켜면 됩니다 — 세션 한도에 막혔다가 풀리는 순간, `claude` 경로와 마지막 작업 폴더를 찾아 ‘이전 대화 이어가기’를 싼 모델로 한 번 자동 실행합니다(버튼 안 눌러도 됨).")
-                    .font(.caption).foregroundStyle(.secondary)
-
-                Toggle("막혀 있는 동안 잠자기 방지", isOn: $store.keepAwakeWhileBlocked)
-                    .disabled(!store.enableLiveLimits)
-                Text("한도에 막혀 있는 동안만 시스템 잠자기를 막아 리셋을 놓치지 않게 합니다(풀리면 즉시 해제). 화면 보호기·화면 꺼짐은 그대로 허용. 단, 노트북 뚜껑을 닫으면(배터리) 잠자기는 막지 못하고 배터리 소모가 늘 수 있어 기본은 꺼져 있습니다.")
                     .font(.caption).foregroundStyle(.secondary)
 
                 DisclosureGroup("명령 직접 지정 (선택)") {

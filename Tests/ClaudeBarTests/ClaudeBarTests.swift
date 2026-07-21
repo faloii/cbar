@@ -141,22 +141,6 @@ final class NotificationBundlerTests: XCTestCase {
     }
 }
 
-final class QuietHoursTests: XCTestCase {
-    func testSameDayWindow() {
-        XCTAssertTrue(QuietHours.isQuiet(hour: 13, start: 12, end: 14))
-        XCTAssertFalse(QuietHours.isQuiet(hour: 15, start: 12, end: 14))
-        XCTAssertFalse(QuietHours.isQuiet(hour: 12, start: 12, end: 12))   // zero-length = never
-    }
-
-    func testOvernightWraparound() {
-        XCTAssertTrue(QuietHours.isQuiet(hour: 23, start: 22, end: 8))
-        XCTAssertTrue(QuietHours.isQuiet(hour: 3, start: 22, end: 8))
-        XCTAssertTrue(QuietHours.isQuiet(hour: 22, start: 22, end: 8))    // start inclusive
-        XCTAssertFalse(QuietHours.isQuiet(hour: 8, start: 22, end: 8))    // end exclusive
-        XCTAssertFalse(QuietHours.isQuiet(hour: 12, start: 22, end: 8))
-    }
-}
-
 final class UpcomingResetsTests: XCTestCase {
     let t = Date(timeIntervalSince1970: 1_000_000)
 
@@ -491,33 +475,6 @@ final class CostEstimatorTests: XCTestCase {
     }
 }
 
-final class BudgetTests: XCTestCase {
-    func testMonthToDateAndProjection() {
-        // now = 2026-06-15 (day 15 of a 30-day month).
-        var comps = DateComponents(); comps.year = 2026; comps.month = 6; comps.day = 15
-        let cal = Calendar(identifier: .gregorian)
-        let now = cal.date(from: comps)!
-        let history = [
-            DailyCost(date: "2026-05-31", tokens: 0, cost: 99),   // previous month — excluded
-            DailyCost(date: "2026-06-05", tokens: 0, cost: 30),
-            DailyCost(date: "2026-06-10", tokens: 0, cost: 30),
-        ]
-        let s = Budget.status(history: history, now: now, budget: 200, calendar: cal)
-        XCTAssertEqual(s.monthToDate, 60, accuracy: 0.001)        // 30 + 30, May excluded
-        XCTAssertEqual(s.projected, 60.0 / 15 * 30, accuracy: 0.001)  // = 120
-        XCTAssertEqual(s.fraction, 60.0 / 200, accuracy: 0.001)
-        XCTAssertFalse(s.projectedOver)                          // 120 < 200
-    }
-
-    func testProjectedOver() {
-        var comps = DateComponents(); comps.year = 2026; comps.month = 6; comps.day = 10
-        let cal = Calendar(identifier: .gregorian)
-        let now = cal.date(from: comps)!
-        let history = [DailyCost(date: "2026-06-09", tokens: 0, cost: 100)]
-        let s = Budget.status(history: history, now: now, budget: 150, calendar: cal)
-        XCTAssertTrue(s.projectedOver)   // 100/10*30 = 300 > 150
-    }
-}
 
 final class WeeklyReviewTests: XCTestCase {
     private func review(this: Double, last: Double, opusThis: Double, opusLast: Double) -> WeeklyReview {

@@ -6,7 +6,7 @@ import AppKit
 /// Popover cards the user can show/hide and reorder (Settings → 섹션).
 /// Declaration order is the default layout order.
 enum PanelSection: String, CaseIterable, Identifiable {
-    case advice, limits, efficiency, recent, perModel, modelGuide, modelRecap, sessions, today, weeklyReview, goals, budget, notificationLog
+    case advice, limits, efficiency, recent, perModel, modelGuide, sessions, today, weeklyReview, goals, notificationLog
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -16,12 +16,10 @@ enum PanelSection: String, CaseIterable, Identifiable {
         case .recent:         return "최근 5시간"
         case .perModel:       return "모델별 소진"
         case .modelGuide:     return "모델 가이드"
-        case .modelRecap:     return "모델·effort 회고"
         case .sessions:       return "세션별"
         case .today:          return "오늘"
         case .weeklyReview:   return "주간 리뷰"
         case .goals:          return "습관 목표"
-        case .budget:         return "월 예산"
         case .notificationLog: return "최근 알림"
         }
     }
@@ -118,17 +116,6 @@ final class UsageStore: ObservableObject {
     @AppStorage("blockWarnLeadMinutes") var blockWarnLeadMinutes: Int = 30 {
         didSet { objectWillChange.send() }
     }
-    /// Suppress notification banners during a daily window (the in-app UI still
-    /// reflects real state) — a "quiet coach" shouldn't ping overnight.
-    @AppStorage("quietHoursEnabled") var quietHoursEnabled: Bool = false {
-        didSet { objectWillChange.send() }
-    }
-    @AppStorage("quietHoursStart") var quietHoursStart: Int = 22 {
-        didSet { objectWillChange.send() }
-    }
-    @AppStorage("quietHoursEnd") var quietHoursEnd: Int = 8 {
-        didSet { objectWillChange.send() }
-    }
     /// Ad-hoc "quiet right now" snooze — epoch seconds until notifications are
     /// suppressed, 0 = not snoozed. Persisted (not just in-memory) so a quick app
     /// restart (e.g. an update) doesn't silently cancel it mid-focus-session.
@@ -145,10 +132,6 @@ final class UsageStore: ObservableObject {
     func toggleSnooze() {
         snoozeUntilEpoch = isSnoozed ? 0 : Date().addingTimeInterval(Self.snoozeDuration).timeIntervalSince1970
     }
-    /// Monthly budget in USD; 0 = off.
-    @AppStorage("monthlyBudget") var monthlyBudget: Double = 0 {
-        didSet { objectWillChange.send() }
-    }
     /// Habit goal: keep Opus cost share at or below this %; 0 = off.
     @AppStorage("opusShareTarget") var opusShareTarget: Int = 0 {
         didSet { objectWillChange.send() }
@@ -157,7 +140,7 @@ final class UsageStore: ObservableObject {
     /// core (advice, limits, recent, today); the analysis cards (per-model burn,
     /// model guide, per-session) are opt-in.
     @AppStorage("hiddenSections") private var hiddenSectionsRaw: String =
-        "modelGuide,modelRecap,perModel,sessions,notificationLog" {
+        "modelGuide,perModel,sessions,notificationLog" {
         didSet { objectWillChange.send() }
     }
     /// Comma-joined raw values defining card order (missing ones append in default order).
@@ -209,36 +192,14 @@ final class UsageStore: ObservableObject {
     @AppStorage("resumeCommand") var resumeCommand: String = "" {
         didSet { objectWillChange.send() }
     }
-    /// Notify when you're pacing to leave a lot of the limit unused ("you could use more").
-    @AppStorage("notifyUnderpace") var notifyUnderpace: Bool = false {
-        didSet { objectWillChange.send() }
-    }
-    /// Notify when the conversation you're CURRENTLY in gets heavy (big context +
-    /// mostly re-reading old turns) — a nudge for THIS session, not just an in-app
-    /// stat. While on, forces a full session-log scan every refresh tick (see the
-    /// `full` gate in `refresh()`) so this stays timely without requiring the
-    /// popover to be open. Off by default — this is an efficiency nudge, not a
-    /// limit warning.
-    @AppStorage("notifyCompactSuggestion") var notifyCompactSuggestion: Bool = false {
-        didSet { objectWillChange.send() }
-    }
-    private var compactSuggestState = CompactSuggestion.State()
     /// Notify when the dominant model in the 5h window looks downshift-worthy
     /// (top-tier model, but turns look light/moderate) — the same read as the
-    /// in-app "모델·effort 회고" card, promoted to a one-shot notification since
+    /// in-app "모델·effort 회고" logic, promoted to a one-shot notification since
     /// it's a concrete, actionable cost lever. Off by default.
     @AppStorage("notifyModelDownshift") var notifyModelDownshift: Bool = false {
         didSet { objectWillChange.send() }
     }
     private var modelDownshiftState = ModelDownshiftSuggestion.State()
-    /// Keep the system awake while blocked so the reset (and auto-resume) isn't missed.
-    @AppStorage("keepAwakeWhileBlocked") var keepAwakeWhileBlocked: Bool = false {
-        didSet { objectWillChange.send(); updatePowerAssertion() }
-    }
-    private let sleepBlocker = PowerAssertion(reason: "ClaudeBar: 한도 리셋 대기")
-    private func updatePowerAssertion() {
-        sleepBlocker.set(keepAwakeWhileBlocked && isBlocked)
-    }
     @AppStorage("barMetric") private var barMetricRaw: String = BarMetric.sessionLimit.rawValue {
         didSet { objectWillChange.send() }
     }
@@ -363,7 +324,7 @@ final class UsageStore: ObservableObject {
         // got heavy" nudge needs `currentSessionId` to stay fresh to be worth anything,
         // so keep scanning every tick while that's on (the per-file parse cache makes
         // repeat scans cheap — only the most recently modified log actually reparses).
-        let full = popoverVisible || !barMetric.needsLiveLimits || notifyCompactSuggestion
+        let full = popoverVisible || !barMetric.needsLiveLimits
         let previous = snapshot
         // Near a limit, fetch fresher data (shorter cache TTL) so the warning is
         // timely; when safe, stay gentle on the rate-limited endpoint.
@@ -403,10 +364,8 @@ final class UsageStore: ObservableObject {
             self.scheduleResetBoundaryRefresh()
             self.recomputeProjections()
             self.processLimitAlerts()
-            self.processCompactSuggestion()
             self.processModelDownshiftSuggestion()
             self.maybeWeeklySummary()
-            self.updatePowerAssertion()   // hold/release based on the fresh blocked state
             // If the risk level changed, re-arm the timer at the matching cadence.
             if self.isAtLimitRisk != self.lastUrgent {
                 self.lastUrgent = self.isAtLimitRisk
@@ -531,9 +490,9 @@ final class UsageStore: ObservableObject {
             blockWarnLeadMinutes: blockWarnLeadMinutes,
             state: &alertState, now: now)
 
-        // The under-pace nudge has its own opt-in toggle; everything else follows
-        // the main warning toggle.
-        let toPost = alerts.filter { $0.id == "pace-slow" ? notifyUnderpace : notifyOnWarning }
+        // The under-pace nudge notification was never opted into by real users and
+        // has been removed; the in-app advice card still covers the same signal.
+        let toPost = notifyOnWarning ? alerts.filter { $0.id != "pace-slow" } : []
         if !isQuietNow(now) {
             // Bundle same-tick alerts into one notification so a stack of separate
             // triggers (e.g. skipping two weekly tiers at once) doesn't post a stack
@@ -586,28 +545,9 @@ final class UsageStore: ObservableObject {
     }
 
     /// Whether proactive notifications should be suppressed right now (ad-hoc
-    /// snooze or the scheduled quiet-hours window) — the in-app UI keeps reflecting
-    /// real state regardless.
+    /// snooze) — the in-app UI keeps reflecting real state regardless.
     private func isQuietNow(_ now: Date) -> Bool {
         isSnoozed
-            || (quietHoursEnabled
-                && QuietHours.isQuiet(hour: Calendar.current.component(.hour, from: now),
-                                      start: quietHoursStart, end: quietHoursEnd))
-    }
-
-    /// Notify once when the conversation you're CURRENTLY in (best-effort: whichever
-    /// session log was touched most recently) crosses into "heavy" — see
-    /// `CompactSuggestion`. Independent of the limit-alert system: this is about
-    /// conversation efficiency, not quota, so it has its own opt-in toggle.
-    private func processCompactSuggestion() {
-        guard notifyCompactSuggestion, enableLiveLimits else { return }
-        let current = snapshot.recentSessions.first { $0.sessionId == snapshot.currentSessionId }
-        guard CompactSuggestion.shouldNotify(current: current, state: &compactSuggestState) else { return }
-        guard !isQuietNow(Date()), let s = current else { return }
-        Notifier.notify(
-            title: "이 대화, 슬슬 무거워요",
-            body: "컨텍스트 ~\(Fmt.tokens(s.lastContextTokens)) · 재읽기 \(Int((s.cacheReadShare * 100).rounded()))% — /compact 하면 같은 한도로 더 오래 가요.",
-            id: "compact-suggest-\(s.sessionId)", urgency: .nudge, category: .compactSuggest)
     }
 
     /// Idle cadence when the popover is closed — deliberately looser than the
@@ -862,12 +802,6 @@ final class UsageStore: ObservableObject {
         let recent = samples.filter { $0.at >= recentCutoff }.map(\.freshShare)
         let baseline = samples.filter { $0.at >= baselineCutoff && $0.at < recentCutoff }.map(\.freshShare)
         return CacheEfficiencyTrend.verdict(recentShares: recent, baselineShares: baseline)
-    }
-
-    /// Month-to-date spend vs the monthly budget, or nil when no budget is set.
-    var budgetStatus: BudgetStatus? {
-        guard monthlyBudget > 0 else { return nil }
-        return Budget.status(history: snapshot.dailyCostHistory, now: Date(), budget: monthlyBudget)
     }
 
     /// Diagnostics panel's manual fix: clears the cached access token (forcing a
