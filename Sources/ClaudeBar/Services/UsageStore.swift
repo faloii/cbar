@@ -490,9 +490,7 @@ final class UsageStore: ObservableObject {
             blockWarnLeadMinutes: blockWarnLeadMinutes,
             state: &alertState, now: now)
 
-        // The under-pace nudge notification was never opted into by real users and
-        // has been removed; the in-app advice card still covers the same signal.
-        let toPost = notifyOnWarning ? alerts.filter { $0.id != "pace-slow" } : []
+        let toPost = notifyOnWarning ? alerts : []
         if !isQuietNow(now) {
             // Bundle same-tick alerts into one notification so a stack of separate
             // triggers (e.g. skipping two weekly tiers at once) doesn't post a stack

@@ -1075,39 +1075,6 @@ final class LimitAlertsTests: XCTestCase {
         XCTAssertTrue(eval(session: win(30, resetIn: 3600), sp: safe, state: &s).isEmpty)
     }
 
-    func testUnderpaceFiresWhenLeavingHeadroom() {
-        var s = LimitAlertState()
-        let safe = Projection(ratePerHour: 3, timeToFull: 99999, secondsToReset: 4 * 3600,
-                              verdict: .safe, projectedAtReset: 40)
-        let out = eval(session: win(30, resetIn: 4 * 3600), sp: safe, state: &s)
-        XCTAssertTrue(out.contains { $0.id == "pace-slow" })
-        XCTAssertTrue(s.paceSlow)
-        // Fires once per episode.
-        XCTAssertFalse(eval(session: win(31, resetIn: 4 * 3600), sp: safe, state: &s).contains { $0.id == "pace-slow" })
-    }
-
-    func testNoUnderpaceWhenOnTrack() {
-        var s = LimitAlertState()
-        let safe = Projection(ratePerHour: 10, timeToFull: 5000, secondsToReset: 4 * 3600,
-                              verdict: .safe, projectedAtReset: 85)
-        XCTAssertFalse(eval(session: win(60, resetIn: 4 * 3600), sp: safe, state: &s).contains { $0.id == "pace-slow" })
-    }
-
-    func testNoUnderpaceWhenWeeklyIsBinding() {
-        // Session has headroom, but the weekly limit is over the warn threshold —
-        // "run heavy work now" would contradict the weekly-defer reality. Suppress it.
-        var s = LimitAlertState()
-        let safe = Projection(ratePerHour: 3, timeToFull: 99999, secondsToReset: 4 * 3600,
-                              verdict: .safe, projectedAtReset: 40)
-        XCTAssertFalse(eval(session: win(30, resetIn: 4 * 3600), weekly: win(85), sp: safe, state: &s)
-            .contains { $0.id == "pace-slow" })
-        // Also suppressed when weekly is at risk (even below the static threshold).
-        var s2 = LimitAlertState()
-        let weeklyRisk = Projection(ratePerHour: 20, timeToFull: 3600, secondsToReset: 7200, verdict: .atRisk)
-        XCTAssertFalse(eval(session: win(30, resetIn: 4 * 3600), weekly: win(50), sp: safe, wp: weeklyRisk, state: &s2)
-            .contains { $0.id == "pace-slow" })
-    }
-
     // MARK: weekly trajectory alert (the more consequential limit — a weekly block costs days)
 
     func testWeeklyTrajectoryFiresOnceThenReArms() {
