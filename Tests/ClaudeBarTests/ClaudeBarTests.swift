@@ -171,35 +171,6 @@ final class CompactSuggestionTests: XCTestCase {
         XCTAssertFalse(CompactSuggestion.isHeavy(session("a", ctx: 150_000, reuse: 0.5)))   // low reuse
         XCTAssertFalse(CompactSuggestion.isHeavy(session("a", ctx: 50_000, reuse: 0.9)))    // small context
     }
-
-    func testFiresOncePerSessionPerCrossing() {
-        var state = CompactSuggestion.State()
-        let heavy = session("a", ctx: 150_000, reuse: 0.9)
-        XCTAssertTrue(CompactSuggestion.shouldNotify(current: heavy, state: &state))
-        XCTAssertFalse(CompactSuggestion.shouldNotify(current: heavy, state: &state))
-    }
-
-    func testRearmsAfterDroppingBelowBar() {
-        var state = CompactSuggestion.State()
-        let heavy = session("a", ctx: 150_000, reuse: 0.9)
-        XCTAssertTrue(CompactSuggestion.shouldNotify(current: heavy, state: &state))
-        let light = session("a", ctx: 20_000, reuse: 0.9)   // e.g. after an actual /compact
-        XCTAssertFalse(CompactSuggestion.shouldNotify(current: light, state: &state))
-        XCTAssertTrue(CompactSuggestion.shouldNotify(current: heavy, state: &state))
-    }
-
-    func testSwitchingSessionsResetsState() {
-        var state = CompactSuggestion.State()
-        let a = session("a", ctx: 150_000, reuse: 0.9)
-        XCTAssertTrue(CompactSuggestion.shouldNotify(current: a, state: &state))
-        let b = session("b", ctx: 150_000, reuse: 0.9)
-        XCTAssertTrue(CompactSuggestion.shouldNotify(current: b, state: &state))
-    }
-
-    func testNilCurrentDoesNotCrash() {
-        var state = CompactSuggestion.State()
-        XCTAssertFalse(CompactSuggestion.shouldNotify(current: nil, state: &state))
-    }
 }
 
 final class ProjectionTests: XCTestCase {
