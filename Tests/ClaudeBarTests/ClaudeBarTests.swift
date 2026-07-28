@@ -1079,15 +1079,47 @@ final class LimitAlertsTests: XCTestCase {
 
     func testWeeklyTrajectoryFiresOnceThenReArms() {
         var s = LimitAlertState()
-        let atRisk = Projection(ratePerHour: 5, timeToFull: 3600, secondsToReset: 7200, verdict: .atRisk)
+        let atRisk = Projection(ratePerHour: 5, timeToFull: 3600, secondsToReset: 7200, verdict: .atRisk, projectedAtReset: 110)
         let out = eval(weekly: win(60), wp: atRisk, state: &s)
         XCTAssertTrue(out.contains { $0.id == "risk-weekly" })
         // Silent on the next tick while still at risk (rising-edge).
         XCTAssertFalse(eval(weekly: win(62), wp: atRisk, state: &s).contains { $0.id == "risk-weekly" })
-        // Verdict leaves .atRisk → re-arms.
-        let safe = Projection(ratePerHour: 1, timeToFull: 99999, secondsToReset: 7200, verdict: .safe)
+        // Verdict leaves .atRisk with a clear margin (well under 100% at reset) → re-arms.
+        let safe = Projection(ratePerHour: 1, timeToFull: 99999, secondsToReset: 7200, verdict: .safe, projectedAtReset: 40)
         _ = eval(weekly: win(62), wp: safe, state: &s)
         XCTAssertTrue(eval(weekly: win(64), wp: atRisk, state: &s).contains { $0.id == "risk-weekly" })
+    }
+
+    // Regression: production notification logs showed "한도 곧 소진" refiring 2-3
+    // times a few minutes apart within what was clearly a single episode. Root
+    // cause was the re-arm using a raw verdict flip — the short-window burn rate
+    // (a two-point secant) is noisy enough that a momentary pause flips .atRisk to
+    // .safe for one tick without the projected outcome actually improving, then
+    // resuming flips it back and refires. Re-arming should require the
+    // projected-at-reset utilization to clear a real margin below 100%.
+    func testWeeklyTrajectoryDoesNotRefireOnMomentaryDip() {
+        var s = LimitAlertState()
+        let atRisk = Projection(ratePerHour: 5, timeToFull: 3600, secondsToReset: 7200, verdict: .atRisk, projectedAtReset: 108)
+        XCTAssertTrue(eval(weekly: win(60), wp: atRisk, state: &s).contains { $0.id == "risk-weekly" })
+        // Momentary dip: verdict flips to .safe but the projected outcome barely
+        // moved (95%, still within the margin) — must not re-arm.
+        let dip = Projection(ratePerHour: 4, timeToFull: 99999, secondsToReset: 7200, verdict: .safe, projectedAtReset: 95)
+        XCTAssertFalse(eval(weekly: win(60), wp: dip, state: &s).contains { $0.id == "risk-weekly" })
+        // Pace resumes → must not refire since the flag never re-armed.
+        XCTAssertFalse(eval(weekly: win(61), wp: atRisk, state: &s).contains { $0.id == "risk-weekly" })
+    }
+
+    func testSessionRiskDoesNotRefireOnMomentaryDip() {
+        var s = LimitAlertState()
+        let atRisk = Projection(ratePerHour: 5, timeToFull: 4 * 3600, secondsToReset: 6 * 3600, verdict: .atRisk, projectedAtReset: 108)
+        XCTAssertTrue(eval(session: win(60, resetIn: 6 * 3600), sp: atRisk, state: &s).contains { $0.id == "risk-session" })
+        let dip = Projection(ratePerHour: 4, timeToFull: 99999, secondsToReset: 6 * 3600, verdict: .safe, projectedAtReset: 95)
+        XCTAssertFalse(eval(session: win(60, resetIn: 6 * 3600), sp: dip, state: &s).contains { $0.id == "risk-session" })
+        XCTAssertFalse(eval(session: win(60, resetIn: 6 * 3600), sp: atRisk, state: &s).contains { $0.id == "risk-session" })
+        // Once genuinely safe (clear margin), re-arms.
+        let safe = Projection(ratePerHour: 1, timeToFull: 99999, secondsToReset: 6 * 3600, verdict: .safe, projectedAtReset: 30)
+        _ = eval(session: win(60, resetIn: 6 * 3600), sp: safe, state: &s)
+        XCTAssertTrue(eval(session: win(60, resetIn: 6 * 3600), sp: atRisk, state: &s).contains { $0.id == "risk-session" })
     }
 
     // MARK: expired windows (reset boundary passed, no fresh fetch yet)

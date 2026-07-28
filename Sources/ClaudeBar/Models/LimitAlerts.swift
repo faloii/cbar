@@ -45,6 +45,10 @@ enum LimitAlerts {
     static let resetSoonWindow: TimeInterval = 15 * 60
     static let resetWasHigh = 50.0    // "리셋됨" only matters if you'd been using it
     static let resetNowLow = 20.0     // window resets drop utilization to ~0
+    /// Margin (percentage points) the projected-at-reset utilization must clear
+    /// below 100% before a firing "atRisk" flag re-arms — see `evaluate`'s
+    /// `clearlySafe` for why a raw verdict flip isn't enough.
+    static let riskClearMargin = 10.0
 
     static func evaluate(session: LimitWindow?, weekly: LimitWindow?,
                          sessionProjection: Projection?, weeklyProjection: Projection?,
@@ -63,6 +67,17 @@ enum LimitAlerts {
         let liveSession = session.flatMap { $0.expired(asOf: now) ? nil : $0 }
         let liveWeekly = weekly.flatMap { $0.expired(asOf: now) ? nil : $0 }
 
+        // A raw verdict flip (.atRisk → anything else) re-arms a "fires once per
+        // episode" flag on ANY momentary dip — and the short-window burn rate
+        // (a two-point secant over `Projection.lookback`) is noisy enough that a
+        // brief pause mid-episode flips it, then resuming a minute later flips it
+        // back, refiring the same notification 2-3 times a few minutes apart. Only
+        // re-arm once the projected-at-reset utilization clears a real margin below
+        // 100% — nil (idle/measuring, no active burn) also counts as clearly safe.
+        func clearlySafe(_ p: Projection?) -> Bool {
+            (p?.projectedAtReset).map { $0 <= 100 - riskClearMargin } ?? true
+        }
+
         // 1) Trajectory — fires earlier than a static %: you can be at 60% but
         //    burning so fast you'll hit 100% before the reset.
         func risk(_ p: Projection?, name: String, key: String, flag: inout Bool) {
@@ -72,7 +87,7 @@ enum LimitAlerts {
                 let full = p.timeToFull.map(countdown) ?? "곧"
                 out.append(LimitAlert(id: "risk-\(key)", title: "\(name) 한도 곧 소진",
                     body: "이 속도면 약 \(full) 뒤 \(name) 한도가 찹니다. 잠깐 쉬거나 천천히 쓰세요."))
-            } else if p.verdict != .atRisk { flag = false }
+            } else if clearlySafe(p) { flag = false }
         }
         risk(weeklyProjection, name: "주간", key: "weekly", flag: &state.weeklyRisk)
 
@@ -95,7 +110,7 @@ enum LimitAlerts {
                     body: "이 속도면 약 \(countdown(ttf)) 뒤 세션 한도가 찹니다. 잠깐 쉬거나 천천히 쓰세요.",
                     urgency: .nudge))   // early heads-up; the imminent one is the loud one
             }
-        } else {
+        } else if clearlySafe(sessionProjection) {
             state.sessionRisk = false
             state.blockImminent = false
         }
