@@ -603,6 +603,29 @@ final class AdviceTests: XCTestCase {
         XCTAssertEqual(tips.first { $0.kind == .sessionPacing }?.level, .warn)
     }
 
+    func testPacingTipNotesFasterThanUsualHour() {
+        let p = Projection(ratePerHour: 40, timeToFull: 1800, secondsToReset: 7200, verdict: .atRisk)
+        let tips = Advice.compute(session: p, weekly: nil, sessionUtil: 70, weeklyUtil: nil,
+                                  models: [], warnThreshold: 80, now: now, typicalHourRate: 10)
+        XCTAssertTrue(tips.first { $0.kind == .sessionPacing }?.text.contains("빠른 편") ?? false)
+    }
+
+    func testPacingTipNotesNormalForThisHour() {
+        let p = Projection(ratePerHour: 40, timeToFull: 1800, secondsToReset: 7200, verdict: .atRisk)
+        let tips = Advice.compute(session: p, weekly: nil, sessionUtil: 70, weeklyUtil: nil,
+                                  models: [], warnThreshold: 80, now: now, typicalHourRate: 38)
+        XCTAssertTrue(tips.first { $0.kind == .sessionPacing }?.text.contains("원래 이 정도") ?? false)
+    }
+
+    func testPacingTipSilentOnHourWithoutBaseline() {
+        let p = Projection(ratePerHour: 40, timeToFull: 1800, secondsToReset: 7200, verdict: .atRisk)
+        let tips = Advice.compute(session: p, weekly: nil, sessionUtil: 70, weeklyUtil: nil,
+                                  models: [], warnThreshold: 80, now: now)
+        let text = tips.first { $0.kind == .sessionPacing }?.text ?? ""
+        XCTAssertFalse(text.contains("빠른 편"))
+        XCTAssertFalse(text.contains("원래 이 정도"))
+    }
+
     func testResetImminentTip() {
         let p = Projection(ratePerHour: 3, timeToFull: 99999, secondsToReset: 600,
                            verdict: .safe, projectedAtReset: 92)
@@ -617,6 +640,24 @@ final class AdviceTests: XCTestCase {
                                   models: [], warnThreshold: 80, now: now)
         let weekly = tips.first { $0.kind == .weeklyDefer }
         XCTAssertTrue(weekly?.text.contains("바닥") ?? false)
+    }
+
+    func testWeeklyDeferNamesDominantProject() {
+        let wk = Projection(ratePerHour: 2, timeToFull: 1000, secondsToReset: 3 * 24 * 3600, verdict: .atRisk)
+        let tips = Advice.compute(session: nil, weekly: wk, sessionUtil: nil, weeklyUtil: 85,
+                                  models: [], warnThreshold: 80, now: now,
+                                  topWeeklyProject: (name: "acme-web", sharePct: 72))
+        let weekly = tips.first { $0.kind == .weeklyDefer }
+        XCTAssertTrue(weekly?.text.contains("acme-web") ?? false)
+    }
+
+    func testWeeklyDeferOmitsProjectWhenSpreadOut() {
+        let wk = Projection(ratePerHour: 2, timeToFull: 1000, secondsToReset: 3 * 24 * 3600, verdict: .atRisk)
+        let tips = Advice.compute(session: nil, weekly: wk, sessionUtil: nil, weeklyUtil: 85,
+                                  models: [], warnThreshold: 80, now: now,
+                                  topWeeklyProject: (name: "acme-web", sharePct: 30))
+        let weekly = tips.first { $0.kind == .weeklyDefer }
+        XCTAssertFalse(weekly?.text.contains("acme-web") ?? true)
     }
 
     func testHeadroomTipWhenUnderUsing() {
@@ -1360,6 +1401,30 @@ final class BurnAnomalyPersonalBaselineTests: XCTestCase {
         let (baseline, isWeekdaySpecific) = BurnAnomaly.personalBaseline(dailyCosts: costs, today: today, calendar: cal)
         XCTAssertFalse(isWeekdaySpecific)
         XCTAssertEqual(baseline.count, costs.count)
+    }
+}
+
+final class HourlyBurnHistoryTests: XCTestCase {
+    let t = Date(timeIntervalSince1970: 1_000_000)
+
+    private func sample(hour: Int, rate: Double) -> HourlyRateSample {
+        HourlyRateSample(hour: hour, ratePerHour: rate, at: t)
+    }
+
+    func testNilBelowMinimumSamples() {
+        let samples = (0..<4).map { _ in sample(hour: 14, rate: 20) }
+        XCTAssertNil(HourlyBurnHistory.typicalRate(forHour: 14, in: samples))
+    }
+
+    func testMedianOnceEnoughSamples() {
+        let samples = [10.0, 20, 30, 40, 50].map { sample(hour: 14, rate: $0) }
+        XCTAssertEqual(HourlyBurnHistory.typicalRate(forHour: 14, in: samples), 30)
+    }
+
+    func testOnlyMatchesRequestedHour() {
+        let samples = [sample(hour: 9, rate: 5), sample(hour: 9, rate: 5), sample(hour: 9, rate: 5),
+                       sample(hour: 9, rate: 5), sample(hour: 9, rate: 5)]
+        XCTAssertNil(HourlyBurnHistory.typicalRate(forHour: 14, in: samples))
     }
 }
 

@@ -2,7 +2,7 @@ import Foundation
 
 /// One piece of dynamic, situational guidance shown in the popover.
 struct AdviceTip: Identifiable, Equatable {
-    enum Kind { case sessionPacing, resetImminent, headroom, contextHeavy, weeklyDefer, costModel, watch, healthy, burnAnomaly, cacheEfficiencyTrend }
+    enum Kind { case sessionPacing, resetImminent, headroom, contextHeavy, weeklyDefer, costModel, watch, healthy, burnAnomaly, cacheEfficiencyTrend, adviceWorked }
     enum Level { case good, info, warn, critical }
 
     let kind: Kind
@@ -23,7 +23,9 @@ enum Advice {
     static func compute(session: Projection?, weekly: Projection?,
                         sessionUtil: Double?, weeklyUtil: Double?,
                         models: [ModelWindowUsage], contextTokens: Int = 0,
-                        warnThreshold: Int, now: Date) -> [AdviceTip] {
+                        warnThreshold: Int, now: Date,
+                        typicalHourRate: Double? = nil,
+                        topWeeklyProject: (name: String, sharePct: Double)? = nil) -> [AdviceTip] {
         var tips: [AdviceTip] = []
         let t = Double(warnThreshold)
         func dur(_ s: TimeInterval?) -> String {
@@ -49,13 +51,24 @@ enum Advice {
                     ? " 리셋까지 버티려면 지금은 멈추는 게 좋아요."
                     : " 리셋까지 버티려면 시간당 \(rate(target))까지 낮추세요(지금 \(rate(s.ratePerHour)))."
             }
+            // Personal time-of-day baseline: the same rate reads differently at
+            // 2pm (your normal work rhythm) vs 11pm (unusually fast for you) — say
+            // so instead of treating every hour of the day the same.
+            var hourNote = ""
+            if let typical = typicalHourRate, typical > 0 {
+                if s.ratePerHour >= typical * 1.5 {
+                    hourNote = " 평소 이 시간대보다 빠른 편이에요."
+                } else if s.ratePerHour <= typical * 1.2 {
+                    hourNote = " 이 시간대엔 원래 이 정도 속도예요."
+                }
+            }
             if (s.blockedBy ?? 0) < 600 {   // barely blocked → don't over-alarm
                 tips.append(AdviceTip(kind: .sessionPacing, level: .warn, icon: "speedometer",
                     text: "이 속도면 약 \(dur(s.timeToFull))\(turnPart) 뒤 한도가 차요. "
-                        + "리셋이 가까워 \(dur(s.blockedBy)) 정도만 막히니 크게 걱정은 마세요."))
+                        + "리셋이 가까워 \(dur(s.blockedBy)) 정도만 막히니 크게 걱정은 마세요.\(hourNote)"))
             } else {
                 tips.append(AdviceTip(kind: .sessionPacing, level: .critical, icon: "exclamationmark.triangle.fill",
-                    text: "이 속도면 약 \(dur(s.timeToFull))\(turnPart) 뒤 한도가 차고 \(dur(s.blockedBy)) 동안 막혀요.\(lever)"))
+                    text: "이 속도면 약 \(dur(s.timeToFull))\(turnPart) 뒤 한도가 차고 \(dur(s.blockedBy)) 동안 막혀요.\(lever)\(hourNote)"))
             }
         }
 
@@ -93,14 +106,20 @@ enum Advice {
         }
 
         // 4) Weekly — defer big work; sharper when the pace will blow the week.
+        //    Name the driving project when one dominates — "왜 이렇게 빠듯하지?" is
+        //    a lot more actionable as "OO 프로젝트가 대부분이에요" than a bare %.
+        var projectNote = ""
+        if let p = topWeeklyProject, p.sharePct >= 50 {
+            projectNote = " 이번 주는 주로 \(p.name) 프로젝트가 원인이에요(\(Int(p.sharePct.rounded()))%)."
+        }
         if let wu = weeklyUtil, wu >= t {
             if weekly?.verdict == .atRisk {
                 tips.append(AdviceTip(kind: .weeklyDefer, level: .warn, icon: "calendar.badge.exclamationmark",
                     text: "주간 한도 \(Int(wu.rounded()))% — 지금 추세면 리셋(\(dur(weekly?.secondsToReset)) 뒤) 전에 바닥나요. "
-                        + "큰 작업은 리셋 후로 미루세요."))
+                        + "큰 작업은 리셋 후로 미루세요.\(projectNote)"))
             } else {
                 tips.append(AdviceTip(kind: .weeklyDefer, level: .warn, icon: "calendar",
-                    text: "주간 한도 \(Int(wu.rounded()))% — \(dur(weekly?.secondsToReset)) 후 리셋. 큰 작업은 리셋 후가 안전해요."))
+                    text: "주간 한도 \(Int(wu.rounded()))% — \(dur(weekly?.secondsToReset)) 후 리셋. 큰 작업은 리셋 후가 안전해요.\(projectNote)"))
             }
         }
 

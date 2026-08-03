@@ -200,6 +200,16 @@ final class UsageStore: ObservableObject {
         didSet { objectWillChange.send() }
     }
     private var modelDownshiftState = ModelDownshiftSuggestion.State()
+    /// A past "compact this conversation" nudge that then actually paid off —
+    /// surfaced once as quiet positive reinforcement, not persisted across app
+    /// restarts (same as the other rising-edge state in this file).
+    @Published private(set) var adviceWorkedTip: AdviceTip?
+    private struct AdviceFollowThroughState {
+        var sessionId: String?
+        var contextTokens = 0
+        var at: Date?
+    }
+    private var followThroughState = AdviceFollowThroughState()
     @AppStorage("barMetric") private var barMetricRaw: String = BarMetric.sessionLimit.rawValue {
         didSet { objectWillChange.send() }
     }
@@ -365,6 +375,7 @@ final class UsageStore: ObservableObject {
             self.recomputeProjections()
             self.processLimitAlerts()
             self.processModelDownshiftSuggestion()
+            self.processAdviceFollowThrough()
             self.maybeWeeklySummary()
             // If the risk level changed, re-arm the timer at the matching cadence.
             if self.isAtLimitRisk != self.lastUrgent {
@@ -437,6 +448,34 @@ final class UsageStore: ObservableObject {
             id: "model-downshift-\(v.model)", urgency: .nudge, category: .limit)
     }
 
+    /// Tracks whether a "this conversation got heavy, try /compact" moment was
+    /// actually followed by a real drop in context size (same session compacted,
+    /// or you moved to a fresh one) — and if so, surfaces a one-time "that
+    /// helped" tip via `adviceWorkedTip`. Deliberately asymmetric: a nudge that
+    /// WASN'T followed just expires quietly after a few hours (no shaming, no
+    /// repeat nagging) — only the positive outcome is worth surfacing.
+    private func processAdviceFollowThrough() {
+        let now = Date()
+        let heavyContext = snapshot.currentContextTokens >= SessionCoach.heavyContextTokens
+        let heavyReuse = (cacheEfficiency?.cacheReadShare ?? 0) >= CacheEfficiency.heavyReuseThreshold
+        if heavyContext, heavyReuse {
+            followThroughState = AdviceFollowThroughState(
+                sessionId: snapshot.currentSessionId, contextTokens: snapshot.currentContextTokens, at: now)
+            adviceWorkedTip = nil
+            return
+        }
+        guard let pendingAt = followThroughState.at, followThroughState.contextTokens > 0,
+              now.timeIntervalSince(pendingAt) <= 3 * 3600 else {
+            followThroughState = AdviceFollowThroughState()
+            adviceWorkedTip = nil
+            return
+        }
+        guard snapshot.currentContextTokens <= followThroughState.contextTokens / 2 else { return }
+        adviceWorkedTip = AdviceTip(kind: .adviceWorked, level: .good, icon: "sparkles",
+            text: "최근 컨텍스트를 정리하신 뒤로 훨씬 가벼워졌어요 — 그 조언 효과가 있었어요.")
+        followThroughState = AdviceFollowThroughState()
+    }
+
     private func recomputeProjections() {
         guard enableLiveLimits else {
             sessionProjection = nil; weeklyProjection = nil; sessionTrend = []; weeklyTrend = []
@@ -454,6 +493,10 @@ final class UsageStore: ObservableObject {
         // Session = rolling 5h window → recent burst rate.
         sessionProjection = Projection.compute(points: samples.compactMap { s in s.session.map { (s.at, $0) } },
                                                resetsAt: liveSession?.resetsAt, now: now)
+        // Feeds the personal "usual speed at this hour" baseline (see `HourlyBurnHistory`).
+        // Idle/near-zero rates are skipped inside `append` so they don't drag every
+        // hour's median toward zero.
+        if let rate = sessionProjection?.ratePerHour { HourlyBurnHistory.append(rate: rate, at: now) }
         if let w = liveWeekly {
             // Weekly = fixed 7-day bucket → realized average pace since the week started,
             // blended with a short-burst trajectory so a fast start doesn't go unnoticed
@@ -698,7 +741,14 @@ final class UsageStore: ObservableObject {
                        models: snapshot.windowByModel,
                        contextTokens: snapshot.currentContextTokens,
                        warnThreshold: warnThreshold,
-                       now: snapshot.generatedAt)
+                       now: snapshot.generatedAt,
+                       typicalHourRate: typicalHourRate,
+                       topWeeklyProject: topWeeklyProject)
+
+        // A rare, positive one-off: reinforce that a past nudge (context/compact)
+        // actually helped, rather than only ever warning. See `processAdviceFollowThrough`.
+        // Appended last so it naturally yields to anything more urgent under the cap.
+        if let worked = adviceWorkedTip { tips.append(worked) }
 
         let heavyContext = snapshot.currentContextTokens >= SessionCoach.heavyContextTokens
         let heavyReuse = (cacheEfficiency?.cacheReadShare ?? 0) >= CacheEfficiency.heavyReuseThreshold
@@ -800,6 +850,24 @@ final class UsageStore: ObservableObject {
         let recent = samples.filter { $0.at >= recentCutoff }.map(\.freshShare)
         let baseline = samples.filter { $0.at >= baselineCutoff && $0.at < recentCutoff }.map(\.freshShare)
         return CacheEfficiencyTrend.verdict(recentShares: recent, baselineShares: baseline)
+    }
+
+    /// Your personal "usual speed at this hour" — see `HourlyBurnHistory`. nil
+    /// until enough same-hour history has accumulated (no false personalization
+    /// from day one).
+    var typicalHourRate: Double? {
+        let hour = Calendar.current.component(.hour, from: snapshot.generatedAt)
+        return HourlyBurnHistory.typicalRate(forHour: hour, in: HourlyBurnHistory.load())
+    }
+
+    /// The project driving most of this week's spend, when one clearly dominates —
+    /// feeds the weekly-defer tip's "왜" context. nil when usage is spread out or
+    /// there's no weekly data yet.
+    var topWeeklyProject: (name: String, sharePct: Double)? {
+        let projects = snapshot.weeklyProjectUsage
+        let totalCost = projects.reduce(0.0) { $0 + $1.cost }
+        guard totalCost > 0.01, let top = projects.first else { return nil }
+        return (top.project, top.cost / totalCost * 100)
     }
 
     /// Diagnostics panel's manual fix: clears the cached access token (forcing a
