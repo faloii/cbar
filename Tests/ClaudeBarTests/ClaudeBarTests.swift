@@ -33,6 +33,25 @@ final class FormatterTests: XCTestCase {
         XCTAssertEqual(Fmt.countdown(to: now.addingTimeInterval(-100), from: now), "<1m") // past
     }
 
+    func testAge() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertEqual(Fmt.age(now.addingTimeInterval(-10), from: now), "방금")
+        XCTAssertEqual(Fmt.age(now.addingTimeInterval(-5 * 60), from: now), "5분 전")
+        XCTAssertEqual(Fmt.age(now.addingTimeInterval(-(14 * 3600 + 55 * 60)), from: now), "14시간 55분 전")
+        XCTAssertEqual(Fmt.age(now.addingTimeInterval(-2 * 3600), from: now), "2시간 전")   // exact hour, no dangling "0분"
+        XCTAssertEqual(Fmt.age(now.addingTimeInterval(-30 * 3600), from: now), "1일 전")
+    }
+
+    func testAgeKeepsMinutesDistinctWithinTheSameHourBucket() {
+        // Two events ~8 minutes apart, both ~14h ago — coarse hour-only rounding
+        // made these read identically ("14시간 전" for both), which looked like a
+        // stuck/duplicate timestamp even though the underlying data was correct.
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let a = Fmt.age(now.addingTimeInterval(-(14 * 3600 + 55 * 60)), from: now)
+        let b = Fmt.age(now.addingTimeInterval(-(15 * 3600 + 3 * 60)), from: now)
+        XCTAssertNotEqual(a, b)
+    }
+
     func testClockFormat() {
         // Timezone-independent shape check: "HH:mm".
         let s = Fmt.clock(Date(timeIntervalSince1970: 1_000_000))
