@@ -258,18 +258,17 @@ struct ClaudeCredentials: Codable {
     // MARK: refresh (no keychain prompt)
 
     /// Exchange the in-memory refresh token for a fresh access token via the OAuth
-    /// endpoint — no keychain read, so no prompt. On success we (1) update the in-memory
-    /// + file cache and (2) write the new access+refresh tokens BACK into Claude Code's
-    /// keychain item in place, so Claude Code keeps working (refresh tokens rotate, and
-    /// the old one we just used is now dead). Returns nil if no refresh token is held
-    /// (e.g. right after an app restart) or the refresh failed.
+    /// endpoint — no keychain read, so no prompt. Only updates our OWN in-memory +
+    /// file cache; deliberately does NOT write back into Claude Code's shared
+    /// keychain item (that used to happen here, but `SecItemUpdate` on a shared
+    /// item can trigger its own separate Keychain access prompt even when reads
+    /// are already "Always Allow"-trusted — a real cause of recurring prompts).
+    /// Since Claude Code CLI sessions refresh their own copy independently in the
+    /// background, we no longer need to keep it in sync from here. Returns nil if
+    /// no refresh token is held (e.g. right after an app restart) or the refresh failed.
     static func refreshSilently() async -> ClaudeCredentials? {
         guard let rt = cachedRefreshToken(), !rt.isEmpty else { return nil }
         guard let fresh = try? await performRefresh(refreshToken: rt) else { return nil }
-        // Keep Claude Code in sync first (it owns the credential); then our caches.
-        writeBackToKeychain(access: fresh.accessToken,
-                            refresh: fresh.refreshToken ?? rt,
-                            expiresAt: fresh.expiresAt)
         setCached(fresh)
         writeFile(fresh)            // access token only (refreshToken excluded by CodingKeys)
         return fresh
@@ -308,40 +307,6 @@ struct ClaudeCredentials: Codable {
         if let secs = root["expires_in"] as? Double { expires = Date().addingTimeInterval(secs) }
         else if let secs = root["expires_in"] as? Int { expires = Date().addingTimeInterval(Double(secs)) }
         return ClaudeCredentials(accessToken: access, expiresAt: expires, refreshToken: newRefresh)
-    }
-
-    /// Merge the refreshed tokens into Claude Code's keychain item via SecItemUpdate
-    /// (in place — preserves the item's ACL, so our "Always Allow" grant survives). We
-    /// only touch the three token fields and leave everything else (scopes, etc.) intact.
-    /// Best-effort: any failure is silent — our own access token still works regardless.
-    private static func writeBackToKeychain(access: String, refresh: String, expiresAt: Date?) {
-        let readQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecReturnData as String: true,
-            kSecReturnAttributes as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(readQuery as CFDictionary, &item) == errSecSuccess,
-              let dict = item as? [String: Any],
-              let data = dict[kSecValueData as String] as? Data,
-              var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              var oauth = root["claudeAiOauth"] as? [String: Any]
-        else { return }
-        oauth["accessToken"] = access
-        oauth["refreshToken"] = refresh
-        if let exp = expiresAt { oauth["expiresAt"] = Int(exp.timeIntervalSince1970 * 1000) }
-        root["claudeAiOauth"] = oauth
-        guard let newData = try? JSONSerialization.data(withJSONObject: root) else { return }
-        var updateQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-        ]
-        if let account = dict[kSecAttrAccount as String] as? String {
-            updateQuery[kSecAttrAccount as String] = account
-        }
-        SecItemUpdate(updateQuery as CFDictionary, [kSecValueData as String: newData] as CFDictionary)
     }
 
     // MARK: file cache
