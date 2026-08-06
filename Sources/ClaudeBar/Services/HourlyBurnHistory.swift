@@ -20,6 +20,12 @@ enum HourlyBurnHistory {
     /// Ignore near-idle rates — they'd just drag every hour's baseline toward
     /// zero and dilute the signal from hours you're actually working.
     static let idleEpsilon = 0.5
+    /// Throttle appends like `WeeklyHistory`/`CacheEfficiencyHistory` do — without
+    /// this, a single afternoon of continuous refresh ticks (every 30-60s) fills
+    /// the whole `maxSamples` ring buffer in hours, evicting every OTHER day's
+    /// history and leaving a same-hour "baseline" built from one session instead
+    /// of many days.
+    static let minSampleGap: TimeInterval = 3600
 
     private static var fileURL: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claudebar/hourly-burn-history.json")
@@ -40,6 +46,7 @@ enum HourlyBurnHistory {
     static func append(rate: Double, at: Date, calendar: Calendar = .current) {
         guard rate > idleEpsilon else { return }
         var samples = load()
+        if let last = samples.last, at.timeIntervalSince(last.at) < minSampleGap { return }
         samples.append(HourlyRateSample(hour: calendar.component(.hour, from: at), ratePerHour: rate, at: at))
         if samples.count > maxSamples { samples.removeFirst(samples.count - maxSamples) }
         guard let data = try? encoder.encode(samples) else { return }
