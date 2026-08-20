@@ -67,9 +67,7 @@ extension UsageStore {
     /// repeat nagging) — only the positive outcome is worth surfacing.
     func processAdviceFollowThrough() {
         let now = Date()
-        let heavyContext = snapshot.currentContextTokens >= SessionCoach.heavyContextTokens
-        let heavyReuse = (cacheEfficiency?.cacheReadShare ?? 0) >= CacheEfficiency.heavyReuseThreshold
-        if heavyContext, heavyReuse {
+        if isHeavyContextWithReuse {
             followThroughState = AdviceFollowThroughState(
                 sessionId: snapshot.currentSessionId, contextTokens: snapshot.currentContextTokens, at: now)
             adviceWorkedTip = nil
@@ -126,5 +124,14 @@ extension UsageStore {
     /// snooze) — the in-app UI keeps reflecting real state regardless.
     func isQuietNow(_ now: Date) -> Bool {
         isSnoozed
+    }
+
+    var snoozeUntil: Date? { snoozeUntilEpoch > 0 ? Date(timeIntervalSince1970: snoozeUntilEpoch) : nil }
+    var isSnoozed: Bool { snoozeUntil.map { Date() < $0 } ?? false }
+
+    /// One-tap toggle for the header button: snooze for `snoozeDuration`, or cancel
+    /// early if already snoozed.
+    func toggleSnooze() {
+        snoozeUntilEpoch = isSnoozed ? 0 : Date().addingTimeInterval(Self.snoozeDuration).timeIntervalSince1970
     }
 }

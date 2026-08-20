@@ -44,6 +44,15 @@ extension UsageStore {
         CacheEfficiency.verdict(snapshot.windowTokens)
     }
 
+    /// The current conversation is both large AND mostly re-read old context — the
+    /// bar for "this is worth a /compact". Shared by `adviceTips` (the in-app tip)
+    /// and `processAdviceFollowThrough` (the follow-through nudge tracker) so the
+    /// two don't quietly drift apart if the threshold logic ever changes.
+    var isHeavyContextWithReuse: Bool {
+        snapshot.currentContextTokens >= SessionCoach.heavyContextTokens
+            && (cacheEfficiency?.cacheReadShare ?? 0) >= CacheEfficiency.heavyReuseThreshold
+    }
+
     /// The session part of the bar label: self-warns "막힘 50m" (time until you'll hit
     /// the cap) when on track to block before reset, "막힘" when already blocked, else
     /// the plain %. So you see trouble coming without opening the popover.

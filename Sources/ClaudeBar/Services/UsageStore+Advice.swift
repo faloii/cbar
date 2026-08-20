@@ -30,7 +30,6 @@ extension UsageStore {
         if let worked = adviceWorkedTip { tips.append(worked) }
 
         let heavyContext = snapshot.currentContextTokens >= SessionCoach.heavyContextTokens
-        let heavyReuse = (cacheEfficiency?.cacheReadShare ?? 0) >= CacheEfficiency.heavyReuseThreshold
         // Once a merge below explains "why", the standalone .contextHeavy tip (same
         // /compact suggestion, just without the causal link) would be redundant.
         var contextStoryTold = false
@@ -47,7 +46,7 @@ extension UsageStore {
             let baseline = a.isWeekdaySpecific ? "이 요일 하루" : "하루"
             var text = "오늘 이 페이스면 평소(\(baseline) ~\(Fmt.usd(a.typicalDailyCost))) 대비 \(multText) 쓰게 돼요"
                 + "(예상 ~\(Fmt.usd(a.projectedToday)))."
-            if heavyContext, heavyReuse {
+            if isHeavyContextWithReuse {
                 // Root-cause link instead of leaving "왜 이렇게 빠르지?" unanswered.
                 let k = snapshot.currentContextTokens / 1000
                 text += " 지금 대화가 무겁고(~\(k)k토큰) 대부분 재읽기라 그런 걸 수도 있어요 — /compact 해보세요."

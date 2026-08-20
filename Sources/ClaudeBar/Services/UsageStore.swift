@@ -126,20 +126,14 @@ final class UsageStore: ObservableObject {
     }
     /// Ad-hoc "quiet right now" snooze — epoch seconds until notifications are
     /// suppressed, 0 = not snoozed. Persisted (not just in-memory) so a quick app
-    /// restart (e.g. an update) doesn't silently cancel it mid-focus-session.
-    @AppStorage("snoozeUntilEpoch") private var snoozeUntilEpoch: Double = 0 {
+    /// restart (e.g. an update) doesn't silently cancel it mid-focus-session. Not
+    /// `private` — `UsageStore+Notifications.swift` (`toggleSnooze`, `isQuietNow`'s
+    /// sibling logic) reads/writes it.
+    @AppStorage("snoozeUntilEpoch") var snoozeUntilEpoch: Double = 0 {
         didSet { objectWillChange.send() }
     }
     static let snoozeDuration: TimeInterval = 2 * 3600
 
-    var snoozeUntil: Date? { snoozeUntilEpoch > 0 ? Date(timeIntervalSince1970: snoozeUntilEpoch) : nil }
-    var isSnoozed: Bool { snoozeUntil.map { Date() < $0 } ?? false }
-
-    /// One-tap toggle for the header button: snooze for `snoozeDuration`, or cancel
-    /// early if already snoozed.
-    func toggleSnooze() {
-        snoozeUntilEpoch = isSnoozed ? 0 : Date().addingTimeInterval(Self.snoozeDuration).timeIntervalSince1970
-    }
     /// Habit goal: keep Opus cost share at or below this %; 0 = off.
     @AppStorage("opusShareTarget") var opusShareTarget: Int = 0 {
         didSet { objectWillChange.send() }
@@ -182,7 +176,7 @@ final class UsageStore: ObservableObject {
     var modelDownshiftState = ModelDownshiftSuggestion.State()
     /// A past "compact this conversation" nudge that then actually paid off —
     /// surfaced once as quiet positive reinforcement, not persisted across app
-    /// restarts (same as the other rising-edge state in this file). Written from
+    /// restarts (same as `modelDownshiftState` above). Written from
     /// `processAdviceFollowThrough` in `UsageStore+Notifications.swift`.
     @Published var adviceWorkedTip: AdviceTip?
     struct AdviceFollowThroughState {
