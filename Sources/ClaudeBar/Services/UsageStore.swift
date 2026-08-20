@@ -65,34 +65,42 @@ enum BarMetric: String, CaseIterable, Identifiable {
 }
 
 /// Owns the current snapshot, the refresh timer, and user settings.
+///
+/// This core file holds every STORED property (Swift requires those in the
+/// primary declaration, not extensions) plus `init()`. The behavior itself is
+/// split across `UsageStore+Sections/Refresh/Notifications/Advice/Display.swift`
+/// — each a plain `extension UsageStore` grouping one area of responsibility.
+/// A few properties below are `internal` (not `private`) specifically because an
+/// extension in another file needs to read/write them; that's a same-module
+/// visibility relaxation only, nothing becomes public API.
 @MainActor
 final class UsageStore: ObservableObject {
     static let shared = UsageStore()
 
-    @Published private(set) var snapshot = UsageSnapshot.empty
-    @Published private(set) var limits: LimitsSnapshot?
-    @Published private(set) var sessionProjection: Projection?
-    @Published private(set) var weeklyProjection: Projection?
+    @Published var snapshot = UsageSnapshot.empty
+    @Published var limits: LimitsSnapshot?
+    @Published var sessionProjection: Projection?
+    @Published var weeklyProjection: Projection?
     /// Recorded session-utilization samples within the current 5h window — the in-session
     /// usage trend ("how fast / how much am I burning right now").
-    @Published private(set) var sessionTrend: [UsageSample] = []
+    @Published var sessionTrend: [UsageSample] = []
     /// Weekly-utilization samples over the last ~8 days — the within-week usage trend.
-    @Published private(set) var weeklyTrend: [UsageSample] = []
+    @Published var weeklyTrend: [UsageSample] = []
     /// Efficiency recap of the most-recently-completed session (for the learning loop).
-    @Published private(set) var lastSessionRecap: SessionCoach.Recap?
+    @Published var lastSessionRecap: SessionCoach.Recap?
     /// "How much can I safely use today?" reading on the weekly limit.
-    @Published private(set) var weeklyAllowance: DailyAllowance.Verdict?
-    @Published private(set) var isRefreshing = false
+    @Published var weeklyAllowance: DailyAllowance.Verdict?
+    @Published var isRefreshing = false
     /// When the current/most-recent refresh cycle started — lets the Settings
     /// diagnostics panel tell "actively retrying but failing" apart from "hasn't
     /// tried in a while" (e.g. if `isRefreshing` were ever stuck, this timestamp
     /// would stop advancing — the smoking gun for exactly that class of bug).
-    @Published private(set) var lastRefreshAttemptAt: Date?
+    @Published var lastRefreshAttemptAt: Date?
     /// True when the live-limits fetch itself didn't finish within the timeout in
     /// the last cycle (see `withTimeout`) — the specific "a system call is hung"
     /// signature, distinct from an ordinary network/auth failure (which still
     /// returns promptly with `limits?.error` set).
-    @Published private(set) var lastRefreshTimedOut = false
+    @Published var lastRefreshTimedOut = false
 
     @AppStorage("refreshIntervalSeconds") var refreshInterval: Double = 60 {
         didSet { restartTimer() }
@@ -138,46 +146,17 @@ final class UsageStore: ObservableObject {
     }
     /// Comma-joined raw values of hidden sections. Default = lean: show only the
     /// core (advice, limits, recent, today); the analysis cards (per-model burn,
-    /// model guide, per-session) are opt-in.
-    @AppStorage("hiddenSections") private var hiddenSectionsRaw: String =
+    /// model guide, per-session) are opt-in. Not `private` — `UsageStore+Sections.swift` reads/writes it.
+    @AppStorage("hiddenSections") var hiddenSectionsRaw: String =
         "modelGuide,perModel,sessions,notificationLog" {
         didSet { objectWillChange.send() }
     }
-    /// Comma-joined raw values defining card order (missing ones append in default order).
-    @AppStorage("sectionOrder") private var sectionOrderRaw: String = "" {
+    /// Comma-joined raw values defining card order (missing ones append in default
+    /// order). Not `private` — `UsageStore+Sections.swift` reads/writes it.
+    @AppStorage("sectionOrder") var sectionOrderRaw: String = "" {
         didSet { objectWillChange.send() }
     }
 
-    func isVisible(_ section: PanelSection) -> Bool {
-        !hiddenSectionsRaw.split(separator: ",").contains(Substring(section.rawValue))
-    }
-    func setVisible(_ section: PanelSection, _ visible: Bool) {
-        var hidden = Set(hiddenSectionsRaw.split(separator: ",").map(String.init))
-        if visible { hidden.remove(section.rawValue) } else { hidden.insert(section.rawValue) }
-        hiddenSectionsRaw = hidden.sorted().joined(separator: ",")
-    }
-
-    /// Sections in display order (saved order first, then any new ones in default order).
-    var orderedSections: [PanelSection] {
-        let saved = sectionOrderRaw.split(separator: ",").compactMap { PanelSection(rawValue: String($0)) }
-        return saved + PanelSection.allCases.filter { !saved.contains($0) }
-    }
-    /// Move a section up (delta -1) or down (delta +1).
-    func moveSection(_ section: PanelSection, by delta: Int) {
-        var order = orderedSections
-        guard let i = order.firstIndex(of: section), order.indices.contains(i + delta) else { return }
-        order.swapAt(i, i + delta)
-        sectionOrderRaw = order.map(\.rawValue).joined(separator: ",")
-    }
-
-    /// Drag-and-drop reorder: place `moved` just before `target`.
-    func moveSection(_ moved: PanelSection, before target: PanelSection) {
-        guard moved != target else { return }
-        var order = orderedSections.filter { $0 != moved }
-        guard let idx = order.firstIndex(of: target) else { return }
-        order.insert(moved, at: idx)
-        sectionOrderRaw = order.map(\.rawValue).joined(separator: ",")
-    }
     @AppStorage("notifyOnWarning") var notifyOnWarning: Bool = true {
         didSet { if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() } }
     }
@@ -199,17 +178,19 @@ final class UsageStore: ObservableObject {
     @AppStorage("notifyModelDownshift") var notifyModelDownshift: Bool = false {
         didSet { objectWillChange.send() }
     }
-    private var modelDownshiftState = ModelDownshiftSuggestion.State()
+    /// Rising-edge state for `processModelDownshiftSuggestion` (`UsageStore+Notifications.swift`).
+    var modelDownshiftState = ModelDownshiftSuggestion.State()
     /// A past "compact this conversation" nudge that then actually paid off —
     /// surfaced once as quiet positive reinforcement, not persisted across app
-    /// restarts (same as the other rising-edge state in this file).
-    @Published private(set) var adviceWorkedTip: AdviceTip?
-    private struct AdviceFollowThroughState {
+    /// restarts (same as the other rising-edge state in this file). Written from
+    /// `processAdviceFollowThrough` in `UsageStore+Notifications.swift`.
+    @Published var adviceWorkedTip: AdviceTip?
+    struct AdviceFollowThroughState {
         var sessionId: String?
         var contextTokens = 0
         var at: Date?
     }
-    private var followThroughState = AdviceFollowThroughState()
+    var followThroughState = AdviceFollowThroughState()
     @AppStorage("barMetric") private var barMetricRaw: String = BarMetric.sessionLimit.rawValue {
         didSet { objectWillChange.send() }
     }
@@ -235,18 +216,18 @@ final class UsageStore: ObservableObject {
     }
 
     // Rising-edge state so each limit alert fires once per episode (see LimitAlerts).
-    private var alertState = LimitAlertState()
+    var alertState = LimitAlertState()
     // Tracks whether we're in the tighter "near a limit" refresh cadence.
-    private var lastUrgent = false
+    var lastUrgent = false
 
     var barMetric: BarMetric {
         get { BarMetric(rawValue: barMetricRaw) ?? .windowTokens }
         set { barMetricRaw = newValue.rawValue }
     }
 
-    private var timer: Timer?
-    private let reader = ClaudeDataReader()
-    private let limitsClient = OAuthUsageClient()
+    var timer: Timer?
+    let reader = ClaudeDataReader()
+    let limitsClient = OAuthUsageClient()
 
     init() {
         if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() }
@@ -266,21 +247,10 @@ final class UsageStore: ObservableObject {
         restartTimer()
     }
 
-    /// Live-limit windows filtered through their reset boundary: once `resetsAt`
-    /// passes, the cached reading describes the PREVIOUS window (possibly "blocked
-    /// at 100%" held all night through sleep) — treat it as unknown until the next
-    /// fetch instead of displaying it as current truth.
-    var liveSession: LimitWindow? {
-        limits?.session5h.flatMap { $0.expired(asOf: Date()) ? nil : $0 }
-    }
-    var liveWeekly: LimitWindow? {
-        limits?.weekly7d.flatMap { $0.expired(asOf: Date()) ? nil : $0 }
-    }
-
     /// One-shot timer pinned just past the nearest limit-window reset, so the app
     /// notices the rollover (freed alert, auto-resume, fresh %) within seconds
-    /// instead of waiting out the idle tick + cache TTL.
-    private var resetBoundaryTimer: Timer?
+    /// instead of waiting out the idle tick + cache TTL. See `UsageStore+Refresh.swift`.
+    var resetBoundaryTimer: Timer?
     /// The server can lag a few seconds past the predicted reset before it
     /// actually reflects the new window — the first forced refetch right after a
     /// reset can still come back with the OLD (now-expired) window. Without this,
@@ -288,274 +258,19 @@ final class UsageStore: ObservableObject {
     /// for (the next one, hours/days away) and fall back to the idle cadence —
     /// leaving the session ring missing from the popover for up to several
     /// minutes after every single reset. Bounded quick retries close that gap.
-    private var resetConfirmAttempts = 0
-    private static let maxResetConfirmAttempts = 6           // ~1 minute of quick retries
-    private static let resetConfirmRetryInterval: TimeInterval = 10
+    var resetConfirmAttempts = 0
+    static let maxResetConfirmAttempts = 6           // ~1 minute of quick retries
+    static let resetConfirmRetryInterval: TimeInterval = 10
 
-    private func scheduleResetBoundaryRefresh() {
-        resetBoundaryTimer?.invalidate()
-        resetBoundaryTimer = nil
-        let now = Date()
-
-        let sessionStillStale = limits?.session5h.map { $0.expired(asOf: now) } ?? false
-        let weeklyStillStale = limits?.weekly7d.map { $0.expired(asOf: now) } ?? false
-        if sessionStillStale || weeklyStillStale, resetConfirmAttempts < Self.maxResetConfirmAttempts {
-            resetConfirmAttempts += 1
-            let timer = Timer(fire: now.addingTimeInterval(Self.resetConfirmRetryInterval), interval: 0, repeats: false) { [weak self] _ in
-                Task { @MainActor in self?.refresh(force: true) }
-            }
-            RunLoop.main.add(timer, forMode: .common)
-            resetBoundaryTimer = timer
-            return
-        }
-        resetConfirmAttempts = 0
-
-        guard let next = [limits?.session5h?.resetsAt, limits?.weekly7d?.resetsAt]
-            .compactMap({ $0 }).filter({ $0 > now }).min() else { return }
-        let timer = Timer(fire: next.addingTimeInterval(5), interval: 0, repeats: false) { [weak self] _ in
-            Task { @MainActor in self?.refresh(force: true) }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        resetBoundaryTimer = timer
-    }
-
-/// Refresh local usage and (if enabled) the live limits. `force` bypasses the
-    /// limits cache TTL — used when the user explicitly hits Refresh.
-    func refresh(force: Bool = false) {
-        guard !isRefreshing else { return }
-        isRefreshing = true
-        lastRefreshAttemptAt = Date()
-        let reader = self.reader
-        let client = self.limitsClient
-        let live = enableLiveLimits
-        // Always parse the cheap stats cache (for the menu-bar/weekly summary); skip
-        // only the heavy session-log scan when the popover is closed and the bar metric
-        // is a limit % (driven by `limits` alone). Exception: the "current conversation
-        // got heavy" nudge needs `currentSessionId` to stay fresh to be worth anything,
-        // so keep scanning every tick while that's on (the per-file parse cache makes
-        // repeat scans cheap — only the most recently modified log actually reparses).
-        let full = popoverVisible || !barMetric.needsLiveLimits
-        let previous = snapshot
-        // Near a limit, fetch fresher data (shorter cache TTL) so the warning is
-        // timely; when safe, stay gentle on the rate-limited endpoint.
-        let ttl: TimeInterval = isAtLimitRisk ? 60 : OAuthUsageClient.cacheTTL
-        Task {
-            // Timeout-wrapped too (not just the live-limits fetch below): this is
-            // plain file I/O and shouldn't hang, but "shouldn't" is exactly what we
-            // assumed about the Keychain call before finding out otherwise — nothing
-            // in this Task may block `isRefreshing` from resetting indefinitely.
-            if let loaded = await withTimeout(seconds: 20, operation: {
-                await Task.detached(priority: .utility) { reader.load(includeSessionLogs: full) }.value
-            }) {
-                var snap = loaded
-                if !full { snap = snap.mergingSession(from: previous) }
-                self.snapshot = snap
-                // Feeds CacheEfficiencyTrend's multi-week "재읽기 비율이 늘고 있어요"
-                // read — a single 5h-window snapshot in isolation can't show a trend.
-                if let ce = CacheEfficiency.verdict(snap.windowTokens) {
-                    CacheEfficiencyHistory.append(freshShare: ce.freshShare, at: snap.generatedAt)
-                }
-            }
-            if live {
-                // 20s: comfortably past the network layer's own 15s timeout, so this
-                // only ever kicks in for the un-timeoutable case (a blocked Keychain
-                // prompt). On timeout, deliberately leave `self.limits` untouched
-                // (not nil'd) — this cycle produced nothing new, not "no data."
-                if let fresh = await withTimeout(seconds: 20, operation: { await client.loadLimits(force: force, ttl: ttl) }) {
-                    self.limits = fresh
-                    self.lastRefreshTimedOut = false
-                } else {
-                    self.lastRefreshTimedOut = true
-                }
-            } else {
-                self.limits = nil
-                self.lastRefreshTimedOut = false
-            }
-            self.scheduleResetBoundaryRefresh()
-            self.recomputeProjections()
-            self.processLimitAlerts()
-            self.processModelDownshiftSuggestion()
-            self.processAdviceFollowThrough()
-            self.maybeWeeklySummary()
-            // If the risk level changed, re-arm the timer at the matching cadence.
-            if self.isAtLimitRisk != self.lastUrgent {
-                self.lastUrgent = self.isAtLimitRisk
-                self.restartTimer()
-            }
-            self.isRefreshing = false
-        }
-    }
-
-    @AppStorage("lastWeeklySummaryAt") private var lastWeeklySummaryAt: Double = 0
+    @AppStorage("lastWeeklySummaryAt") var lastWeeklySummaryAt: Double = 0
     /// Last-seen weekly-limit `resetsAt` (epoch seconds; 0 = never observed), to
     /// detect the moment the window actually rolls over (see `WeeklyResetRecap`)
     /// instead of firing on an arbitrary timer. Persisted: weekly resets usually
     /// land overnight while the app is quit — an in-memory marker would restart at
     /// nil, swallow the jump, and silently skip the recap.
-    @AppStorage("lastSeenWeeklyResetsAt") private var lastSeenWeeklyResetsAtEpoch: Double = 0
-    private var lastSeenWeeklyResetsAt: Date? {
-        get { lastSeenWeeklyResetsAtEpoch > 0 ? Date(timeIntervalSince1970: lastSeenWeeklyResetsAtEpoch) : nil }
-        set { lastSeenWeeklyResetsAtEpoch = newValue?.timeIntervalSince1970 ?? 0 }
-    }
+    @AppStorage("lastSeenWeeklyResetsAt") var lastSeenWeeklyResetsAtEpoch: Double = 0
 
-    /// Fire a weekly usage recap notification: once per real weekly-limit reset
-    /// when live limits are on (so the recap lands right when last week wraps up),
-    /// falling back to a rolling ~7-day timer when they're off (no reset to observe).
-    private func maybeWeeklySummary() {
-        guard weeklySummaryEnabled, let r = snapshot.weeklyReview else { return }
-        let newResetsAt = limits?.weekly7d?.resetsAt
-        if enableLiveLimits, newResetsAt != nil {
-            guard WeeklyResetRecap.justReset(old: lastSeenWeeklyResetsAt, new: newResetsAt) else {
-                lastSeenWeeklyResetsAt = newResetsAt
-                return
-            }
-        } else {
-            guard Date().timeIntervalSince1970 - lastWeeklySummaryAt >= 7 * 86400 else { return }
-        }
-        // Quiet hours/snooze: leave the reset "unconsumed" so this is retried (not
-        // lost) on the next non-quiet tick, rather than silently skipping the week.
-        guard !isQuietNow(Date()) else { return }
-        lastSeenWeeklyResetsAt = newResetsAt
-        lastWeeklySummaryAt = Date().timeIntervalSince1970
-
-        var body = "지난 7일 ~\(Fmt.usd(r.thisCost))"
-        if let d = r.costDeltaPct {
-            body += d >= 0 ? " · 전주 ▲\(Int(d.rounded()))%" : " · 전주 ▼\(Int(abs(d).rounded()))%"
-        }
-        body += " · Opus 비중 \(Int((r.opusShareThis * 100).rounded()))%"
-        if let ce = CacheEfficiency.verdict(snapshot.weeklyTokens) {
-            body += " · 재읽기 \(Int((ce.cacheReadShare * 100).rounded()))%"
-        }
-        if let top = snapshot.weeklyProjectUsage.first {
-            body += " · 최다 사용 \(top.project)"
-        }
-        if let coaching = r.coaching { body += "\n\(coaching)" }
-        Notifier.notify(title: "주간 마감 리캡", body: body, id: "weekly-summary", urgency: .fyi)
-    }
-
-    /// Notify once when the dominant model in the 5h window newly looks
-    /// downshift-worthy — see `ModelDownshiftSuggestion`. Independent of the
-    /// limit-alert system: this is a cost-efficiency nudge, not a quota warning,
-    /// so it has its own opt-in toggle.
-    private func processModelDownshiftSuggestion() {
-        guard notifyModelDownshift, enableLiveLimits else { return }
-        guard ModelDownshiftSuggestion.shouldNotify(modelRecap, state: &modelDownshiftState) else { return }
-        guard !isQuietNow(Date()), let v = modelRecap, let to = v.downshiftTo else { return }
-        let savingPct = Int(((v.downshiftSaving ?? 0) * 100).rounded())
-        Notifier.notify(
-            title: "\(v.model) 대신 \(to)면 충분해 보여요",
-            body: "최근 턴 출력이 가벼운 편이에요 — \(to)로 바꾸면 이 창에서 비용 \(savingPct)% 절감돼요 (한도 소모량은 동일).",
-            id: "model-downshift-\(v.model)", urgency: .nudge, category: .limit)
-    }
-
-    /// Tracks whether a "this conversation got heavy, try /compact" moment was
-    /// actually followed by a real drop in context size (same session compacted,
-    /// or you moved to a fresh one) — and if so, surfaces a one-time "that
-    /// helped" tip via `adviceWorkedTip`. Deliberately asymmetric: a nudge that
-    /// WASN'T followed just expires quietly after a few hours (no shaming, no
-    /// repeat nagging) — only the positive outcome is worth surfacing.
-    private func processAdviceFollowThrough() {
-        let now = Date()
-        let heavyContext = snapshot.currentContextTokens >= SessionCoach.heavyContextTokens
-        let heavyReuse = (cacheEfficiency?.cacheReadShare ?? 0) >= CacheEfficiency.heavyReuseThreshold
-        if heavyContext, heavyReuse {
-            followThroughState = AdviceFollowThroughState(
-                sessionId: snapshot.currentSessionId, contextTokens: snapshot.currentContextTokens, at: now)
-            adviceWorkedTip = nil
-            return
-        }
-        guard let pendingAt = followThroughState.at, followThroughState.contextTokens > 0,
-              now.timeIntervalSince(pendingAt) <= 3 * 3600 else {
-            followThroughState = AdviceFollowThroughState()
-            adviceWorkedTip = nil
-            return
-        }
-        guard snapshot.currentContextTokens <= followThroughState.contextTokens / 2 else { return }
-        adviceWorkedTip = AdviceTip(kind: .adviceWorked, level: .good, icon: "sparkles",
-            text: "최근 컨텍스트를 정리하신 뒤로 훨씬 가벼워졌어요 — 그 조언 효과가 있었어요.")
-        followThroughState = AdviceFollowThroughState()
-    }
-
-    private func recomputeProjections() {
-        guard enableLiveLimits else {
-            sessionProjection = nil; weeklyProjection = nil; sessionTrend = []; weeklyTrend = []
-            lastSessionRecap = nil; weeklyAllowance = nil; return
-        }
-        let now = Date()
-        let samples = UsageHistory.load()
-        // Session-window trend: samples with a session reading from the last 5h, oldest→newest.
-        let cutoff = now.addingTimeInterval(-5 * 3600)
-        sessionTrend = samples.filter { $0.session != nil && $0.at >= cutoff }.sorted { $0.at < $1.at }
-        // Weekly trend: from the coarser, longer-retention store (8 days), not the
-        // short-lived `UsageHistory` ring buffer.
-        weeklyTrend = WeeklyHistory.load().filter { $0.weekly != nil }.sorted { $0.at < $1.at }
-        lastSessionRecap = SessionCoach.lastSessionRecap(samples: samples, now: now)
-        // Session = rolling 5h window → recent burst rate.
-        sessionProjection = Projection.compute(points: samples.compactMap { s in s.session.map { (s.at, $0) } },
-                                               resetsAt: liveSession?.resetsAt, now: now)
-        // Feeds the personal "usual speed at this hour" baseline (see `HourlyBurnHistory`).
-        // Idle/near-zero rates are skipped inside `append` so they don't drag every
-        // hour's median toward zero.
-        if let rate = sessionProjection?.ratePerHour { HourlyBurnHistory.append(rate: rate, at: now) }
-        if let w = liveWeekly {
-            // Weekly = fixed 7-day bucket → realized average pace since the week started,
-            // blended with a short-burst trajectory so a fast start doesn't go unnoticed
-            // for the first 6h (see `Projection.combinedWeekly`).
-            let weeklyPoints = samples.compactMap { s in s.weekly.map { (s.at, $0) } }
-            weeklyProjection = Projection.combinedWeekly(points: weeklyPoints, util: w.utilization,
-                                                          resetsAt: w.resetsAt,
-                                                          windowSeconds: 7 * 24 * 3600, now: now)
-            let midnight = Calendar.current.startOfDay(for: now)
-            // Baseline from the 8-day WeeklyHistory, not the ~12h UsageHistory ring
-            // buffer — by afternoon that buffer has evicted every pre-midnight sample
-            // and "오늘 사용" silently vanished exactly when it mattered most.
-            let todayStartUtil = DailyAllowance.todayBaseline(
-                points: weeklyTrend.compactMap { s in s.weekly.map { (at: s.at, util: $0) } },
-                midnight: midnight)
-            weeklyAllowance = DailyAllowance.verdict(util: w.utilization, resetsAt: w.resetsAt, now: now,
-                                                     todayStartUtil: todayStartUtil)
-        } else {
-            weeklyProjection = nil
-            weeklyAllowance = nil
-        }
-    }
-
-    /// Evaluate the proactive limit alerts (threshold, trajectory, blocked, reset
-    /// timing) once, then act: post notifications (if enabled) and run the optional
-    /// auto-resume command when the limit frees up after a block.
-    private func processLimitAlerts() {
-        let now = Date()
-        // Always evaluate so rising-edge state advances even when notifications are off.
-        let alerts = LimitAlerts.evaluate(
-            session: limits?.session5h, weekly: limits?.weekly7d,
-            sessionProjection: sessionProjection, weeklyProjection: weeklyProjection,
-            status: limits?.status, warnThreshold: warnThreshold,
-            blockWarnLeadMinutes: blockWarnLeadMinutes,
-            state: &alertState, now: now)
-
-        let toPost = notifyOnWarning ? alerts : []
-        if !isQuietNow(now) {
-            // Bundle same-tick alerts into one notification so a stack of separate
-            // triggers (e.g. skipping two weekly tiers at once) doesn't post a stack
-            // of separate banners.
-            for a in NotificationBundler.bundle(toPost) {
-                // "한도 풀렸어요" gets a one-tap resume action; every other limit
-                // nudge/danger gets a one-tap snooze — fyi (the weekly recap, posted
-                // separately) carries neither, nothing to act on right now.
-                let category: Notifier.Category? =
-                    a.id.contains("reset-after-block") ? .freed : (a.urgency != .fyi ? .limit : nil)
-                Notifier.notify(title: a.title, body: a.body, id: a.id, urgency: a.urgency, category: category)
-            }
-        }
-        // Auto-resume on the "freed after being blocked" reset (opt-in). With no
-        // custom command, default to continuing the last conversation — so just
-        // flipping the toggle is enough; no button press needed.
-        if autoResumeEnabled, alerts.contains(where: { $0.id == "reset-after-block" }) {
-            resumeNow()
-        }
-    }
-
-    private var lastAutoResumeAt: Date?
+    var lastAutoResumeAt: Date?
     /// Guards against launching several `claude` processes in a short burst —
     /// observed after the reset-boundary retry (fires refresh(force:true) every
     /// ~10s near a reset): if "reset-after-block" ends up qualifying on more than
@@ -566,399 +281,14 @@ final class UsageStore: ObservableObject {
     /// grant), several concurrent launches show up as several stacked
     /// "security..." access prompts. One resume attempt per cooldown window is
     /// enough; a genuinely new block-then-reset cycle is always well outside it.
-    private static let autoResumeCooldown: TimeInterval = 90
-
-    /// Runs the configured resume command (or the built-in "continue last
-    /// conversation" default) right now — the auto-resume toggle's action, also
-    /// triggered manually via the "지금 이어가기" notification button. Off the main
-    /// actor since resolving the binary/dir spawns a short-lived process.
-    func resumeNow() {
-        let now = Date()
-        guard now.timeIntervalSince(lastAutoResumeAt ?? .distantPast) >= Self.autoResumeCooldown else { return }
-        lastAutoResumeAt = now
-        let custom = resumeCommand.trimmingCharacters(in: .whitespacesAndNewlines)
-        Task.detached(priority: .utility) {
-            // Empty → safe built-in (argv, no shell injection). Filled → the user's
-            // own shell command (their responsibility), run via the login shell.
-            if custom.isEmpty { ResumeCommand.runContinueLast() }
-            else { CommandRunner.run(custom) }
-        }
-    }
-
-    /// Whether proactive notifications should be suppressed right now (ad-hoc
-    /// snooze) — the in-app UI keeps reflecting real state regardless.
-    private func isQuietNow(_ now: Date) -> Bool {
-        isSnoozed
-    }
+    static let autoResumeCooldown: TimeInterval = 90
 
     /// Idle cadence when the popover is closed — deliberately looser than the
     /// limits cache TTL (180s): when nothing is at risk there's no need to wake up
     /// and hit the network/disk that often just to keep a background number fresh
     /// a user isn't even looking at right now. Tightened to `urgentIdleInterval`
     /// while near a limit so the warning icon still stays timely.
-    private static let idleInterval: TimeInterval = 300
-    private static let urgentIdleInterval: TimeInterval = 60
-    private var popoverVisible = false
-
-    /// Driven by the popover's onAppear/onDisappear: refresh on open and use the
-    /// user's interval while visible; back off to the idle cadence when closed.
-    func setPopoverVisible(_ visible: Bool) {
-        popoverVisible = visible
-        if visible { refresh() }
-        restartTimer()
-    }
-
-    private func restartTimer() {
-        timer?.invalidate()
-        guard refreshInterval > 0 else { return }
-        let idle = isAtLimitRisk ? Self.urgentIdleInterval : Self.idleInterval
-        let interval = popoverVisible ? refreshInterval : max(refreshInterval, idle)
-        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
-        }
-    }
-
-    // MARK: - Derived values for the bar label
-
-    /// Working-time budget for the current session window — drives the menu-bar
-    /// "block in N" warning and the in-popover coach.
-    var sessionWorkBudget: SessionCoach.WorkBudget? {
-        guard enableLiveLimits, let w = liveSession else { return nil }
-        return SessionCoach.workBudget(session: sessionProjection, util: w.utilization,
-                                       resetsAt: w.resetsAt, now: Date())
-    }
-
-    /// Estimated session-limit cost of one more exchange, from the current conversation
-    /// size — the tangible "efficiency" number.
-    var perExchangePct: Double? {
-        guard enableLiveLimits, let u = liveSession?.utilization else { return nil }
-        return SessionCoach.perExchangeLimitPct(contextTokens: snapshot.currentContextTokens,
-                                                windowTokens: snapshot.windowTokens.total, sessionUtil: u)
-    }
-
-    /// One-glance "am I spending this session efficiently?" verdict.
-    var efficiencyVerdict: SessionCoach.EfficiencyVerdict {
-        SessionCoach.efficiency(util: liveSession?.utilization, projection: sessionProjection)
-    }
-
-    /// Whether the efficiency card has anything worth showing.
-    var hasEfficiencyData: Bool {
-        enableLiveLimits && (snapshot.currentContextTokens > 0 || lastSessionRecap != nil)
-    }
-
-    /// The next few session-window reset times — plan heavy work around today's
-    /// rhythm instead of only reacting when the current window is about to flip.
-    var upcomingResets: [Date] {
-        guard let next = liveSession?.resetsAt else { return [] }
-        return UpcomingResets.compute(nextReset: next, now: snapshot.generatedAt)
-    }
-
-    /// New-work vs re-read-old-context share of the 5h window — how much of the
-    /// limit consumed so far is "new work" vs "re-reading" (see `CacheEfficiency`).
-    var cacheEfficiency: CacheEfficiency.Verdict? {
-        CacheEfficiency.verdict(snapshot.windowTokens)
-    }
-
-    /// The session part of the bar label: self-warns "막힘 50m" (time until you'll hit
-    /// the cap) when on track to block before reset, "막힘" when already blocked, else
-    /// the plain %. So you see trouble coming without opening the popover.
-    private func sessionBarText(util: Double) -> String {
-        if util >= 100 { return "막힘 100%" }
-        if let b = sessionWorkBudget, b.willBlock, let at = b.blockAt {
-            return "막힘 \(Fmt.shortCountdown(to: at, from: Date())) · \(Int(util.rounded()))%"
-        }
-        return "\(Int(util.rounded()))%"
-    }
-
-    /// The weekly part of the bar label — mirrors `sessionBarText`'s "막힘 Nh/Nd"
-    /// self-warning. A weekly block is the expensive one (days, not hours), so
-    /// seeing it coming without opening the popover matters just as much here.
-    private func weeklyBarText(util: Double) -> String {
-        if util >= 100 { return "막힘 100%" }
-        if let p = weeklyProjection, p.verdict == .atRisk, let ttf = p.timeToFull {
-            return "막힘 \(Fmt.shortCountdown(to: Date().addingTimeInterval(ttf), from: Date())) · \(Int(util.rounded()))%"
-        }
-        return "\(Int(util.rounded()))%"
-    }
-
-    /// When the OTHER limit window (not the one the bar is showing) is past the
-    /// warn threshold, surface it compactly — otherwise the bar can raise a warning
-    /// triangle for a window whose number isn't even on screen.
-    private func crossWindowSuffix(other: LimitWindow?, prefix: String) -> String {
-        guard let u = other?.utilization, u >= Double(warnThreshold) else { return "" }
-        return " · \(prefix)\(Int(u.rounded()))%"
-    }
-
-    /// Menu-bar space is shared with the system's other extras, and a "막힘 6d
-    /// 23h"-style primary reading is already long — drop the cross-window suffix
-    /// rather than let the label balloon past a sane budget.
-    private static let maxBarTextLength = 16
-    private func withCrossWindowSuffix(_ primary: String, other: LimitWindow?, prefix: String) -> String {
-        let suffix = crossWindowSuffix(other: other, prefix: prefix)
-        guard !suffix.isEmpty else { return primary }
-        let combined = primary + suffix
-        return combined.count <= Self.maxBarTextLength ? combined : primary
-    }
-
-    var barText: String {
-        let s = snapshot
-        switch barMetric {
-        case .sessionLimit:
-            if let u = liveSession?.utilization {
-                return withCrossWindowSuffix(sessionBarText(util: u), other: liveWeekly, prefix: "W")
-            }
-            return enableLiveLimits ? "—" : Fmt.tokens(s.windowTokens.total)
-        case .weeklyLimit:
-            if let u = liveWeekly?.utilization {
-                return withCrossWindowSuffix(weeklyBarText(util: u), other: liveSession, prefix: "S")
-            }
-            return enableLiveLimits ? "—" : Fmt.tokens(s.windowTokens.total)
-        case .bothLimits:
-            let sPart = liveSession.map { "S \(sessionBarText(util: $0.utilization))" }
-            let wPart = liveWeekly.map { "W \(weeklyBarText(util: $0.utilization))" }
-            let joined = [sPart, wPart].compactMap { $0 }.joined(separator: " · ")
-            return joined.isEmpty ? (enableLiveLimits ? "—" : Fmt.tokens(s.windowTokens.total)) : joined
-        case .windowTokens: return Fmt.tokens(s.windowTokens.total)
-        case .windowCost:   return Fmt.usd(s.windowCost)
-        case .todayTokens:  return Fmt.tokens(s.todayTokens.total)
-        case .todayCost:    return Fmt.usd(s.todayCost)
-        }
-    }
-
-    /// Dynamic, situational advice from the current projections + per-model burn.
-    ///
-    /// Beyond the independent per-signal tips from `Advice.compute`, this layer
-    /// looks for a shared ROOT CAUSE across signals and tells one coherent story
-    /// instead of a stack of parallel observations — e.g. "burning 10× your usual
-    /// day" and "this conversation is 300k tokens, mostly re-read" are very likely
-    /// the same event, not two unrelated facts, so they're merged into one tip
-    /// with a causal link ("...아마 이 무거운 대화 때문일 거예요") instead of both
-    /// separately repeating the /compact suggestion.
-    var adviceTips: [AdviceTip] {
-        var tips = Advice.compute(session: sessionProjection, weekly: weeklyProjection,
-                       sessionUtil: liveSession?.utilization,
-                       weeklyUtil: liveWeekly?.utilization,
-                       models: snapshot.windowByModel,
-                       contextTokens: snapshot.currentContextTokens,
-                       warnThreshold: warnThreshold,
-                       now: snapshot.generatedAt,
-                       typicalHourRate: typicalHourRate,
-                       topWeeklyProject: topWeeklyProject)
-
-        // A rare, positive one-off: reinforce that a past nudge (context/compact)
-        // actually helped, rather than only ever warning. See `processAdviceFollowThrough`.
-        // Appended last so it naturally yields to anything more urgent under the cap.
-        if let worked = adviceWorkedTip { tips.append(worked) }
-
-        let heavyContext = snapshot.currentContextTokens >= SessionCoach.heavyContextTokens
-        let heavyReuse = (cacheEfficiency?.cacheReadShare ?? 0) >= CacheEfficiency.heavyReuseThreshold
-        // Once a merge below explains "why", the standalone .contextHeavy tip (same
-        // /compact suggestion, just without the causal link) would be redundant.
-        var contextStoryTold = false
-
-        if let a = burnAnomaly {
-            // The burn-anomaly warning ("you're on track to spend ~10× your usual
-            // day") and the healthy fallback ("plenty of headroom — feel free to
-            // use more") read as directly contradictory side by side, even though
-            // one is about daily cost and the other about session-limit pacing.
-            // Drop the reassuring fallback when the anomaly is showing — a "slow
-            // down and check" nudge shouldn't sit next to "go ahead and use more".
-            tips.removeAll { $0.kind == .healthy }
-            let multText = a.multiplier >= 10 ? "10배 넘게" : String(format: "%.1f배", a.multiplier)
-            let baseline = a.isWeekdaySpecific ? "이 요일 하루" : "하루"
-            var text = "오늘 이 페이스면 평소(\(baseline) ~\(Fmt.usd(a.typicalDailyCost))) 대비 \(multText) 쓰게 돼요"
-                + "(예상 ~\(Fmt.usd(a.projectedToday)))."
-            if heavyContext, heavyReuse {
-                // Root-cause link instead of leaving "왜 이렇게 빠르지?" unanswered.
-                let k = snapshot.currentContextTokens / 1000
-                text += " 지금 대화가 무겁고(~\(k)k토큰) 대부분 재읽기라 그런 걸 수도 있어요 — /compact 해보세요."
-                contextStoryTold = true
-            } else {
-                text += " 계획한 작업이면 괜찮지만, 아니라면 한번 확인해보세요."
-            }
-            tips.insert(AdviceTip(kind: .burnAnomaly, level: .warn, icon: "flame", text: text), at: 0)
-        }
-
-        // Advice.compute already caps itself at 3, so simply appending here would
-        // almost always get sliced off by a naive prefix(3) below — this tip would
-        // silently never show in the common case. Widen the cap to 4 instead of
-        // dropping it: it's real but lower-urgency (.info) than an active
-        // risk/pacing warning, so it still yields to those when things are tight.
-        if let t = cacheEfficiencyTrend {
-            if heavyContext, !contextStoryTold, let idx = tips.firstIndex(where: { $0.kind == .contextHeavy }) {
-                // Same underlying story as the heavy-context tip (re-reading a big
-                // conversation) — fold the multi-day trend into it rather than
-                // repeating the /compact suggestion in a second, separate tip.
-                let old = tips[idx]
-                tips[idx] = AdviceTip(kind: .contextHeavy, level: old.level, icon: old.icon,
-                    text: old.text + " 최근 며칠 재읽기 비율도 늘고 있어요(예전 \(Int((t.baselineFreshShare * 100).rounded()))% → 최근 \(Int((t.recentFreshShare * 100).rounded()))%).")
-                contextStoryTold = true
-            } else if !contextStoryTold {
-                tips.append(AdviceTip(kind: .cacheEfficiencyTrend, level: .info, icon: "arrow.trianglehead.2.clockwise",
-                    text: "최근 재읽기 비율이 늘고 있어요(예전 평균 \(Int((t.baselineFreshShare * 100).rounded()))% 새 작업 → 최근 \(Int((t.recentFreshShare * 100).rounded()))%). "
-                        + "/compact를 더 자주 쓰거나 새 대화로 자주 시작해보세요."))
-            }
-        }
-
-        // The burn-anomaly tip above already told the heavy-context story with a
-        // causal link — drop the plain .contextHeavy repeat of the same /compact
-        // suggestion so the card doesn't say it twice.
-        if contextStoryTold, tips.contains(where: { $0.kind == .burnAnomaly }) {
-            tips.removeAll { $0.kind == .contextHeavy }
-        }
-
-        return Array(tips.prefix(4))
-    }
-
-    /// Multi-week "is your plan tier a good fit" read — see `PlanFitSignal`. Needs
-    /// several completed weeks of live-limit history, so this stays nil for a
-    /// while after a fresh install (nothing dishonest to say yet).
-    var planFitSignal: PlanFitSignal.Result? {
-        let peaks = PlanFitSignal.weeklyPeaks(samples: weeklyTrend, now: Date(), weeks: 5)
-        return PlanFitSignal.evaluate(weeklyPeaks: peaks)
-    }
-
-    /// Per-project forward-looking share of the weekly limit — see `ProjectWeeklyForecast`.
-    var projectWeeklyForecast: [ProjectWeeklyForecast.Item] {
-        guard let w = liveWeekly, let allowance = weeklyAllowance else { return [] }
-        return ProjectWeeklyForecast.forecast(projects: snapshot.weeklyProjectUsage,
-                                              weeklyUtilPct: w.utilization,
-                                              daysRemaining: allowance.daysRemaining)
-    }
-
-    /// "You're burning unusually fast today, FOR YOU" — a personal-baseline nudge
-    /// (see `BurnAnomaly`), distinct from the fixed-threshold advice above.
-    var burnAnomaly: BurnAnomaly.Verdict? {
-        let now = snapshot.generatedAt
-        let todayStr = DateParse.dayString(now)
-        let hoursElapsed = now.timeIntervalSince(Calendar.current.startOfDay(for: now)) / 3600
-        let dated = snapshot.dailyCostHistory.compactMap { dc -> (date: Date, cost: Double)? in
-            guard dc.date != todayStr, let d = DateParse.day(dc.date) else { return nil }
-            return (d, dc.cost)
-        }
-        let (past, isWeekdaySpecific) = BurnAnomaly.personalBaseline(dailyCosts: dated, today: now)
-        return BurnAnomaly.verdict(todayCost: snapshot.todayCost, hoursElapsedToday: hoursElapsed,
-                                   pastDailyCosts: past, isWeekdaySpecific: isWeekdaySpecific)
-    }
-
-    /// "Re-read share has been creeping up lately" — see `CacheEfficiencyTrend`.
-    var cacheEfficiencyTrend: CacheEfficiencyTrend.Verdict? {
-        let now = Date()
-        let samples = CacheEfficiencyHistory.load()
-        let recentCutoff = now.addingTimeInterval(-3 * 86400)      // last 3 days
-        let baselineCutoff = now.addingTimeInterval(-28 * 86400)   // the 4 weeks before that
-        let recent = samples.filter { $0.at >= recentCutoff }.map(\.freshShare)
-        let baseline = samples.filter { $0.at >= baselineCutoff && $0.at < recentCutoff }.map(\.freshShare)
-        return CacheEfficiencyTrend.verdict(recentShares: recent, baselineShares: baseline)
-    }
-
-    /// Your personal "usual speed at this hour" — see `HourlyBurnHistory`. nil
-    /// until enough same-hour history has accumulated (no false personalization
-    /// from day one).
-    var typicalHourRate: Double? {
-        let hour = Calendar.current.component(.hour, from: snapshot.generatedAt)
-        return HourlyBurnHistory.typicalRate(forHour: hour, in: HourlyBurnHistory.load())
-    }
-
-    /// The project driving most of this week's spend, when one clearly dominates —
-    /// feeds the weekly-defer tip's "왜" context. nil when usage is spread out or
-    /// there's no weekly data yet.
-    var topWeeklyProject: (name: String, sharePct: Double)? {
-        let projects = snapshot.weeklyProjectUsage
-        let totalCost = projects.reduce(0.0) { $0 + $1.cost }
-        guard totalCost > 0.01, let top = projects.first else { return nil }
-        return (top.project, top.cost / totalCost * 100)
-    }
-
-    /// Diagnostics panel's manual fix: clears the cached access token (forcing a
-    /// fresh Keychain read next time) and any exponential backoff, then retries
-    /// immediately — for when the automatic recovery (timeout + next tick) isn't
-    /// enough and the user just wants to force a clean attempt right now.
-    func resetCredentialsAndRetry() {
-        ClaudeCredentials.invalidate()
-        OAuthUsageClient.resetBackoff()
-        // Force-clear a possibly-stuck in-flight cycle: this button exists
-        // specifically for when the automatic recovery hasn't kicked in, so it
-        // must not be silently swallowed by refresh()'s own `!isRefreshing` guard
-        // the way every other caller correctly is. Safe — the abandoned old Task,
-        // if one is still running, simply has its result discarded when it
-        // eventually (if ever) finishes, same as any other timed-out cycle.
-        isRefreshing = false
-        refresh(force: true)
-    }
-
-    /// Whether the live-limits endpoint is currently being backed off from after
-    /// consecutive failures, and when the next attempt is allowed — see
-    /// `OAuthUsageClient.backoffStatus()`.
-    var liveLimitsBackoff: (isBackingOff: Bool, retryAt: Date?) { OAuthUsageClient.backoffStatus() }
-
-    /// The last few notifications CBar has posted (newest first) — a safety net
-    /// for passive/no-banner ones and anything missed while away. See `NotificationLog`.
-    var recentNotifications: [NotificationLogEntry] {
-        // compacted() so pre-dedup historical duplicates already on disk disappear
-        // from the list on next open, not only after the next new notification.
-        NotificationLog.compacted(NotificationLog.load()).reversed()
-    }
-
-    /// Per-model burn comparison for the current 5-hour window.
-    var modelBurnRows: [ModelBurnRow] {
-        ModelBurn.rows(window: snapshot.windowByModel,
-                       sessionUtil: limits?.session5h?.utilization,
-                       basis: burnBasis)
-    }
-
-    /// Retrospective right-sizing read on the dominant model in the 5h window.
-    var modelRecap: ModelRecap.Verdict? {
-        ModelRecap.verdict(window: snapshot.windowByModel)
-    }
-
-    /// Highest of the live session/weekly utilizations, or nil if unavailable.
-    /// Expired windows (reset boundary passed) don't count — see `liveSession`.
-    var maxLimitUtilization: Double? {
-        let vals = [liveSession?.utilization, liveWeekly?.utilization].compactMap { $0 }
-        return vals.max()
-    }
-
-    /// True when a live limit has crossed the warning threshold — drives the
-    /// menu-bar warning icon/color.
-    var isOverThreshold: Bool {
-        (maxLimitUtilization ?? 0) >= Double(warnThreshold)
-    }
-
-    /// True when you're currently rate-limited: a `rejected` status or a window at
-    /// 100%. Drives the menu-bar "blocked" glyph, red tint, and the keep-awake
-    /// assertion. A cached `rejected` is only trusted while some un-expired window
-    /// backs it — a stale overnight "blocked" otherwise held keep-awake all night
-    /// for a limit that had already reset.
-    var isBlocked: Bool {
-        if (maxLimitUtilization ?? 0) >= 100 { return true }
-        return limits?.status == "rejected" && (liveSession != nil || liveWeekly != nil)
-    }
-
-    /// Whether we're close enough to a limit to warrant the tighter refresh cadence
-    /// + fresher fetches: blocked, over the warn threshold, or projected to exhaust.
-    var isAtLimitRisk: Bool {
-        isBlocked || isOverThreshold || sessionProjection?.verdict == .atRisk
-    }
-
-    /// Menu-bar tint: green (safe) → orange (warning) → red (nearly out), based on
-    /// the utilization relevant to the chosen bar metric.
-    var barColor: Color {
-        if isBlocked { return .red }
-        let shown: Double?
-        switch barMetric {
-        case .sessionLimit: shown = liveSession?.utilization
-        case .weeklyLimit:  shown = liveWeekly?.utilization
-        case .bothLimits:   shown = maxLimitUtilization
-        default:            return isOverThreshold ? .orange : .primary
-        }
-        // The warning glyph keys on the WORST window (isOverThreshold) — don't let
-        // the tint contradict it by following only the displayed metric (a safe-green
-        // "12%" next to a triangle raised by the weekly window at 85%).
-        let effective: Double? = isOverThreshold ? max(shown ?? 0, maxLimitUtilization ?? 0) : shown
-        guard let u = effective else { return .primary }
-        if u >= 95 { return .red }
-        if u >= Double(warnThreshold) { return .orange }
-        return .green
-    }
+    static let idleInterval: TimeInterval = 300
+    static let urgentIdleInterval: TimeInterval = 60
+    var popoverVisible = false
 }
