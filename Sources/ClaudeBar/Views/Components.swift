@@ -275,21 +275,28 @@ struct WeeklyAllowanceLine: View {
             : "\(Int((budget.daysRemaining * 24).rounded()))시간"
     }
 
+    /// e.g. " (평일만 따지면 ~56%)" — only present when a weekend in the
+    /// remaining window makes the calendar-day number look falsely safe.
+    private var workdayNote: String {
+        guard let w = budget.recommendedPctPerWorkday else { return "" }
+        return " (평일만 따지면 ~\(Int(w.rounded()))%)"
+    }
+
     private var state: (text: String, color: Color, icon: String) {
-        let rec = Int(budget.recommendedPctPerDay.rounded())
+        let rec = "~\(Int(budget.recommendedPctPerDay.rounded()))%\(workdayNote)"
         guard let used = budget.usedTodayPct else {
-            return ("남은 \(daysText) · 하루 권장 ~\(rec)%", .secondary, "calendar.badge.clock")
+            return ("남은 \(daysText) · 하루 권장 \(rec)", .secondary, "calendar.badge.clock")
         }
         let usedPct = Int(used.rounded())
         if used >= 3, used >= budget.recommendedPctPerDay * 1.15 {
-            return ("남은 \(daysText) · 하루 권장 ~\(rec)% · 오늘 이미 \(usedPct)% — 빠른 편",
+            return ("남은 \(daysText) · 하루 권장 \(rec) · 오늘 이미 \(usedPct)% — 빠른 편",
                     .orange, "hare.fill")
         }
         if budget.recommendedPctPerDay >= 1, used <= budget.recommendedPctPerDay * 0.5 {
-            return ("남은 \(daysText) · 하루 권장 ~\(rec)% · 오늘 \(usedPct)% — 여유 있어요",
+            return ("남은 \(daysText) · 하루 권장 \(rec) · 오늘 \(usedPct)% — 여유 있어요",
                     .secondary, "tortoise.fill")
         }
-        return ("남은 \(daysText) · 하루 권장 ~\(rec)% · 오늘 \(usedPct)% — 적정 페이스",
+        return ("남은 \(daysText) · 하루 권장 \(rec) · 오늘 \(usedPct)% — 적정 페이스",
                 .green, "checkmark.circle")
     }
 }

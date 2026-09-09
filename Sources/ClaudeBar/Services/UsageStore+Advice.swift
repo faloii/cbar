@@ -22,7 +22,8 @@ extension UsageStore {
                        warnThreshold: warnThreshold,
                        now: snapshot.generatedAt,
                        typicalHourRate: typicalHourRate,
-                       topWeeklyProject: topWeeklyProject)
+                       topWeeklyProject: topWeeklyProject,
+                       recentSessionRecaps: sessionRecapsToday)
 
         // A rare, positive one-off: reinforce that a past nudge (context/compact)
         // actually helped, rather than only ever warning. See `processAdviceFollowThrough`.

@@ -88,6 +88,9 @@ final class UsageStore: ObservableObject {
     @Published var weeklyTrend: [UsageSample] = []
     /// Efficiency recap of the most-recently-completed session (for the learning loop).
     @Published var lastSessionRecap: SessionCoach.Recap?
+    /// Efficiency recap of every completed session in roughly the last day, oldest →
+    /// newest — lets `Advice` compare consecutive sessions for a feast/famine swing.
+    @Published var sessionRecapsToday: [SessionCoach.Recap] = []
     /// "How much can I safely use today?" reading on the weekly limit.
     @Published var weeklyAllowance: DailyAllowance.Verdict?
     @Published var isRefreshing = false

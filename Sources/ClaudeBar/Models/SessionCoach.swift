@@ -62,21 +62,51 @@ enum SessionCoach {
         var leftover: Double { max(0, 100 - endedAt) } // allowance left unused at reset
     }
 
-    /// Finds the segment before the most recent reset (a downward jump) and summarizes it.
-    /// nil until at least one session has completed within `maxAge`.
-    static func lastSessionRecap(samples: [UsageSample], now: Date, maxAge: TimeInterval = 12 * 3600) -> Recap? {
+    /// Every COMPLETED session segment within `maxAge` (each demarcated by a
+    /// downward jump = reset), oldest → newest — the raw material for spotting a
+    /// feast/famine pattern across today's sessions (see `Advice`'s
+    /// `.sessionImbalance` tip). The still-in-progress segment (no reset since) is
+    /// excluded, same as `lastSessionRecap`. Empty until at least one session has
+    /// completed within `maxAge`. Default matches `UsageHistory`'s own retention
+    /// (~12h) — asking for more than that would just find nothing older anyway.
+    static func recentSessionRecaps(samples: [UsageSample], now: Date, maxAge: TimeInterval = 12 * 3600) -> [Recap] {
         let pts = samples.compactMap { s in s.session.map { (s.at, $0) } }
             .filter { now.timeIntervalSince($0.0) <= maxAge && $0.0 <= now }
             .sorted { $0.0 < $1.0 }
-        guard pts.count >= 2 else { return nil }
-        var resetIdx: Int?
-        for i in stride(from: pts.count - 1, to: 0, by: -1) where pts[i].1 + Projection.resetDrop < pts[i - 1].1 {
-            resetIdx = i; break
+        guard pts.count >= 2 else { return [] }
+        var segments: [[Double]] = [[pts[0].1]]
+        for i in 1..<pts.count {
+            if pts[i].1 + Projection.resetDrop < pts[i - 1].1 { segments.append([]) }
+            segments[segments.count - 1].append(pts[i].1)
         }
-        guard let ri = resetIdx else { return nil }   // no completed session yet
-        let prev = Array(pts[..<ri])
-        guard let endedAt = prev.last?.1 else { return nil }
-        return Recap(peak: prev.map(\.1).max() ?? endedAt, endedAt: endedAt)
+        guard segments.count >= 2 else { return [] }   // no completed session yet — only the in-progress one
+        return segments.dropLast().map { seg in Recap(peak: seg.max() ?? 0, endedAt: seg.last ?? 0) }
+    }
+
+    /// Coarse shape of one completed session, by peak — the same split `Advice`
+    /// uses for its imbalance check, pulled out so streak detection can reuse it.
+    enum RecapShape { case aggressive, idle, even }
+    static func shape(_ r: Recap) -> RecapShape {
+        if r.blocked || r.peak >= 90 { return .aggressive }
+        if r.peak < 55 { return .idle }
+        return .even
+    }
+
+    /// True when the most recent `minRun` sessions strictly alternate between
+    /// aggressive and idle (either direction) — a repeating habit, not a single
+    /// swing. `.even` sessions anywhere in the run break the streak.
+    static func isAlternatingStreak(_ recaps: [Recap], minRun: Int = 3) -> Bool {
+        guard recaps.count >= minRun else { return false }
+        let tail = recaps.suffix(minRun).map(shape)
+        guard tail.allSatisfy({ $0 != .even }) else { return false }
+        return zip(tail, tail.dropFirst()).allSatisfy { $0 != $1 }
+    }
+
+    /// The most recently completed session window (the segment just before the
+    /// latest reset), for the "how did I spend it?" learning loop. nil until at
+    /// least one session has completed within `maxAge`.
+    static func lastSessionRecap(samples: [UsageSample], now: Date, maxAge: TimeInterval = 12 * 3600) -> Recap? {
+        recentSessionRecaps(samples: samples, now: now, maxAge: maxAge).last
     }
 
     static func recapText(_ r: Recap) -> String {

@@ -381,6 +381,47 @@ final class DailyAllowanceTests: XCTestCase {
                                        now: t, todayStartUtil: 80)
         XCTAssertEqual(v?.usedTodayPct ?? -1, 12, accuracy: 0.001)
     }
+
+    private var utcCalendar: Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        return cal
+    }
+
+    // 2024-01-05 is a Friday, 2024-01-06/07 the weekend, 2024-01-08 a Monday.
+    func testRemainingWorkdaysExcludesWeekend() {
+        let fridaySixPM = utcCalendar.date(from: DateComponents(year: 2024, month: 1, day: 5, hour: 18))!
+        let mondayNineAM = utcCalendar.date(from: DateComponents(year: 2024, month: 1, day: 8, hour: 9))!
+        let workdays = DailyAllowance.remainingWorkdays(now: fridaySixPM, resetsAt: mondayNineAM, calendar: utcCalendar)
+        // 6h left of Friday + 9h into Monday = 15h = 0.625 days; the whole weekend is skipped.
+        XCTAssertEqual(workdays, 0.625, accuracy: 0.001)
+    }
+
+    // 2024-01-02/04 is Tue/Thu — no weekend in between.
+    func testRemainingWorkdaysMatchesCalendarDaysWithoutAWeekend() {
+        let tuesday = utcCalendar.date(from: DateComponents(year: 2024, month: 1, day: 2, hour: 9))!
+        let thursday = utcCalendar.date(from: DateComponents(year: 2024, month: 1, day: 4, hour: 9))!
+        let workdays = DailyAllowance.remainingWorkdays(now: tuesday, resetsAt: thursday, calendar: utcCalendar)
+        XCTAssertEqual(workdays, 2.0, accuracy: 0.001)
+    }
+
+    func testVerdictSurfacesWorkdayPaceWhenWeekendIntervenes() {
+        let fridaySixPM = utcCalendar.date(from: DateComponents(year: 2024, month: 1, day: 5, hour: 18))!
+        let mondayNineAM = utcCalendar.date(from: DateComponents(year: 2024, month: 1, day: 8, hour: 9))!
+        let v = DailyAllowance.verdict(util: 50, resetsAt: mondayNineAM, now: fridaySixPM,
+                                       todayStartUtil: nil, calendar: utcCalendar)
+        // Calendar-day pace (~19%/day over 2.625 days) looks much safer than the
+        // workday-only pace (50%/0.625 workdays = 80%/workday) — the whole point.
+        XCTAssertEqual(v?.recommendedPctPerWorkday ?? 0, 80, accuracy: 0.5)
+    }
+
+    func testVerdictOmitsWorkdayPaceWithoutAWeekend() {
+        let tuesday = utcCalendar.date(from: DateComponents(year: 2024, month: 1, day: 2, hour: 9))!
+        let thursday = utcCalendar.date(from: DateComponents(year: 2024, month: 1, day: 4, hour: 9))!
+        let v = DailyAllowance.verdict(util: 50, resetsAt: thursday, now: tuesday,
+                                       todayStartUtil: nil, calendar: utcCalendar)
+        XCTAssertNil(v?.recommendedPctPerWorkday)
+    }
 }
 
 final class ModelBurnTests: XCTestCase {
@@ -733,6 +774,57 @@ final class AdviceTests: XCTestCase {
             .contains { $0.kind == .contextHeavy })
     }
 
+    func testSessionImbalanceTipWhenAggressiveThenWasted() {
+        let recaps = [SessionCoach.Recap(peak: 99, endedAt: 99), SessionCoach.Recap(peak: 20, endedAt: 15)]
+        let tips = Advice.compute(session: nil, weekly: nil, sessionUtil: nil, weeklyUtil: nil,
+                                  models: [], warnThreshold: 80, now: now, recentSessionRecaps: recaps)
+        let tip = tips.first { $0.kind == .sessionImbalance }
+        XCTAssertEqual(tip?.level, .info)
+        XCTAssertTrue(tip?.text.contains("99%") ?? false)
+    }
+
+    func testSessionImbalanceTipWhenIdleThenAggressive() {
+        let recaps = [SessionCoach.Recap(peak: 30, endedAt: 25), SessionCoach.Recap(peak: 95, endedAt: 95)]
+        let tips = Advice.compute(session: nil, weekly: nil, sessionUtil: nil, weeklyUtil: nil,
+                                  models: [], warnThreshold: 80, now: now, recentSessionRecaps: recaps)
+        let tip = tips.first { $0.kind == .sessionImbalance }
+        XCTAssertEqual(tip?.level, .warn)
+    }
+
+    func testSessionImbalanceGroundsReassuranceInLiveSession() {
+        let recaps = [SessionCoach.Recap(peak: 99, endedAt: 99), SessionCoach.Recap(peak: 20, endedAt: 15)]
+        let live = Projection(ratePerHour: 2, timeToFull: nil, secondsToReset: 7200, verdict: .idle)
+        let tips = Advice.compute(session: live, weekly: nil, sessionUtil: 8, weeklyUtil: nil,
+                                  models: [], warnThreshold: 80, now: now, recentSessionRecaps: recaps)
+        let tip = tips.first { $0.kind == .sessionImbalance }
+        XCTAssertTrue(tip?.text.contains("지금 세션은 아직 8%") ?? false)
+    }
+
+    func testSessionImbalanceOmitsLiveNoteWhenLiveSessionAtRisk() {
+        let recaps = [SessionCoach.Recap(peak: 99, endedAt: 99), SessionCoach.Recap(peak: 20, endedAt: 15)]
+        let live = Projection(ratePerHour: 40, timeToFull: 1800, secondsToReset: 7200, verdict: .atRisk)
+        let tips = Advice.compute(session: live, weekly: nil, sessionUtil: 70, weeklyUtil: nil,
+                                  models: [], warnThreshold: 80, now: now, recentSessionRecaps: recaps)
+        let tip = tips.first { $0.kind == .sessionImbalance }
+        XCTAssertFalse(tip?.text.contains("지금 세션은") ?? true)
+    }
+
+    func testSessionImbalanceNotesRepeatingStreak() {
+        let recaps = [SessionCoach.Recap(peak: 20, endedAt: 15), SessionCoach.Recap(peak: 99, endedAt: 99),
+                      SessionCoach.Recap(peak: 20, endedAt: 15)]
+        let tips = Advice.compute(session: nil, weekly: nil, sessionUtil: nil, weeklyUtil: nil,
+                                  models: [], warnThreshold: 80, now: now, recentSessionRecaps: recaps)
+        let tip = tips.first { $0.kind == .sessionImbalance }
+        XCTAssertTrue(tip?.text.contains("습관이 된 것 같아요") ?? false)
+    }
+
+    func testNoSessionImbalanceTipWhenEven() {
+        let recaps = [SessionCoach.Recap(peak: 70, endedAt: 65), SessionCoach.Recap(peak: 75, endedAt: 70)]
+        let tips = Advice.compute(session: nil, weekly: nil, sessionUtil: nil, weeklyUtil: nil,
+                                  models: [], warnThreshold: 80, now: now, recentSessionRecaps: recaps)
+        XCTAssertFalse(tips.contains { $0.kind == .sessionImbalance })
+    }
+
     func testCapsAtThreeTips() {
         let atRisk = Projection(ratePerHour: 40, timeToFull: 600, secondsToReset: 7200, verdict: .atRisk)
         let models = [model("Opus 4.8", total: 500_000, requests: 5, cost: 300),
@@ -859,14 +951,13 @@ final class SessionCoachTests: XCTestCase {
 
     func testLastSessionRecapFindsSegmentBeforeReset() {
         let s: [UsageSample] = [
-            UsageSample(at: now.addingTimeInterval(-4 * 3600), session: 30, weekly: nil),
-            UsageSample(at: now.addingTimeInterval(-3 * 3600), session: 88, weekly: nil),  // peak of prev session
-            UsageSample(at: now.addingTimeInterval(-2.5 * 3600), session: 70, weekly: nil),// ended here
-            UsageSample(at: now.addingTimeInterval(-2 * 3600), session: 5, weekly: nil),   // reset (drop)
+            UsageSample(at: now.addingTimeInterval(-3 * 3600), session: 30, weekly: nil),
+            UsageSample(at: now.addingTimeInterval(-2.5 * 3600), session: 70, weekly: nil), // peak, ended here
+            UsageSample(at: now.addingTimeInterval(-2 * 3600), session: 5, weekly: nil),    // reset (drop)
             UsageSample(at: now.addingTimeInterval(-1 * 3600), session: 20, weekly: nil),
         ]
         let r = SessionCoach.lastSessionRecap(samples: s, now: now)
-        XCTAssertEqual(r?.peak, 88)
+        XCTAssertEqual(r?.peak, 70)
         XCTAssertEqual(r?.endedAt, 70)
         XCTAssertFalse(r?.blocked ?? true)
         XCTAssertEqual(r?.leftover ?? 0, 30, accuracy: 0.001)
@@ -878,6 +969,49 @@ final class SessionCoachTests: XCTestCase {
             UsageSample(at: now.addingTimeInterval(-1 * 3600), session: 40, weekly: nil),
         ]
         XCTAssertNil(SessionCoach.lastSessionRecap(samples: s, now: now))
+    }
+
+    func testRecentSessionRecapsListsEachCompletedSegment() {
+        let s: [UsageSample] = [
+            UsageSample(at: now.addingTimeInterval(-10 * 3600), session: 20, weekly: nil),
+            UsageSample(at: now.addingTimeInterval(-9 * 3600), session: 99, weekly: nil),   // session 1 peak
+            UsageSample(at: now.addingTimeInterval(-8 * 3600), session: 6, weekly: nil),    // reset
+            UsageSample(at: now.addingTimeInterval(-7 * 3600), session: 15, weekly: nil),   // session 2 ended low
+            UsageSample(at: now.addingTimeInterval(-2 * 3600), session: 3, weekly: nil),    // reset
+            UsageSample(at: now.addingTimeInterval(-1 * 3600), session: 40, weekly: nil),   // in progress, excluded
+        ]
+        let recaps = SessionCoach.recentSessionRecaps(samples: s, now: now)
+        XCTAssertEqual(recaps.count, 2)
+        XCTAssertEqual(recaps[0].peak, 99)
+        XCTAssertTrue(recaps[0].blocked)
+        XCTAssertEqual(recaps[1].peak, 15)
+        XCTAssertEqual(recaps[1].endedAt, 15)
+        XCTAssertEqual(recaps.last, SessionCoach.lastSessionRecap(samples: s, now: now))
+    }
+
+    func testIsAlternatingStreakDetectsRepeatingSwing() {
+        let recaps = [SessionCoach.Recap(peak: 30, endedAt: 25), SessionCoach.Recap(peak: 95, endedAt: 95),
+                      SessionCoach.Recap(peak: 20, endedAt: 15), SessionCoach.Recap(peak: 99, endedAt: 99)]
+        XCTAssertTrue(SessionCoach.isAlternatingStreak(recaps))
+    }
+
+    func testIsAlternatingStreakFalseWhenEvenSessionBreaksIt() {
+        let recaps = [SessionCoach.Recap(peak: 30, endedAt: 25), SessionCoach.Recap(peak: 70, endedAt: 65),
+                      SessionCoach.Recap(peak: 95, endedAt: 95)]
+        XCTAssertFalse(SessionCoach.isAlternatingStreak(recaps))
+    }
+
+    func testIsAlternatingStreakFalseWithTooFewSessions() {
+        let recaps = [SessionCoach.Recap(peak: 30, endedAt: 25), SessionCoach.Recap(peak: 95, endedAt: 95)]
+        XCTAssertFalse(SessionCoach.isAlternatingStreak(recaps))
+    }
+
+    func testRecentSessionRecapsEmptyWithoutACompletedSession() {
+        let s: [UsageSample] = [
+            UsageSample(at: now.addingTimeInterval(-2 * 3600), session: 10, weekly: nil),
+            UsageSample(at: now.addingTimeInterval(-1 * 3600), session: 40, weekly: nil),
+        ]
+        XCTAssertEqual(SessionCoach.recentSessionRecaps(samples: s, now: now), [])
     }
 
     func testEfficiencyVerdict() {

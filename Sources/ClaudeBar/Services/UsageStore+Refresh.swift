@@ -111,7 +111,7 @@ extension UsageStore {
     func recomputeProjections() {
         guard enableLiveLimits else {
             sessionProjection = nil; weeklyProjection = nil; sessionTrend = []; weeklyTrend = []
-            lastSessionRecap = nil; weeklyAllowance = nil; return
+            lastSessionRecap = nil; sessionRecapsToday = []; weeklyAllowance = nil; return
         }
         let now = Date()
         let samples = UsageHistory.load()
@@ -121,7 +121,8 @@ extension UsageStore {
         // Weekly trend: from the coarser, longer-retention store (8 days), not the
         // short-lived `UsageHistory` ring buffer.
         weeklyTrend = WeeklyHistory.load().filter { $0.weekly != nil }.sorted { $0.at < $1.at }
-        lastSessionRecap = SessionCoach.lastSessionRecap(samples: samples, now: now)
+        sessionRecapsToday = SessionCoach.recentSessionRecaps(samples: samples, now: now)
+        lastSessionRecap = sessionRecapsToday.last
         // Session = rolling 5h window → recent burst rate.
         sessionProjection = Projection.compute(points: samples.compactMap { s in s.session.map { (s.at, $0) } },
                                                resetsAt: liveSession?.resetsAt, now: now)
