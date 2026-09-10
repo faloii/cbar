@@ -86,11 +86,13 @@ final class UsageStore: ObservableObject {
     @Published var sessionTrend: [UsageSample] = []
     /// Weekly-utilization samples over the last ~8 days — the within-week usage trend.
     @Published var weeklyTrend: [UsageSample] = []
-    /// Efficiency recap of the most-recently-completed session (for the learning loop).
-    @Published var lastSessionRecap: SessionCoach.Recap?
-    /// Efficiency recap of every completed session in roughly the last day, oldest →
+    /// Efficiency recap of every completed session in roughly the last 12h, oldest →
     /// newest — lets `Advice` compare consecutive sessions for a feast/famine swing.
     @Published var sessionRecapsToday: [SessionCoach.Recap] = []
+    /// The most-recently-completed session (for the learning loop) — always just
+    /// `sessionRecapsToday.last`; kept as a computed property so the two can't
+    /// drift out of sync the way two independently-set `@Published` vars could.
+    var lastSessionRecap: SessionCoach.Recap? { sessionRecapsToday.last }
     /// "How much can I safely use today?" reading on the weekly limit.
     @Published var weeklyAllowance: DailyAllowance.Verdict?
     @Published var isRefreshing = false

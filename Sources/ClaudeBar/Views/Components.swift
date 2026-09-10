@@ -161,6 +161,11 @@ struct RingGauge: View {
     var preciseReset: Bool = false    // always show hours+minutes+clock (session); weekly/Opus
                                        // still switch to this automatically once under a day out
 
+    /// Below this much time-to-reset, the countdown alone ("리셋 18h") stops being
+    /// enough to tell whether that's tonight or tomorrow afternoon — pair it with
+    /// the actual clock time instead, same as `preciseReset` always does.
+    static let preciseResetWindow: TimeInterval = 24 * 3600
+
     private var color: Color { MeterBar.color(for: window.fraction) }
 
     var body: some View {
@@ -196,7 +201,7 @@ struct RingGauge: View {
                     // single-unit ("리셋 6d") UNTIL the reset is under a day out, at which
                     // point the exact clock time becomes worth showing there too — "리셋
                     // 18h" doesn't tell you whether that's tonight or tomorrow afternoon.
-                    let showPrecise = preciseReset || reset.timeIntervalSince(now) < 24 * 3600
+                    let showPrecise = preciseReset || reset.timeIntervalSince(now) < Self.preciseResetWindow
                     Text(showPrecise
                          ? "리셋 \(Fmt.mediumCountdown(to: reset, from: now)) (\(Fmt.clock(reset)))"
                          : "리셋 \(Fmt.shortCountdown(to: reset, from: now))")
@@ -592,37 +597,41 @@ struct TodaySessionsBar: View {
     let liveUtilization: Double?            // the in-progress session's %, if any
     var height: CGFloat = 28
 
-    private var barCount: Int { recaps.count + (liveUtilization != nil ? 1 : 0) }
+    /// Single source of truth for both the rendered bars and the accessibility
+    /// summary below — one shared traversal so the two can't drift apart (a bar
+    /// changed here without updating a second, separate label-building pass).
+    private var items: [(pct: Double, hollow: Bool)] {
+        recaps.map { ($0.peak, false) } + (liveUtilization.map { [($0, true)] } ?? [])
+    }
 
     var body: some View {
-        if barCount >= 2 {
+        let items = self.items
+        if items.count >= 2 {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .bottom, spacing: 4) {
-                    ForEach(Array(recaps.enumerated()), id: \.offset) { _, r in
-                        bar(pct: r.peak, hollow: false)
-                    }
-                    if let live = liveUtilization {
-                        bar(pct: live, hollow: true)
+                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                        bar(pct: item.pct, hollow: item.hollow)
                     }
                 }
                 .frame(height: height, alignment: .bottom)
-                Text("오늘 세션 \(barCount)개 · 진행 중인 세션은 점선")
+                // "최근" not "오늘" — this covers UsageHistory's ~12h retention,
+                // which can span into the previous calendar day late at night.
+                Text("최근 세션 \(items.count)개 · 진행 중인 세션은 점선")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
             // NOT purely decorative — unlike the advice text (which only ever
-            // compares the last two sessions), this is the only place today's
+            // compares the last two sessions), this is the only place the
             // FULL session-by-session peak history is exposed, so hiding it
             // entirely would leave VoiceOver users with strictly less
             // information than sighted ones. Collapse it into one label instead.
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(accessibilitySummary)
+            .accessibilityLabel(accessibilitySummary(items))
         }
     }
 
-    private var accessibilitySummary: String {
-        var parts = recaps.map { "\(Int($0.peak.rounded()))%" }
-        if let live = liveUtilization { parts.append("진행 중 \(Int(live.rounded()))%") }
-        return "오늘 세션 \(barCount)개, 시간순으로 최고 사용률 \(parts.joined(separator: ", "))"
+    private func accessibilitySummary(_ items: [(pct: Double, hollow: Bool)]) -> String {
+        let parts = items.map { $0.hollow ? "진행 중 \(Int($0.pct.rounded()))%" : "\(Int($0.pct.rounded()))%" }
+        return "최근 세션 \(items.count)개, 시간순으로 최고 사용률 \(parts.joined(separator: ", "))"
     }
 
     @ViewBuilder

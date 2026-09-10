@@ -818,6 +818,37 @@ final class AdviceTests: XCTestCase {
         XCTAssertTrue(tip?.text.contains("습관이 된 것 같아요") ?? false)
     }
 
+    func testSessionImbalanceUsesShapeNotRawLeftoverThreshold() {
+        // last peaked/ended at 58% — .even by SessionCoach.shape() (not < 55), so
+        // the imbalance tip should NOT fire even though leftover (42) used to clear
+        // the old ad hoc >= 40 threshold on its own.
+        let recaps = [SessionCoach.Recap(peak: 99, endedAt: 99), SessionCoach.Recap(peak: 58, endedAt: 58)]
+        let tips = Advice.compute(session: nil, weekly: nil, sessionUtil: nil, weeklyUtil: nil,
+                                  models: [], warnThreshold: 80, now: now, recentSessionRecaps: recaps)
+        XCTAssertFalse(tips.contains { $0.kind == .sessionImbalance })
+    }
+
+    func testSessionImbalanceOmitsLiveNoteWhileMeasuring() {
+        let recaps = [SessionCoach.Recap(peak: 99, endedAt: 99), SessionCoach.Recap(peak: 20, endedAt: 15)]
+        let tips = Advice.compute(session: .measuring, weekly: nil, sessionUtil: 3, weeklyUtil: nil,
+                                  models: [], warnThreshold: 80, now: now, recentSessionRecaps: recaps)
+        let tip = tips.first { $0.kind == .sessionImbalance }
+        XCTAssertFalse(tip?.text.contains("지금 세션은") ?? true)
+    }
+
+    func testWeeklyDeferSurvivesCapWithSessionImbalancePresent() {
+        // Before the fix, sessionPacing + contextHeavy + sessionImbalance alone
+        // filled the 3-slot cap, silently dropping weeklyDefer. Weekly is now
+        // computed first so it keeps its seat.
+        let atRisk = Projection(ratePerHour: 40, timeToFull: 600, secondsToReset: 7200, verdict: .atRisk)
+        let wk = Projection(ratePerHour: 2, timeToFull: 1000, secondsToReset: 3 * 24 * 3600, verdict: .atRisk)
+        let recaps = [SessionCoach.Recap(peak: 99, endedAt: 99), SessionCoach.Recap(peak: 20, endedAt: 15)]
+        let tips = Advice.compute(session: atRisk, weekly: wk, sessionUtil: 90, weeklyUtil: 92,
+                                  models: [], contextTokens: 150_000, warnThreshold: 80, now: now,
+                                  recentSessionRecaps: recaps)
+        XCTAssertTrue(tips.contains { $0.kind == .weeklyDefer })
+    }
+
     func testNoSessionImbalanceTipWhenEven() {
         let recaps = [SessionCoach.Recap(peak: 70, endedAt: 65), SessionCoach.Recap(peak: 75, endedAt: 70)]
         let tips = Advice.compute(session: nil, weekly: nil, sessionUtil: nil, weeklyUtil: nil,

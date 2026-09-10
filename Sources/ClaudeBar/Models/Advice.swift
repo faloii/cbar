@@ -106,42 +106,12 @@ enum Advice {
                     + "/compact 하거나 새 대화로 시작하면 같은 한도로 더 오래 갈 수 있어요."))
         }
 
-        // 3.6) Session-to-session imbalance — the "몰아쓰고 나서 못 씀" (or reverse)
-        //      pattern: compare the two most recently COMPLETED sessions (today's
-        //      rhythm), named "두 세션 전" / "지난 세션" so neither is mistaken for
-        //      the LIVE session. Silent when they're roughly even — most days ARE —
-        //      so this only speaks up when the two neighbors genuinely swing against
-        //      each other. A 3+-session alternating streak gets called out as a
-        //      repeating habit rather than a one-off.
-        if recentSessionRecaps.count >= 2 {
-            let prev = recentSessionRecaps[recentSessionRecaps.count - 2]
-            let last = recentSessionRecaps[recentSessionRecaps.count - 1]
-            let prevShape = SessionCoach.shape(prev)
-            let lastAggressive = SessionCoach.shape(last) == .aggressive
-            let streakNote = SessionCoach.isAlternatingStreak(recentSessionRecaps)
-                ? " 오늘 계속 이런 식으로 왔다갔다 하고 있어요 — 습관이 된 것 같아요."
-                : ""
-            if prevShape == .aggressive, last.leftover >= 40 {
-                var text = "두 세션 전엔 한도를 거의 다 썼는데(최고 \(Int(prev.peak.rounded()))%) 지난 세션은 \(Int(last.leftover.rounded()))%P 남기고 끝났어요. "
-                    + "몰아쓴 뒤 움츠러드는 패턴이니, 다음엔 좀 더 고르게 나눠 써도 됩니다."
-                // Ground the reassurance in the LIVE session, not just generic
-                // advice — a fresh, calm window is the actual reason not to worry.
-                if let u = sessionUtil, let s = session, s.verdict != .atRisk {
-                    text += " 지금 세션은 아직 \(Int(u.rounded()))%밖에 안 썼으니 편하게 쓰세요."
-                }
-                tips.append(AdviceTip(kind: .sessionImbalance, level: .info, icon: "arrow.up.arrow.down",
-                    text: text + streakNote))
-            } else if prevShape == .idle, lastAggressive {
-                let text = "두 세션 전엔 최고 \(Int(prev.peak.rounded()))%만 쓰고 끝났는데 지난 세션은 한도에 바짝 붙었어요. "
-                    + "아낀 만큼 몰아 쓴 거면 괜찮지만, 아니라면 페이스를 확인해보세요."
-                tips.append(AdviceTip(kind: .sessionImbalance, level: .warn, icon: "arrow.up.arrow.down",
-                    text: text + streakNote))
-            }
-        }
-
         // 4) Weekly — defer big work; sharper when the pace will blow the week.
         //    Name the driving project when one dominates — "왜 이렇게 빠듯하지?" is
         //    a lot more actionable as "OO 프로젝트가 대부분이에요" than a bare %.
+        //    Computed BEFORE the session-imbalance tip below so it keeps priority
+        //    for the `prefix(3)` cap — the weekly warning matters more than a
+        //    same-day pacing observation and shouldn't lose its seat to one.
         var projectNote = ""
         if let p = topWeeklyProject, p.sharePct >= 50 {
             projectNote = " 이번 주는 주로 \(p.name) 프로젝트가 원인이에요(\(Int(p.sharePct.rounded()))%)."
@@ -154,6 +124,43 @@ enum Advice {
             } else {
                 tips.append(AdviceTip(kind: .weeklyDefer, level: .warn, icon: "calendar",
                     text: "주간 한도 \(Int(wu.rounded()))% — \(dur(weekly?.secondsToReset)) 후 리셋. 큰 작업은 리셋 후가 안전해요.\(projectNote)"))
+            }
+        }
+
+        // 4.5) Session-to-session imbalance — the "몰아쓰고 나서 못 씀" (or reverse)
+        //      pattern: compare the two most recently COMPLETED sessions (recent
+        //      rhythm — within the ~12h `UsageHistory` retains, not strictly "오늘"
+        //      since that can span into the previous calendar day late at night),
+        //      named "두 세션 전" / "지난 세션" so neither is mistaken for the LIVE
+        //      session. Silent when they're roughly even — most days ARE — so this
+        //      only speaks up when the two neighbors genuinely swing against each
+        //      other. A 3+-session alternating streak gets called out as a
+        //      repeating habit rather than a one-off.
+        if recentSessionRecaps.count >= 2 {
+            let prev = recentSessionRecaps[recentSessionRecaps.count - 2]
+            let last = recentSessionRecaps[recentSessionRecaps.count - 1]
+            let prevShape = SessionCoach.shape(prev)
+            let lastShape = SessionCoach.shape(last)
+            let streakNote = SessionCoach.isAlternatingStreak(recentSessionRecaps)
+                ? " 최근 계속 이런 식으로 왔다갔다 하고 있어요 — 습관이 된 것 같아요."
+                : ""
+            if prevShape == .aggressive, lastShape == .idle {
+                var text = "두 세션 전엔 한도를 거의 다 썼는데(최고 \(Int(prev.peak.rounded()))%) 지난 세션은 \(Int(last.leftover.rounded()))%P 남기고 끝났어요. "
+                    + "몰아쓴 뒤 움츠러드는 패턴이니, 다음엔 좀 더 고르게 나눠 써도 됩니다."
+                // Ground the reassurance in the LIVE session, not just generic
+                // advice — a fresh, calm window is the actual reason not to worry.
+                // Only when the live session is CONFIRMED calm (.safe/.idle), not
+                // merely "not yet known to be atRisk" (.measuring has no signal yet).
+                if let u = sessionUtil, let s = session, s.verdict == .safe || s.verdict == .idle {
+                    text += " 지금 세션은 아직 \(Int(u.rounded()))%밖에 안 썼으니 편하게 쓰세요."
+                }
+                tips.append(AdviceTip(kind: .sessionImbalance, level: .info, icon: "arrow.up.arrow.down",
+                    text: text + streakNote))
+            } else if prevShape == .idle, lastShape == .aggressive {
+                let text = "두 세션 전엔 최고 \(Int(prev.peak.rounded()))%만 쓰고 끝났는데 지난 세션은 한도에 바짝 붙었어요. "
+                    + "아낀 만큼 몰아 쓴 거면 괜찮지만, 아니라면 페이스를 확인해보세요."
+                tips.append(AdviceTip(kind: .sessionImbalance, level: .warn, icon: "arrow.up.arrow.down",
+                    text: text + streakNote))
             }
         }
 
