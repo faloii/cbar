@@ -609,8 +609,20 @@ struct TodaySessionsBar: View {
                 Text("오늘 세션 \(barCount)개 · 진행 중인 세션은 점선")
                     .font(.caption2).foregroundStyle(.tertiary)
             }
-            .accessibilityHidden(true)   // decorative; the same numbers are in the advice text
+            // NOT purely decorative — unlike the advice text (which only ever
+            // compares the last two sessions), this is the only place today's
+            // FULL session-by-session peak history is exposed, so hiding it
+            // entirely would leave VoiceOver users with strictly less
+            // information than sighted ones. Collapse it into one label instead.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(accessibilitySummary)
         }
+    }
+
+    private var accessibilitySummary: String {
+        var parts = recaps.map { "\(Int($0.peak.rounded()))%" }
+        if let live = liveUtilization { parts.append("진행 중 \(Int(live.rounded()))%") }
+        return "오늘 세션 \(barCount)개, 시간순으로 최고 사용률 \(parts.joined(separator: ", "))"
     }
 
     @ViewBuilder
