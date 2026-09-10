@@ -158,7 +158,8 @@ struct RingGauge: View {
     let now: Date
     var paceFraction: Double? = nil   // even-usage marker ("on this much by now")
     var size: CGFloat = 66
-    var preciseReset: Bool = false    // show hours+minutes (session) vs a single unit (weekly)
+    var preciseReset: Bool = false    // always show hours+minutes+clock (session); weekly/Opus
+                                       // still switch to this automatically once under a day out
 
     private var color: Color { MeterBar.color(for: window.fraction) }
 
@@ -190,9 +191,13 @@ struct RingGauge: View {
             VStack(spacing: 1) {
                 Text(title).font(.caption.weight(.semibold))
                 if let reset = window.resetsAt {
-                    // Session (preciseReset): show the countdown *and* the actual reset
-                    // clock time, e.g. "리셋 1h 18m (15:30)". Weekly/Opus stay single-unit.
-                    Text(preciseReset
+                    // Session (preciseReset) always shows the countdown *and* the actual
+                    // reset clock time, e.g. "리셋 1h 18m (15:30)". Weekly/Opus stay
+                    // single-unit ("리셋 6d") UNTIL the reset is under a day out, at which
+                    // point the exact clock time becomes worth showing there too — "리셋
+                    // 18h" doesn't tell you whether that's tonight or tomorrow afternoon.
+                    let showPrecise = preciseReset || reset.timeIntervalSince(now) < 24 * 3600
+                    Text(showPrecise
                          ? "리셋 \(Fmt.mediumCountdown(to: reset, from: now)) (\(Fmt.clock(reset)))"
                          : "리셋 \(Fmt.shortCountdown(to: reset, from: now))")
                         .font(.caption2).foregroundStyle(.tertiary)
