@@ -339,6 +339,8 @@ struct MenuContentView: View {
                                   secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt))
                     .padding(.top, 4)
             }
+            TodaySessionsBar(recaps: store.sessionRecapsToday, liveUtilization: session?.utilization)
+                .padding(.top, 4)
             if let w = weekly {
                 WeeklyTrendChart(samples: store.weeklyTrend, now: snap.generatedAt,
                                  secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt))

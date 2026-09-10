@@ -576,6 +576,52 @@ struct WeeklyTrendChart: View {
     }
 }
 
+/// Today's sessions at a glance — one bar per COMPLETED session (peak
+/// utilization, same green/amber/red coloring as everywhere else), plus a
+/// hollow dashed bar for the still-in-progress one. Makes a feast/famine
+/// rhythm ("막힐 뻔한 세션 다음에 거의 안 쓴 세션") visible in one glance instead
+/// of only readable from the advice text. Silent when there's nothing to
+/// compare yet (fewer than 2 bars total).
+struct TodaySessionsBar: View {
+    let recaps: [SessionCoach.Recap]        // oldest → newest, completed sessions only
+    let liveUtilization: Double?            // the in-progress session's %, if any
+    var height: CGFloat = 28
+
+    private var barCount: Int { recaps.count + (liveUtilization != nil ? 1 : 0) }
+
+    var body: some View {
+        if barCount >= 2 {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .bottom, spacing: 4) {
+                    ForEach(Array(recaps.enumerated()), id: \.offset) { _, r in
+                        bar(pct: r.peak, hollow: false)
+                    }
+                    if let live = liveUtilization {
+                        bar(pct: live, hollow: true)
+                    }
+                }
+                .frame(height: height, alignment: .bottom)
+                Text("오늘 세션 \(barCount)개 · 진행 중인 세션은 점선")
+                    .font(.caption2).foregroundStyle(.tertiary)
+            }
+            .accessibilityHidden(true)   // decorative; the same numbers are in the advice text
+        }
+    }
+
+    @ViewBuilder
+    private func bar(pct: Double, hollow: Bool) -> some View {
+        let clamped = min(100, max(0, pct))
+        let color = MeterBar.color(for: clamped / 100)
+        RoundedRectangle(cornerRadius: 2)
+            .fill(color.opacity(hollow ? 0.12 : 0.85))
+            .overlay(
+                RoundedRectangle(cornerRadius: 2)
+                    .strokeBorder(color, style: StrokeStyle(lineWidth: 1, dash: hollow ? [2, 2] : []))
+            )
+            .frame(width: 10, height: max(2, height * clamped / 100))
+    }
+}
+
 /// One row of the per-model burn comparison: share bar + tokens/turn + cost +
 /// burn multiplier, with optional "turns left if only this model".
 struct ModelBurnRowView: View {
