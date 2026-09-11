@@ -11,6 +11,7 @@ struct MenuContentView: View {
     @ObservedObject var store: UsageStore
     @State private var contentHeight: CGFloat = 0
     @State private var dropTarget: PanelSection?
+    @State private var trendTab: UnifiedTrendChart.Tab = .session
 
     private var snap: UsageSnapshot { store.snapshot }
 
@@ -322,42 +323,57 @@ struct MenuContentView: View {
                 Text("한도 리셋 직후 — 새 수치 불러오는 중…")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            // Hero: the one-glance "can I keep working?" answer.
+            // Hero: the one-glance "can I keep working?" answer. Collapsed view
+            // stops here — badge + rings + this line is enough to answer "am I
+            // fine?" without reading the pace/reset/chart detail below.
             if let w = session {
                 WorkTimeLine(window: w, projection: store.sessionProjection, now: snap.generatedAt)
                     .padding(.top, 4)
             }
-            // Session group — pace, reset schedule, trend, today's history.
-            // Grouped together (instead of interleaved with the weekly lines
-            // below) so this reads as one "about the 세션 ring" block rather
-            // than a single undifferentiated wall of small gray text.
-            VStack(alignment: .leading, spacing: 3) {
-                if let w = session {
-                    PaceLine(window: w, projection: store.sessionProjection, now: snap.generatedAt)
-                }
-                UpcomingResetsLine(resets: store.upcomingResets)
-            }
-            .padding(.top, 3)
-            if let w = session {
-                SessionTrendChart(samples: store.sessionTrend, now: snap.generatedAt,
-                                  secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt))
-                    .padding(.top, 4)
-            }
-            TodaySessionsBar(recaps: store.sessionRecapsToday, liveUtilization: session?.utilization)
-                .padding(.top, 4)
 
-            // Weekly group — separated by a divider so it reads as its own
-            // section instead of blending into the session detail above.
-            if let w = weekly {
-                Divider().padding(.vertical, 4)
-                VStack(alignment: .leading, spacing: 3) {
-                    ProjectionLine(tag: "주간", window: w, projection: store.weeklyProjection, now: snap.generatedAt)
-                    if let budget = store.weeklyAllowance {
-                        WeeklyAllowanceLine(budget: budget)
-                    }
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) { store.showLimitDetails.toggle() }
+            } label: {
+                HStack(spacing: 3) {
+                    Text(store.showLimitDetails ? "간단히 보기" : "자세히 보기")
+                    Image(systemName: store.showLimitDetails ? "chevron.up" : "chevron.down")
                 }
-                WeeklyTrendChart(samples: store.weeklyTrend, now: snap.generatedAt,
-                                 secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt))
+            }
+            .buttonStyle(.plain)
+            .font(.caption2).foregroundStyle(.secondary)
+            .padding(.top, 4)
+
+            if store.showLimitDetails {
+                // Session group — pace + full reset schedule. Grouped together
+                // (instead of interleaved with the weekly lines below) so this
+                // reads as one "about the 세션 ring" block, not a wall of text.
+                VStack(alignment: .leading, spacing: 3) {
+                    if let w = session {
+                        PaceLine(window: w, projection: store.sessionProjection, now: snap.generatedAt)
+                    }
+                    UpcomingResetsLine(resets: store.upcomingResets)
+                }
+                .padding(.top, 3)
+
+                // Weekly group — pace + today's allowance.
+                if let w = weekly {
+                    VStack(alignment: .leading, spacing: 3) {
+                        ProjectionLine(tag: "주간", window: w, projection: store.weeklyProjection, now: snap.generatedAt)
+                        if let budget = store.weeklyAllowance {
+                            WeeklyAllowanceLine(budget: budget)
+                        }
+                    }
+                    .padding(.top, 6)
+                }
+
+                UnifiedTrendChart(sessionSamples: store.sessionTrend, weeklySamples: store.weeklyTrend,
+                                  now: snap.generatedAt,
+                                  sessionSecondsToReset: session?.resetsAt?.timeIntervalSince(snap.generatedAt),
+                                  weeklySecondsToReset: weekly?.resetsAt?.timeIntervalSince(snap.generatedAt),
+                                  selected: $trendTab)
+                    .padding(.top, 6)
+
+                TodaySessionsBar(recaps: store.sessionRecapsToday, liveUtilization: session?.utilization)
                     .padding(.top, 4)
             }
         } else {

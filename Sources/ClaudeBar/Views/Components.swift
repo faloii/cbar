@@ -593,7 +593,7 @@ struct UsageTrendChart: View {
                         Spacer(minLength: 4)
                         HStack(spacing: 3) {
                             Rectangle().fill(Color.primary.opacity(0.35)).frame(width: 8, height: 1)
-                            Text("이상 페이스")
+                            Text("균등 소진 기준선")
                         }
                     }
                 }
@@ -650,6 +650,41 @@ struct WeeklyTrendChart: View {
         } else {
             Text("주간 추이 측정 중… (데이터가 더 쌓이면 표시)")
                 .font(.caption2).foregroundStyle(.tertiary)
+        }
+    }
+}
+
+/// Session and weekly trends share the same underlying `UsageTrendChart`
+/// engine — `SessionTrendChart`/`WeeklyTrendChart` each just feed it a
+/// different sample set at a different window scale — so there's no real
+/// reason to show both stacked. One shared area, tab-switched instead.
+struct UnifiedTrendChart: View {
+    enum Tab: String, CaseIterable, Identifiable {
+        case session = "세션", weekly = "주간"
+        var id: String { rawValue }
+    }
+
+    let sessionSamples: [UsageSample]
+    let weeklySamples: [UsageSample]
+    let now: Date
+    let sessionSecondsToReset: TimeInterval?
+    let weeklySecondsToReset: TimeInterval?
+    @Binding var selected: Tab
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Picker("", selection: $selected) {
+                ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            switch selected {
+            case .session:
+                SessionTrendChart(samples: sessionSamples, now: now, secondsToReset: sessionSecondsToReset)
+            case .weekly:
+                WeeklyTrendChart(samples: weeklySamples, now: now, secondsToReset: weeklySecondsToReset)
+            }
         }
     }
 }

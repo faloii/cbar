@@ -143,6 +143,12 @@ final class UsageStore: ObservableObject {
     @AppStorage("opusShareTarget") var opusShareTarget: Int = 0 {
         didSet { objectWillChange.send() }
     }
+    /// Progressive disclosure for the 플랜 한도 card: collapsed by default shows
+    /// just the badge + rings + hero line ("am I fine?"); this reveals the pace
+    /// detail, full reset schedule, trend chart, and today's session history.
+    @AppStorage("showLimitDetails") var showLimitDetails: Bool = false {
+        didSet { objectWillChange.send() }
+    }
     /// Comma-joined raw values of hidden sections. Default = lean: show only the
     /// core (advice, limits, recent, today); the analysis cards (per-model burn,
     /// model guide, per-session) are opt-in. Not `private` — `UsageStore+Sections.swift` reads/writes it.
