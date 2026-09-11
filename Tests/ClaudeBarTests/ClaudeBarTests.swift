@@ -192,6 +192,39 @@ final class CompactSuggestionTests: XCTestCase {
     }
 }
 
+final class RiskTierTests: XCTestCase {
+    func testForFractionMatchesMeterBarTiers() {
+        XCTAssertEqual(RiskTier.forFraction(0.3), .safe)
+        XCTAssertEqual(RiskTier.forFraction(0.7), .caution)
+        XCTAssertEqual(RiskTier.forFraction(0.9), .danger)
+    }
+
+    func testForPaceSafeWhenNotAtRisk() {
+        let safe = Projection(ratePerHour: 5, timeToFull: nil, secondsToReset: 3600, verdict: .safe)
+        XCTAssertEqual(RiskTier.forPace(safe, imminentWindow: 3600), .safe)
+        XCTAssertEqual(RiskTier.forPace(nil, imminentWindow: 3600), .safe)
+    }
+
+    func testForPaceDangerWhenExhaustionIsImminent() {
+        let p = Projection(ratePerHour: 40, timeToFull: 1800, secondsToReset: 7200, verdict: .atRisk)
+        XCTAssertEqual(RiskTier.forPace(p, imminentWindow: 3600), .danger)
+    }
+
+    func testForPaceCautionWhenAtRiskButFarOff() {
+        let p = Projection(ratePerHour: 2, timeToFull: 90_000, secondsToReset: 200_000, verdict: .atRisk)
+        XCTAssertEqual(RiskTier.forPace(p, imminentWindow: 3600), .caution)
+    }
+
+    func testCombinedTakesTheMoreSevere() {
+        // Low raw % but an imminent at-risk pace should escalate past "safe".
+        let p = Projection(ratePerHour: 40, timeToFull: 1800, secondsToReset: 7200, verdict: .atRisk)
+        XCTAssertEqual(RiskTier.combined(fraction: 0.49, projection: p, imminentWindow: 3600), .danger)
+        // High raw % should stay danger even with a calm pace.
+        let calm = Projection(ratePerHour: 1, timeToFull: nil, secondsToReset: 3600, verdict: .idle)
+        XCTAssertEqual(RiskTier.combined(fraction: 0.9, projection: calm, imminentWindow: 3600), .danger)
+    }
+}
+
 final class ProjectionTests: XCTestCase {
     let t = Date(timeIntervalSince1970: 1_000_000)
     func mins(_ m: Double) -> Date { t.addingTimeInterval(m * 60) }

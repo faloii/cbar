@@ -32,6 +32,38 @@ enum PaceVerdict: Equatable {
     case atRisk      // at this rate you hit 100% *before* the window resets
 }
 
+/// Blends raw utilization (the green/amber/60/85%-tier split `MeterBar` already
+/// used) with the pace projection, taking whichever is more severe. A ring at
+/// 49% raw is "green" by percentage alone, but if the pace projection says
+/// you're on track to blow through the cap before reset, showing green next
+/// to an orange/red pace warning elsewhere on the same card is misleading —
+/// so an at-risk pace can escalate the color even when the raw % is still low.
+enum RiskTier: Int, Comparable, Equatable {
+    case safe, caution, danger
+    static func < (l: RiskTier, r: RiskTier) -> Bool { l.rawValue < r.rawValue }
+
+    static func forFraction(_ fraction: Double) -> RiskTier {
+        switch fraction {
+        case ..<0.6:  return .safe
+        case ..<0.85: return .caution
+        default:      return .danger
+        }
+    }
+
+    /// `imminentWindow`: how soon "on track to exhaust" counts as `.danger`
+    /// rather than merely `.caution` — pass a short window for a short limit
+    /// window (the 5h session ring) and a longer one for a long one (a day,
+    /// for the 7-day weekly ring), so "imminent" scales with the window itself.
+    static func forPace(_ projection: Projection?, imminentWindow: TimeInterval) -> RiskTier {
+        guard let p = projection, p.verdict == .atRisk, let ttf = p.timeToFull else { return .safe }
+        return ttf <= imminentWindow ? .danger : .caution
+    }
+
+    static func combined(fraction: Double, projection: Projection?, imminentWindow: TimeInterval) -> RiskTier {
+        max(forFraction(fraction), forPace(projection, imminentWindow: imminentWindow))
+    }
+}
+
 /// Burn-rate projection for a single limit window, derived from recent samples.
 struct Projection: Equatable {
     let ratePerHour: Double          // percentage points per hour (>= 0)

@@ -103,17 +103,21 @@ struct CardHeader: View {
 }
 
 /// Horizontal usage meter with a gradient fill that shifts toward red as it fills.
+extension RiskTier {
+    var color: Color {
+        switch self {
+        case .safe:    return .green
+        case .caution: return Color(red: 0.95, green: 0.7, blue: 0.2)
+        case .danger:  return .red
+        }
+    }
+}
+
 struct MeterBar: View {
     let fraction: Double   // 0...1
 
     /// Green → amber → red by fill level. Shared so the headline % can match the bar.
-    static func color(for fraction: Double) -> Color {
-        switch fraction {
-        case ..<0.6:  return .green
-        case ..<0.85: return Color(red: 0.95, green: 0.7, blue: 0.2)
-        default:      return .red
-        }
-    }
+    static func color(for fraction: Double) -> Color { RiskTier.forFraction(fraction).color }
     private var color: Color { Self.color(for: fraction) }
 
     var body: some View {
@@ -150,6 +154,37 @@ struct StatRow: View {
     }
 }
 
+/// One-line COMBINED verdict for both windows — "can I stop looking now?" —
+/// meant to sit above the rings so the worst-case status reads before anything
+/// else on the card. Deliberately coarser than `WorkTimeLine` (which gives the
+/// session's exact time budget further down): this only answers green/amber/red
+/// for the whole card, built from the SAME `RiskTier` the rings use so the
+/// headline can never disagree with what they show.
+struct PlanStatusBadge: View {
+    let sessionTier: RiskTier?
+    let weeklyTier: RiskTier?
+
+    private var tier: RiskTier { max(sessionTier ?? .safe, weeklyTier ?? .safe) }
+
+    private var state: (text: String, icon: String) {
+        switch tier {
+        case .safe:    return ("지금 페이스면 오늘·이번 주 안 막혀요", "checkmark.circle.fill")
+        case .caution: return ("페이스 주의 — 리셋 전에 빠듯할 수 있어요", "exclamationmark.triangle.fill")
+        case .danger:  return ("이 속도면 리셋 전에 소진돼요", "exclamationmark.octagon.fill")
+        }
+    }
+
+    var body: some View {
+        let s = state
+        HStack(spacing: 6) {
+            Image(systemName: s.icon)
+            Text(s.text).fixedSize(horizontal: false, vertical: true)
+        }
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(tier.color)
+    }
+}
+
 /// The headline plan-limit visual: a circular gauge with the % in the center, the
 /// ring filling green→amber→red, the window name + a compact reset time below.
 struct RingGauge: View {
@@ -160,13 +195,22 @@ struct RingGauge: View {
     var size: CGFloat = 66
     var preciseReset: Bool = false    // always show hours+minutes+clock (session); weekly/Opus
                                        // still switch to this automatically once under a day out
+    /// The burn-rate projection for this SAME window — lets the ring color
+    /// escalate past the raw-% tier when the pace itself is already a warning
+    /// (e.g. 49% raw is "green" alone, but not next to an atRisk pace verdict).
+    var projection: Projection? = nil
+    /// How soon "on track to exhaust" counts as `.danger` rather than
+    /// `.caution` — pass a window sized to this ring's own limit window.
+    var imminentWindow: TimeInterval = 24 * 3600
 
     /// Below this much time-to-reset, the countdown alone ("리셋 18h") stops being
     /// enough to tell whether that's tonight or tomorrow afternoon — pair it with
     /// the actual clock time instead, same as `preciseReset` always does.
     static let preciseResetWindow: TimeInterval = 24 * 3600
 
-    private var color: Color { MeterBar.color(for: window.fraction) }
+    private var color: Color {
+        RiskTier.combined(fraction: window.fraction, projection: projection, imminentWindow: imminentWindow).color
+    }
 
     var body: some View {
         VStack(spacing: 6) {
@@ -256,8 +300,11 @@ struct ProjectionLine: View {
             }
             return ("\(rateText(p.ratePerHour)) · 리셋까지 충분", .green, "checkmark.circle")
         case .atRisk:
-            let full = p.timeToFull.map { Fmt.countdown(to: now.addingTimeInterval($0), from: now) } ?? "?"
-            let gap = p.blockedBy.map { Fmt.countdown(to: now.addingTimeInterval($0), from: now) } ?? "?"
+            // mediumCountdown (not countdown) so a weekly gap rolls into "3d 23h"
+            // instead of a raw, un-rolled-over "95h 21m" — countdown's flat h+m
+            // reads fine for the session ring (≤5h) but not at weekly scale.
+            let full = p.timeToFull.map { Fmt.mediumCountdown(to: now.addingTimeInterval($0), from: now) } ?? "?"
+            let gap = p.blockedBy.map { Fmt.mediumCountdown(to: now.addingTimeInterval($0), from: now) } ?? "?"
             return ("\(rateText(p.ratePerHour)) · \(full) 후 소진 — 리셋보다 \(gap) 빠름", .orange, "exclamationmark.triangle.fill")
         }
     }
@@ -271,12 +318,33 @@ struct WeeklyAllowanceLine: View {
 
     var body: some View {
         let s = state
-        HStack(alignment: .top, spacing: 5) {
-            Image(systemName: s.icon).frame(width: 12)
-            Text(s.text).fixedSize(horizontal: false, vertical: true)
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .top, spacing: 5) {
+                Image(systemName: s.icon).frame(width: 12)
+                Text(s.text).fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.caption2)
+            .foregroundStyle(s.color)
+            // "오늘 5%" vs "권장 ~11%" as a bar — how much of today's allowance
+            // is left, at a glance, without doing the division in your head.
+            if let used = budget.usedTodayPct, budget.recommendedPctPerDay > 0 {
+                todayProgressBar(used: used, recommended: budget.recommendedPctPerDay)
+            }
         }
-        .font(.caption2)
-        .foregroundStyle(s.color)
+    }
+
+    private func todayProgressBar(used: Double, recommended: Double) -> some View {
+        let fraction = used / recommended
+        let color: Color = fraction >= 1 ? .red : (fraction >= 0.7 ? Color(red: 0.95, green: 0.7, blue: 0.2) : .green)
+        return GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.primary.opacity(0.09))
+                Capsule().fill(color).frame(width: max(3, geo.size.width * min(1, fraction)))
+            }
+        }
+        .frame(height: 5)
+        .padding(.leading, 17)   // align under the text, past the icon column
+        .accessibilityHidden(true)   // the same "오늘 X% / 권장 ~Y%" is already in the text above
     }
 
     private var daysText: String {
@@ -644,7 +712,36 @@ struct TodaySessionsBar: View {
                 RoundedRectangle(cornerRadius: 2)
                     .strokeBorder(color, style: StrokeStyle(lineWidth: 1, dash: hollow ? [2, 2] : []))
             )
+            .overlay(alignment: .top) {
+                // The dashed outline alone reads as "different", not "still
+                // moving right now" — a pulse makes the live bar legible even
+                // without matching it back to the legend text below.
+                if hollow { PulsingLiveDot(color: color).offset(y: -4) }
+            }
             .frame(width: 10, height: max(2, height * clamped / 100))
+    }
+}
+
+/// A small dot that pulses outward and fades — marks the live/in-progress bar
+/// in `TodaySessionsBar` as "actively climbing right now", not just "styled
+/// differently". Self-contained `@State` so the animation survives the parent
+/// view's own frequent re-renders (every refresh tick).
+private struct PulsingLiveDot: View {
+    let color: Color
+    @State private var expanded = false
+
+    var body: some View {
+        Circle()
+            .fill(color)
+            .frame(width: 5, height: 5)
+            .scaleEffect(expanded ? 1.8 : 1)
+            .opacity(expanded ? 0 : 0.9)
+            .onAppear {
+                withAnimation(.easeOut(duration: 1.1).repeatForever(autoreverses: false)) {
+                    expanded = true
+                }
+            }
+            .accessibilityHidden(true)   // decorative; "진행 중" is already in the label/legend text
     }
 }
 

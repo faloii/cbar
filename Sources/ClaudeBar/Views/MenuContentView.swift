@@ -295,17 +295,23 @@ struct MenuContentView: View {
             // would contradict the bar's "—" with the same stale data.
             let session = store.liveSession
             let weekly = store.liveWeekly
+            PlanStatusBadge(
+                sessionTier: session.map { RiskTier.combined(fraction: $0.fraction, projection: store.sessionProjection, imminentWindow: 3600) },
+                weeklyTier: weekly.map { RiskTier.combined(fraction: $0.fraction, projection: store.weeklyProjection, imminentWindow: 24 * 3600) })
+                .padding(.top, 2)
             HStack(alignment: .top, spacing: 10) {
                 if let w = session {
                     RingGauge(title: "세션", window: w, now: snap.generatedAt,
                               paceFraction: Pace.elapsedFraction(windowSeconds: 5 * 3600,
                                                                  secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt)),
-                              preciseReset: true)
+                              preciseReset: true,
+                              projection: store.sessionProjection, imminentWindow: 3600)
                 }
                 if let w = weekly {
                     RingGauge(title: "주간", window: w, now: snap.generatedAt,
                               paceFraction: Pace.elapsedFraction(windowSeconds: 7 * 24 * 3600,
-                                                                 secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt)))
+                                                                 secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt)),
+                              projection: store.weeklyProjection, imminentWindow: 24 * 3600)
                 }
                 if let w = l.weeklyOpus, !w.expired(asOf: snap.generatedAt) {
                     RingGauge(title: "Opus", window: w, now: snap.generatedAt)
