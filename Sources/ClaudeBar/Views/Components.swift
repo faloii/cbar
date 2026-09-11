@@ -107,7 +107,12 @@ extension RiskTier {
     var color: Color {
         switch self {
         case .safe:    return .green
-        case .caution: return Color(red: 0.95, green: 0.7, blue: 0.2)
+        // System orange, not a hand-picked pale gold — that custom tone read
+        // as low-contrast "노란색" (as text especially, on a light background)
+        // and it duplicated the plain .orange already used elsewhere in this
+        // file (ProjectionLine/PaceLine's atRisk case) — one consistent,
+        // system-adaptive color for "caution" everywhere now.
+        case .caution: return .orange
         case .danger:  return .red
         }
     }
@@ -351,7 +356,11 @@ struct WeeklyAllowanceLine: View {
 
     private func todayProgressBar(used: Double, recommended: Double) -> some View {
         let fraction = used / recommended
-        let color: Color = fraction >= 1 ? .red : (fraction >= 0.7 ? Color(red: 0.95, green: 0.7, blue: 0.2) : .green)
+        // Same 3 colors as everywhere else (RiskTier), own thresholds (100%/70%
+        // of TODAY's recommended pace — a different question from the 60/85%
+        // raw-fraction tiers RiskTier.forFraction answers).
+        let tier: RiskTier = fraction >= 1 ? .danger : (fraction >= 0.7 ? .caution : .safe)
+        let color = tier.color
         return GeometryReader { geo in
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.primary.opacity(0.09))
