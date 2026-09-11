@@ -93,4 +93,13 @@ enum Fmt {
         f.dateFormat = "HH:mm"
         return f.string(from: date)
     }
+
+    /// Compact "9/15" — pairs with a multi-day countdown ("4d") so "언제" has an
+    /// actual calendar date, not just a relative offset you'd have to do the
+    /// math on yourself.
+    static func monthDay(_ date: Date) -> String {
+        let f = DateFormatter()
+        f.dateFormat = "M/d"
+        return f.string(from: date)
+    }
 }

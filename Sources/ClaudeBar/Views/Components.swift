@@ -256,13 +256,15 @@ struct RingGauge: View {
                 if let reset = window.resetsAt {
                     // Session (preciseReset) always shows the countdown *and* the actual
                     // reset clock time, e.g. "리셋 1h 18m (15:30)". Weekly/Opus stay
-                    // single-unit ("리셋 6d") UNTIL the reset is under a day out, at which
+                    // single-unit ("리셋 4d") until the reset is under a day out, at which
                     // point the exact clock time becomes worth showing there too — "리셋
                     // 18h" doesn't tell you whether that's tonight or tomorrow afternoon.
+                    // Beyond a day, pair the countdown with the calendar date instead
+                    // ("리셋 4d (9/15)") — "4일 뒤가 정확히 며칠인지" shouldn't need mental math.
                     let showPrecise = preciseReset || reset.timeIntervalSince(now) < Self.preciseResetWindow
                     Text(showPrecise
                          ? "리셋 \(Fmt.mediumCountdown(to: reset, from: now)) (\(Fmt.clock(reset)))"
-                         : "리셋 \(Fmt.shortCountdown(to: reset, from: now))")
+                         : "리셋 \(Fmt.shortCountdown(to: reset, from: now)) (\(Fmt.monthDay(reset)))")
                         .font(.caption2).foregroundStyle(.tertiary)
                         .lineLimit(1).minimumScaleFactor(0.7)
                 }
