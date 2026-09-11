@@ -670,41 +670,6 @@ struct WeeklyTrendChart: View {
     }
 }
 
-/// Session and weekly trends share the same underlying `UsageTrendChart`
-/// engine — `SessionTrendChart`/`WeeklyTrendChart` each just feed it a
-/// different sample set at a different window scale — so there's no real
-/// reason to show both stacked. One shared area, tab-switched instead.
-struct UnifiedTrendChart: View {
-    enum Tab: String, CaseIterable, Identifiable {
-        case session = "세션", weekly = "주간"
-        var id: String { rawValue }
-    }
-
-    let sessionSamples: [UsageSample]
-    let weeklySamples: [UsageSample]
-    let now: Date
-    let sessionSecondsToReset: TimeInterval?
-    let weeklySecondsToReset: TimeInterval?
-    @Binding var selected: Tab
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Picker("", selection: $selected) {
-                ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-
-            switch selected {
-            case .session:
-                SessionTrendChart(samples: sessionSamples, now: now, secondsToReset: sessionSecondsToReset)
-            case .weekly:
-                WeeklyTrendChart(samples: weeklySamples, now: now, secondsToReset: weeklySecondsToReset)
-            }
-        }
-    }
-}
-
 /// Today's sessions at a glance — one bar per COMPLETED session (peak
 /// utilization, same green/amber/red coloring as everywhere else), plus a
 /// hollow dashed bar for the still-in-progress one. Makes a feast/famine

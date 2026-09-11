@@ -11,7 +11,6 @@ struct MenuContentView: View {
     @ObservedObject var store: UsageStore
     @State private var contentHeight: CGFloat = 0
     @State private var dropTarget: PanelSection?
-    @State private var trendTab: UnifiedTrendChart.Tab = .session
 
     private var snap: UsageSnapshot { store.snapshot }
 
@@ -366,12 +365,19 @@ struct MenuContentView: View {
                     .padding(.top, 6)
                 }
 
-                UnifiedTrendChart(sessionSamples: store.sessionTrend, weeklySamples: store.weeklyTrend,
-                                  now: snap.generatedAt,
-                                  sessionSecondsToReset: session?.resetsAt?.timeIntervalSince(snap.generatedAt),
-                                  weeklySecondsToReset: weekly?.resetsAt?.timeIntervalSince(snap.generatedAt),
-                                  selected: $trendTab)
-                    .padding(.top, 6)
+                // Both charts shown at once, not tab-switched — tried the tab
+                // and it just added a click for no real benefit; they're short
+                // enough to both fit.
+                if let w = session {
+                    SessionTrendChart(samples: store.sessionTrend, now: snap.generatedAt,
+                                      secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt))
+                        .padding(.top, 6)
+                }
+                if let w = weekly {
+                    WeeklyTrendChart(samples: store.weeklyTrend, now: snap.generatedAt,
+                                     secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt))
+                        .padding(.top, 4)
+                }
 
                 TodaySessionsBar(recaps: store.sessionRecapsToday, liveUtilization: session?.utilization)
                     .padding(.top, 4)
