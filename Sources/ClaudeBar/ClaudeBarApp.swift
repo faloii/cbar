@@ -40,7 +40,14 @@ struct ClaudeBarApp: App {
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        UNUserNotificationCenter.current().delegate = self
+        // UNUserNotificationCenter.current() throws (hard crash) when the process
+        // has no bundle identifier — true for the bare `swift run`/`swift build`
+        // dev binary, which has no Info.plist. Same guard `Notifier` already uses
+        // internally; without it here, even a packaged-app-only feature test via
+        // `swift run` crashes on launch before the window ever appears.
+        if Notifier.isBundled {
+            UNUserNotificationCenter.current().delegate = self
+        }
         Notifier.registerCategories()
     }
 

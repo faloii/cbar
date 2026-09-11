@@ -7,7 +7,8 @@ import UserNotifications
 /// identifier (e.g. the bare `swift run` dev binary), so every call is guarded —
 /// notifications simply no-op until the app is run as a packaged `.app`.
 enum Notifier {
-    private static var isBundled: Bool { Bundle.main.bundleIdentifier != nil }
+    /// Also used by `AppDelegate` to guard its own `UNUserNotificationCenter` touch.
+    static var isBundled: Bool { Bundle.main.bundleIdentifier != nil }
 
     /// Notification action identifiers — handled in `AppDelegate`'s
     /// `UNUserNotificationCenterDelegate` conformance.
