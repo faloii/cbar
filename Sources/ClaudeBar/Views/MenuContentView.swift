@@ -432,7 +432,11 @@ struct MenuContentView: View {
                 }
             }
             .font(.caption2).foregroundStyle(.secondary)
-            if ctx >= SessionCoach.heavyContextTokens {
+            // CompactSuggestion.isHeavy also catches a conversation that's
+            // already re-read-dominated before it's fully ballooned to the
+            // absolute size threshold — earlier than a bare `ctx >=
+            // heavyContextTokens` check would.
+            if CompactSuggestion.isHeavy(contextTokens: ctx, cacheReadShare: store.cacheEfficiency?.cacheReadShare ?? 0) {
                 HStack(alignment: .top, spacing: 5) {
                     Image(systemName: "rectangle.compress.vertical").frame(width: 12)
                     Text(heavyContextActionText(store.cacheEfficiency))

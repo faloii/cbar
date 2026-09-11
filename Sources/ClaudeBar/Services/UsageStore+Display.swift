@@ -47,10 +47,13 @@ extension UsageStore {
     /// The current conversation is both large AND mostly re-read old context — the
     /// bar for "this is worth a /compact". Shared by `adviceTips` (the in-app tip)
     /// and `processAdviceFollowThrough` (the follow-through nudge tracker) so the
-    /// two don't quietly drift apart if the threshold logic ever changes.
+    /// two don't quietly drift apart if the threshold logic ever changes. Delegates
+    /// to `CompactSuggestion.isHeavy` — the SAME predicate the 효율 card and the
+    /// per-session badges use, including its earlier catch for a conversation
+    /// that's already re-read-dominated before it's fully ballooned in size.
     var isHeavyContextWithReuse: Bool {
-        snapshot.currentContextTokens >= SessionCoach.heavyContextTokens
-            && (cacheEfficiency?.cacheReadShare ?? 0) >= CacheEfficiency.heavyReuseThreshold
+        CompactSuggestion.isHeavy(contextTokens: snapshot.currentContextTokens,
+                                  cacheReadShare: cacheEfficiency?.cacheReadShare ?? 0)
     }
 
     /// The session part of the bar label: self-warns "막힘 50m" (time until you'll hit

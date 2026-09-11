@@ -190,6 +190,24 @@ final class CompactSuggestionTests: XCTestCase {
         XCTAssertFalse(CompactSuggestion.isHeavy(session("a", ctx: 150_000, reuse: 0.5)))   // low reuse
         XCTAssertFalse(CompactSuggestion.isHeavy(session("a", ctx: 50_000, reuse: 0.9)))    // small context
     }
+
+    func testEarlyCatchFiresAtHalfSizeWithVeryHighReuse() {
+        // 70k is below the 120k full threshold but above the 60k early floor;
+        // 0.9 clears the stricter 0.85 early bar.
+        XCTAssertTrue(CompactSuggestion.isHeavy(contextTokens: 70_000, cacheReadShare: 0.9))
+    }
+
+    func testEarlyCatchStaysQuietBelowItsOwnStricterBar() {
+        // Same size, but only the (lower) full-size bar's reuse level — not
+        // enough to trip the stricter early-catch threshold yet.
+        XCTAssertFalse(CompactSuggestion.isHeavy(contextTokens: 70_000, cacheReadShare: 0.8))
+    }
+
+    func testEarlyCatchStaysQuietBelowItsContextFloor() {
+        // High reuse alone isn't enough below the early floor — too small a
+        // sample to mean much (e.g. one big system prompt read twice).
+        XCTAssertFalse(CompactSuggestion.isHeavy(contextTokens: 40_000, cacheReadShare: 0.95))
+    }
 }
 
 final class RiskTierTests: XCTestCase {
