@@ -321,19 +321,17 @@ struct MenuContentView: View {
                 WorkTimeLine(window: w, projection: store.sessionProjection, now: snap.generatedAt)
                     .padding(.top, 4)
             }
-            // Supporting detail, visually subordinate to the hero line.
-            VStack(alignment: .leading, spacing: 2) {
+            // Session group — pace, reset schedule, trend, today's history.
+            // Grouped together (instead of interleaved with the weekly lines
+            // below) so this reads as one "about the 세션 ring" block rather
+            // than a single undifferentiated wall of small gray text.
+            VStack(alignment: .leading, spacing: 3) {
                 if let w = session {
                     PaceLine(window: w, projection: store.sessionProjection, now: snap.generatedAt)
                 }
-                if let w = weekly {
-                    ProjectionLine(tag: "주간", window: w, projection: store.weeklyProjection, now: snap.generatedAt)
-                    if let budget = store.weeklyAllowance {
-                        WeeklyAllowanceLine(budget: budget)
-                    }
-                }
                 UpcomingResetsLine(resets: store.upcomingResets)
             }
+            .padding(.top, 3)
             if let w = session {
                 SessionTrendChart(samples: store.sessionTrend, now: snap.generatedAt,
                                   secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt))
@@ -341,7 +339,17 @@ struct MenuContentView: View {
             }
             TodaySessionsBar(recaps: store.sessionRecapsToday, liveUtilization: session?.utilization)
                 .padding(.top, 4)
+
+            // Weekly group — separated by a divider so it reads as its own
+            // section instead of blending into the session detail above.
             if let w = weekly {
+                Divider().padding(.vertical, 4)
+                VStack(alignment: .leading, spacing: 3) {
+                    ProjectionLine(tag: "주간", window: w, projection: store.weeklyProjection, now: snap.generatedAt)
+                    if let budget = store.weeklyAllowance {
+                        WeeklyAllowanceLine(budget: budget)
+                    }
+                }
                 WeeklyTrendChart(samples: store.weeklyTrend, now: snap.generatedAt,
                                  secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt))
                     .padding(.top, 4)

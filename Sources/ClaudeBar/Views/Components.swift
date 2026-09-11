@@ -231,8 +231,8 @@ struct ProjectionLine: View {
                 Image(systemName: s.icon).frame(width: 12)
                 Text("\(tag) · \(s.text)").fixedSize(horizontal: false, vertical: true)
             }
-            .font(.caption2)
-            .foregroundStyle(s.color)
+            .font(.caption)   // one tier up from the reference lines below it (allowance/resets) —
+            .foregroundStyle(s.color)   // this is the pace VERDICT, not just a number to look up
         }
     }
 
@@ -327,7 +327,7 @@ struct PaceLine: View {
                 Image(systemName: s.icon).frame(width: 12)
                 Text(s.text).fixedSize(horizontal: false, vertical: true)
             }
-            .font(.caption2)
+            .font(.caption)   // one tier up — this is the pace VERDICT, not a reference number
             .foregroundStyle(s.color)
             .help(detail)
         }
