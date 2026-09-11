@@ -166,11 +166,25 @@ struct PlanStatusBadge: View {
 
     private var tier: RiskTier { max(sessionTier ?? .safe, weeklyTier ?? .safe) }
 
+    /// Which window(s) are driving the worst tier — without this, "이 속도면
+    /// 리셋 전에 소진돼요" reads as if it could be either ring, and you'd have
+    /// to go compare their colors yourself to find out which one it means.
+    private var subject: String {
+        let sessionWorst = (sessionTier ?? .safe) == tier
+        let weeklyWorst = (weeklyTier ?? .safe) == tier
+        switch (sessionWorst, weeklyWorst) {
+        case (true, true):  return "세션·주간"
+        case (true, false): return "세션"
+        case (false, true): return "주간"
+        default:            return ""
+        }
+    }
+
     private var state: (text: String, icon: String) {
         switch tier {
         case .safe:    return ("지금 페이스면 오늘·이번 주 안 막혀요", "checkmark.circle.fill")
-        case .caution: return ("페이스 주의 — 리셋 전에 빠듯할 수 있어요", "exclamationmark.triangle.fill")
-        case .danger:  return ("이 속도면 리셋 전에 소진돼요", "exclamationmark.octagon.fill")
+        case .caution: return ("\(subject) 페이스 주의 — 리셋 전에 빠듯할 수 있어요", "exclamationmark.triangle.fill")
+        case .danger:  return ("\(subject)이 이 속도면 리셋 전에 소진돼요", "exclamationmark.octagon.fill")
         }
     }
 
