@@ -164,23 +164,34 @@ extension UsageStore {
     }
 
     /// Menu-bar tint: green (safe) → orange (warning) → red (nearly out), based on
-    /// the utilization relevant to the chosen bar metric.
+    /// the utilization relevant to the chosen bar metric — escalated by pace the
+    /// same way the ring/badge in the popover are. This icon is the one thing
+    /// visible WITHOUT opening the popover, so it can't be allowed to stay calm
+    /// while an at-risk pace is already flagged once you do open it.
     var barColor: Color {
         if isBlocked { return .red }
         let shown: Double?
+        let paceTier: RiskTier
         switch barMetric {
-        case .sessionLimit: shown = liveSession?.utilization
-        case .weeklyLimit:  shown = liveWeekly?.utilization
-        case .bothLimits:   shown = maxLimitUtilization
-        default:            return isOverThreshold ? .orange : .primary
+        case .sessionLimit:
+            shown = liveSession?.utilization
+            paceTier = RiskTier.forPace(sessionProjection, imminentWindow: 3600)
+        case .weeklyLimit:
+            shown = liveWeekly?.utilization
+            paceTier = RiskTier.forPace(weeklyProjection, imminentWindow: 24 * 3600)
+        case .bothLimits:
+            shown = maxLimitUtilization
+            paceTier = max(RiskTier.forPace(sessionProjection, imminentWindow: 3600),
+                           RiskTier.forPace(weeklyProjection, imminentWindow: 24 * 3600))
+        default:
+            return isOverThreshold ? .orange : .primary
         }
         // The warning glyph keys on the WORST window (isOverThreshold) — don't let
         // the tint contradict it by following only the displayed metric (a safe-green
         // "12%" next to a triangle raised by the weekly window at 85%).
         let effective: Double? = isOverThreshold ? max(shown ?? 0, maxLimitUtilization ?? 0) : shown
         guard let u = effective else { return .primary }
-        if u >= 95 { return .red }
-        if u >= Double(warnThreshold) { return .orange }
-        return .green
+        let byThreshold: RiskTier = u >= 95 ? .danger : (u >= Double(warnThreshold) ? .caution : .safe)
+        return max(byThreshold, paceTier).color
     }
 }
