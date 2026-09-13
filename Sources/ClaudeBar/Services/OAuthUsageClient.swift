@@ -258,6 +258,18 @@ struct ClaudeCredentials: Codable {
         lock.unlock()
     }
 
+    /// Whether a refresh token is currently available (memory or token.json) —
+    /// i.e. whether the next expired-access-token 401 can refresh silently, or
+    /// will fall back to a (prompting) Keychain read. Exposed for the Settings
+    /// diagnostics panel; doesn't touch Keychain itself, so checking this never
+    /// causes a prompt on its own.
+    static var hasRefreshToken: Bool {
+        lock.lock()
+        if let c = cached { lock.unlock(); return !(c.refreshToken ?? "").isEmpty }
+        lock.unlock()
+        return !(readFile()?.refreshToken ?? "").isEmpty
+    }
+
     // MARK: refresh (no keychain prompt)
 
     /// Exchange the cached refresh token for a fresh access token via the OAuth
