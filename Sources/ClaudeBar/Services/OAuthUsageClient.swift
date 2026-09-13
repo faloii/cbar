@@ -211,19 +211,22 @@ struct OAuthUsageClient: Sendable {
     }
 }
 
-/// Reads Claude Code's OAuth token, then caches just the access token in a 0600
-/// file (`~/.claudebar/token.json`). File reads never prompt, so Claude Code's
-/// (prompting) Keychain item is read only on first run or after a 401 — not on
-/// every launch. Only the short-lived access token is stored (not the refresh token).
+/// Reads Claude Code's OAuth token, then caches it in a 0600 file
+/// (`~/.claudebar/token.json`). File reads never prompt, so Claude Code's
+/// (prompting) Keychain item is read only on first run, or when both this
+/// file AND the in-memory refresh token are unavailable.
+///
+/// The refresh token is persisted here too (not memory-only) so a CBar
+/// restart doesn't lose the ability to refresh silently — without it, every
+/// relaunch eventually hits an expired cached access token with no refresh
+/// token in memory, forcing a fresh Keychain read (and its prompt) the moment
+/// that happens. Accepted trade-off: a long-lived credential now lives on
+/// disk, guarded only by the 0600 permission and normal disk access — deemed
+/// reasonable for a personal, single-user local app.
 struct ClaudeCredentials: Codable {
     let accessToken: String
     let expiresAt: Date?
-    /// Kept ONLY in memory — never encoded to disk (see CodingKeys). Used to refresh
-    /// silently so we don't re-read the (prompting) keychain on every token rotation.
     var refreshToken: String? = nil
-
-    // refreshToken is intentionally excluded so it never lands in token.json.
-    private enum CodingKeys: String, CodingKey { case accessToken, expiresAt }
 
     /// Claude Code's public OAuth client id + token endpoint, used to exchange the
     /// refresh token for a new access token directly (the same flow Claude Code uses).
@@ -257,20 +260,23 @@ struct ClaudeCredentials: Codable {
 
     // MARK: refresh (no keychain prompt)
 
-    /// Exchange the in-memory refresh token for a fresh access token via the OAuth
+    /// Exchange the cached refresh token for a fresh access token via the OAuth
     /// endpoint — no keychain read, so no prompt. Only updates our OWN in-memory +
     /// file cache; deliberately does NOT write back into Claude Code's shared
     /// keychain item (that used to happen here, but `SecItemUpdate` on a shared
     /// item can trigger its own separate Keychain access prompt even when reads
     /// are already "Always Allow"-trusted — a real cause of recurring prompts).
     /// Since Claude Code CLI sessions refresh their own copy independently in the
-    /// background, we no longer need to keep it in sync from here. Returns nil if
-    /// no refresh token is held (e.g. right after an app restart) or the refresh failed.
+    /// background, we no longer need to keep it in sync from here. The refresh
+    /// token is persisted to `token.json`, so this works across app restarts too
+    /// — not just within one still-running process. Returns nil if no refresh
+    /// token is available at all (e.g. very first run, before anything's been
+    /// cached yet) or the refresh call itself failed.
     static func refreshSilently() async -> ClaudeCredentials? {
         guard let rt = cachedRefreshToken(), !rt.isEmpty else { return nil }
         guard let fresh = try? await performRefresh(refreshToken: rt) else { return nil }
         setCached(fresh)
-        writeFile(fresh)            // access token only (refreshToken excluded by CodingKeys)
+        writeFile(fresh)
         return fresh
     }
 
@@ -358,7 +364,8 @@ struct ClaudeCredentials: Codable {
         var expires: Date?
         if let ms = oauth["expiresAt"] as? Double { expires = Date(timeIntervalSince1970: ms / 1000) }
         else if let ms = oauth["expiresAt"] as? Int { expires = Date(timeIntervalSince1970: Double(ms) / 1000) }
-        // Keep the refresh token in memory so we can refresh silently (never persisted).
+        // Cached (and persisted to token.json by the caller) so we can refresh
+        // silently later — including after an app restart, not just this run.
         let refresh = oauth["refreshToken"] as? String
         return ClaudeCredentials(accessToken: token, expiresAt: expires, refreshToken: refresh)
     }

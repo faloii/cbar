@@ -958,17 +958,21 @@ final class OAuthUsageParseTests: XCTestCase {
         XCTAssertNotNil(snap.error)
     }
 
-    /// Security invariant: the refresh token lives in memory only and must never be
-    /// encoded to disk (token.json). Only the access token + expiry are persisted.
-    func testRefreshTokenNeverEncoded() throws {
+    /// The refresh token is now persisted to token.json (a deliberate trade-off
+    /// so a CBar restart doesn't lose the ability to refresh silently and fall
+    /// back to a prompting Keychain read) — round-trips through encode/decode
+    /// intact, not just the access token.
+    func testRefreshTokenRoundTripsThroughEncoding() throws {
         let creds = ClaudeCredentials(accessToken: "sk-ant-access",
                                       expiresAt: Date(timeIntervalSince1970: 1_781_157_378),
-                                      refreshToken: "sk-ant-refresh-SECRET")
+                                      refreshToken: "sk-ant-refresh")
         let data = try JSONEncoder().encode(creds)
         let json = String(data: data, encoding: .utf8) ?? ""
         XCTAssertTrue(json.contains("sk-ant-access"))
-        XCTAssertFalse(json.contains("sk-ant-refresh-SECRET"))
-        XCTAssertFalse(json.lowercased().contains("refresh"))
+        XCTAssertTrue(json.contains("sk-ant-refresh"))
+
+        let decoded = try JSONDecoder().decode(ClaudeCredentials.self, from: data)
+        XCTAssertEqual(decoded.refreshToken, "sk-ant-refresh")
     }
 }
 
