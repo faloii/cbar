@@ -260,15 +260,18 @@ struct RingGauge: View {
                 Text(title).font(.caption.weight(.semibold))
                 if let reset = window.resetsAt {
                     // Session (preciseReset) always shows the countdown *and* the actual
-                    // reset clock time, e.g. "리셋 1h 18m (15:30)". Weekly/Opus stay
-                    // single-unit ("리셋 4d") until the reset is under a day out, at which
-                    // point the exact clock time becomes worth showing there too — "리셋
-                    // 18h" doesn't tell you whether that's tonight or tomorrow afternoon.
-                    // Beyond a day, pair the countdown with the calendar date instead
-                    // ("리셋 4d (9/15)") — "4일 뒤가 정확히 며칠인지" shouldn't need mental math.
+                    // reset date+time, e.g. "리셋 1h 18m (9/15 15:30)" — the date is
+                    // included even here (not just the clock time) so a session that
+                    // crosses midnight doesn't read as ambiguous either. Weekly/Opus
+                    // stay single-unit ("리셋 4d") until the reset is under a day out,
+                    // at which point the same precise date+time becomes worth showing
+                    // there too — "리셋 18h" doesn't say whether that's tonight or
+                    // tomorrow afternoon. Beyond a day, pair the countdown with just
+                    // the calendar date ("리셋 4d (9/15)") — "4일 뒤가 정확히 며칠인지"
+                    // shouldn't need mental math either.
                     let showPrecise = preciseReset || reset.timeIntervalSince(now) < Self.preciseResetWindow
                     Text(showPrecise
-                         ? "리셋 \(Fmt.mediumCountdown(to: reset, from: now)) (\(Fmt.clock(reset)))"
+                         ? "리셋 \(Fmt.mediumCountdown(to: reset, from: now)) (\(Fmt.monthDay(reset)) \(Fmt.clock(reset)))"
                          : "리셋 \(Fmt.shortCountdown(to: reset, from: now)) (\(Fmt.monthDay(reset)))")
                         .font(.caption2).foregroundStyle(.tertiary)
                         .lineLimit(1).minimumScaleFactor(0.7)
