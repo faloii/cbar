@@ -1,6 +1,29 @@
 import SwiftUI
 import AppKit
 
+/// Resizes the hosting MenuBarExtra panel to `height`, keeping its TOP edge pinned
+/// under the menu bar (AppKit frames grow from the bottom-left, so a plain resize
+/// would slide the whole popover up/down).
+private struct PanelHeightSync: NSViewRepresentable {
+    let height: CGFloat
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        let target = height
+        DispatchQueue.main.async {   // after this layout pass — `window` may not be attached yet
+            guard target > 0, let w = view.window, let content = w.contentView else { return }
+            let chrome = w.frame.height - content.frame.height
+            let newHeight = target + chrome
+            guard abs(w.frame.height - newHeight) > 1 else { return }   // also stops any resize ping-pong
+            var f = w.frame
+            f.origin.y += f.height - newHeight
+            f.size.height = newHeight
+            w.setFrame(f, display: true)
+        }
+    }
+}
+
 private struct ContentHeightKey: PreferenceKey {
     static let defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
@@ -57,6 +80,13 @@ struct MenuContentView: View {
                 .padding(.vertical, 9)
         }
         .frame(width: 350)
+        // MenuBarExtra(.window) sizes its panel to the FIRST layout pass and never
+        // shrinks it afterwards — that first pass uses `maxScroll` (contentHeight is
+        // still 0), so the panel stayed nearly screen-tall with the real content
+        // centered in it: big empty bands above the header and below the footer.
+        // Same after collapsing "간단히 보기". Track the content's real height and
+        // resize the panel to it.
+        .background(GeometryReader { g in PanelHeightSync(height: g.size.height) })
         .tint(Color.brand)
         // Bump all text-style fonts up for readability — one step by default, two
         // (an accessibility size) when "글씨 크게" is on in Settings. Crisp at 100%
