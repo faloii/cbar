@@ -72,16 +72,17 @@ struct Card<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
             .background(
+                // An opaque system surface (white in light mode, dark gray in dark) —
+                // not a translucent gray tint: a gray layer over the popover's own
+                // translucent gray material read as muddy, gray-on-gray.
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    // Faint top-to-bottom gradient reads as a subtle raised surface.
-                    .fill(LinearGradient(colors: [Color.primary.opacity(0.075), Color.primary.opacity(0.035)],
-                                         startPoint: .top, endPoint: .bottom))
+                    .fill(Color(nsColor: .controlBackgroundColor))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.10), lineWidth: 0.5)
+                    .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
             )
-            .shadow(color: .black.opacity(0.05), radius: 2, y: 1)
+            .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
     }
 }
 
@@ -106,12 +107,12 @@ struct CardHeader<Trailing: View>: View {
                 .accessibilityHidden(true)
             Text(title.uppercased())
                 .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.primary)
                 .kerning(0.4)
             Spacer(minLength: 6)
             trailing
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -174,7 +175,7 @@ struct StatRow: View {
             Text(label).foregroundStyle(.secondary)
             Spacer(minLength: 8)
             if let secondary {
-                Text(secondary).foregroundStyle(.tertiary).font(.callout)
+                Text(secondary).foregroundStyle(.secondary).font(.callout)
             }
             Text(value).monospacedDigit()
         }
@@ -296,7 +297,7 @@ struct RingGauge: View {
                     Text(showPrecise
                          ? "리셋 \(Fmt.mediumCountdown(to: reset, from: now)) (\(Fmt.monthDay(reset)) \(Fmt.clock(reset)))"
                          : "리셋 \(Fmt.shortCountdown(to: reset, from: now)) (\(Fmt.monthDay(reset)))")
-                        .font(.caption2).foregroundStyle(.tertiary)
+                        .font(.caption2).foregroundStyle(.secondary)
                         .lineLimit(1).minimumScaleFactor(0.7)
                 }
             }
@@ -343,7 +344,7 @@ struct ProjectionLine: View {
                 if proj >= 90 {
                     return ("\(rateText(p.ratePerHour)) · 리셋까지 거의 다 씀(~\(pct)%)", .green, "checkmark.circle")
                 }
-                return ("\(rateText(p.ratePerHour)) · 리셋 때 ~\(pct)% · \(max(0, 100 - pct))% 여유", .secondary, "gauge.medium")
+                return ("\(rateText(p.ratePerHour)) · 리셋 때 ~\(pct)% · \(max(0, 100 - pct))% 여유", .primary, "gauge.medium")
             }
             return ("\(rateText(p.ratePerHour)) · 리셋까지 충분", .green, "checkmark.circle")
         case .atRisk:
@@ -414,7 +415,7 @@ struct WeeklyAllowanceLine: View {
     private var state: (text: String, color: Color, icon: String) {
         let rec = "~\(Int(budget.recommendedPctPerDay.rounded()))%\(workdayNote)"
         guard let used = budget.usedTodayPct else {
-            return ("남은 \(daysText) · 하루 권장 \(rec)", .secondary, "calendar.badge.clock")
+            return ("남은 \(daysText) · 하루 권장 \(rec)", .primary, "calendar.badge.clock")
         }
         let usedPct = Int(used.rounded())
         if used >= 3, used >= budget.recommendedPctPerDay * 1.15 {
@@ -423,7 +424,7 @@ struct WeeklyAllowanceLine: View {
         }
         if budget.recommendedPctPerDay >= 1, used <= budget.recommendedPctPerDay * 0.5 {
             return ("남은 \(daysText) · 하루 권장 \(rec) · 오늘 \(usedPct)% — 여유 있어요",
-                    .secondary, "tortoise.fill")
+                    .primary, "tortoise.fill")
         }
         return ("남은 \(daysText) · 하루 권장 \(rec) · 오늘 \(usedPct)% — 적정 페이스",
                 .green, "checkmark.circle")
@@ -472,7 +473,7 @@ struct PaceLine: View {
         let measured = projection?.ratePerHour ?? 0
         switch projection?.verdict {
         case .idle:
-            return ("지금은 거의 안 쓰는 중 — 리셋까지 여유 있어요", .secondary, "pause")
+            return ("지금은 거의 안 쓰는 중 — 리셋까지 여유 있어요", .primary, "pause")
         case .measuring, .none:
             // Can't judge the pace yet; WorkTimeLine + 추이 차트가 대신 보여줍니다.
             return ("", .secondary, "")
@@ -480,7 +481,7 @@ struct PaceLine: View {
             return ("좀 빠르게 쓰는 중 — 살짝 늦추면 리셋까지 안 막혀요", .orange, "hare.fill")
         case .safe:
             if measured > rec * 1.25 { return ("살짝 빠른 편 — 이대로도 괜찮지만 늦추면 더 여유로워요", .orange, "hare") }
-            if measured < rec * 0.6  { return ("여유롭게 쓰는 중 — 더 써도 리셋 전엔 안 막혀요", .secondary, "tortoise") }
+            if measured < rec * 0.6  { return ("여유롭게 쓰는 중 — 더 써도 리셋 전엔 안 막혀요", .primary, "tortoise") }
             return ("딱 좋은 속도로 쓰고 있어요", .green, "checkmark.circle")
         }
     }
@@ -531,7 +532,7 @@ struct WorkTimeLine: View {
             return ("리셋까지 안 막힘 · ~\(dur(b.workableSeconds)) 여유 — 미룬 큰 작업 지금 돌리세요",
                     .green, "checkmark.circle")
         }
-        return ("리셋까지 ~\(dur(b.workableSeconds)) 더 작업 가능 (안 막힘)", .secondary, "clock")
+        return ("리셋까지 ~\(dur(b.workableSeconds)) 더 작업 가능 (안 막힘)", .primary, "clock")
     }
 }
 
@@ -674,7 +675,7 @@ struct SessionTrendChart: View {
                             windowSeconds: windowSeconds, height: height)
         } else {
             Text("세션 추이 측정 중… (몇 분 더 쌓이면 표시)")
-                .font(.caption2).foregroundStyle(.tertiary)
+                .font(.caption2).foregroundStyle(.secondary)
         }
     }
 }
@@ -700,7 +701,7 @@ struct WeeklyTrendChart: View {
                             windowSeconds: windowSeconds, height: height)
         } else {
             Text("주간 추이 측정 중… (데이터가 더 쌓이면 표시)")
-                .font(.caption2).foregroundStyle(.tertiary)
+                .font(.caption2).foregroundStyle(.secondary)
         }
     }
 }
@@ -736,7 +737,7 @@ struct TodaySessionsBar: View {
                 // "최근" not "오늘" — this covers UsageHistory's ~12h retention,
                 // which can span into the previous calendar day late at night.
                 Text("최근 세션 \(items.count)개 · 진행 중인 세션은 점선")
-                    .font(.caption2).foregroundStyle(.tertiary)
+                    .font(.caption2).foregroundStyle(.secondary)
             }
             // NOT purely decorative — unlike the advice text (which only ever
             // compares the last two sessions), this is the only place the
@@ -815,7 +816,7 @@ struct ModelBurnRowView: View {
             HStack(spacing: 6) {
                 Text(row.model).font(.callout.weight(.medium))
                 if let tier = ModelTier.of(row.model) {
-                    Text(tier.short).font(.caption2).foregroundStyle(.tertiary)
+                    Text(tier.short).font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text(String(format: "%.1f×", row.burnMultiplier))
@@ -826,7 +827,7 @@ struct ModelBurnRowView: View {
                     .font(.callout.weight(.semibold)).monospacedDigit()
                     .frame(width: 38, alignment: .trailing)
             }
-            MeterBar(fraction: row.shareFraction, tint: .secondary)
+            MeterBar(fraction: row.shareFraction, tint: Color.brand)   // a share, not a risk — brand, not a status color
             HStack(spacing: 5) {
                 Text(basis.formatPerTurn(row.perTurnWeight))
                 if basis != .cost {

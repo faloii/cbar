@@ -155,7 +155,7 @@ struct MenuContentView: View {
     private var footer: some View {
         HStack(spacing: 10) {
             Text("업데이트 \(Fmt.time(snap.generatedAt))")
-                .font(.caption2).foregroundStyle(.tertiary)
+                .font(.caption2).foregroundStyle(.secondary)
             Spacer()
             Button { SettingsOpener.open() } label: {
                 Image(systemName: "gearshape")
@@ -250,7 +250,7 @@ struct MenuContentView: View {
                         Text(n.title).font(.caption.weight(.medium))
                         Spacer()
                         Text(Fmt.age(n.at, from: snap.generatedAt))
-                            .font(.caption2).foregroundStyle(.tertiary)
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
                     Text(n.body).font(.caption2).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -280,7 +280,7 @@ struct MenuContentView: View {
             .font(.callout).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         if store.enableLiveLimits, store.limits == nil {
-            Text("실시간 한도 불러오는 중…").font(.caption).foregroundStyle(.tertiary)
+            Text("실시간 한도 불러오는 중…").font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -462,7 +462,7 @@ struct MenuContentView: View {
                     Text("대화 ~\(Fmt.tokens(ctx))")
                 }
             }
-            .font(.caption2).foregroundStyle(.secondary)
+            .font(.caption2).foregroundStyle(.primary)
             // CompactSuggestion.isHeavy also catches a conversation that's
             // already re-read-dominated before it's fully ballooned to the
             // absolute size threshold — earlier than a bare `ctx >=
@@ -480,12 +480,12 @@ struct MenuContentView: View {
         // raw % alone doesn't tell you what to do about it.
         if let ce = store.cacheEfficiency {
             Text("최근 5시간 새 작업 \(Int((ce.freshShare * 100).rounded()))% · 재읽기 \(Int((ce.cacheReadShare * 100).rounded()))%")
-                .font(.caption2).foregroundStyle(.secondary)
+                .font(.caption2).foregroundStyle(.primary)
         }
         // Learning loop: how the last completed session was spent.
         if let r = store.lastSessionRecap {
             Text(SessionCoach.recapText(r)).fixedSize(horizontal: false, vertical: true)
-                .font(.caption2).foregroundStyle(.tertiary)
+                .font(.caption2).foregroundStyle(.secondary)
         }
     }
 
@@ -511,7 +511,7 @@ struct MenuContentView: View {
         MeterBar(fraction: current)
         if !used.isEmpty {
             Text("최근 \(used.count)주 중 \(compliant)주 준수")
-                .font(.caption2).foregroundStyle(.tertiary)
+                .font(.caption2).foregroundStyle(.secondary)
         }
     }
 
@@ -526,7 +526,7 @@ struct MenuContentView: View {
         // is a steadier read on whether THIS week is actually unusual.
         if let avg = r.avgPast4WeeksCost, let vsAvgText = vsAvgText(r.costDeltaVsAvgPct) {
             Text("최근 4주 평균 ~\(Fmt.usd(avg)) 대비 \(vsAvgText)")
-                .font(.caption2).foregroundStyle(.tertiary)
+                .font(.caption2).foregroundStyle(.secondary)
         }
         if let fit = store.planFitSignal {
             Text(planFitText(fit)).font(.caption)
@@ -537,14 +537,14 @@ struct MenuContentView: View {
             Text(coaching).font(.caption)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        Text("이번 주 vs 지난주").font(.caption2).foregroundStyle(.tertiary)
+        Text("이번 주 vs 지난주").font(.caption2).foregroundStyle(.secondary)
         // Which project is eating the weekly limit — useful when juggling several.
         let projects = snap.weeklyProjectUsage
         if projects.count >= 2 {
             let total = max(1, projects.reduce(0) { $0 + $1.tokens })
             let forecast = Dictionary(uniqueKeysWithValues: store.projectWeeklyForecast.map { ($0.project, $0) })
             Divider().padding(.vertical, 2)
-            Text("프로젝트별 · 최근 7일").font(.caption2).foregroundStyle(.tertiary)
+            Text("프로젝트별 · 최근 7일").font(.caption2).foregroundStyle(.secondary)
                 .help("이 Mac의 Claude Code 로그 기준이에요 — 다른 기기에서 쓴 프로젝트는 빠져 있어요.")
             VStack(alignment: .leading, spacing: 5) {
                 ForEach(projects.prefix(3)) { p in
@@ -558,7 +558,7 @@ struct MenuContentView: View {
                     MeterBar(fraction: share)
                     if let f = forecast[p.project], f.projectedAdditionalPct >= 0.5 {
                         Text("이 페이스면 리셋까지 주간 한도 \(String(format: "%.1f", f.usedPct))%P + 추가 \(String(format: "%.1f", f.projectedAdditionalPct))%P")
-                            .font(.caption2).foregroundStyle(.tertiary)
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
                 }
             }
@@ -601,7 +601,7 @@ struct MenuContentView: View {
                 .font(.callout).foregroundStyle(.secondary).monospacedDigit()
         }
         Text("정가 기준 추정 · 구독이면 실제 청구는 없음")
-            .font(.caption2).foregroundStyle(.tertiary)
+            .font(.caption2).foregroundStyle(.secondary)
     }
 
     @ViewBuilder private var perModelSection: some View {
@@ -613,7 +613,7 @@ struct MenuContentView: View {
             ForEach(store.modelBurnRows) { ModelBurnRowView(row: $0, basis: store.burnBasis) }
         }
         Text("× = 턴당 \(store.burnBasis.shortLabel) (최저 모델 대비) · 한도 %/턴 = 한 번 쓸 때 세션 한도를 먹는 비중")
-            .font(.caption2).foregroundStyle(.tertiary)
+            .font(.caption2).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -638,7 +638,7 @@ struct MenuContentView: View {
             }
         }
         Text("작업 난이도는 CBar가 알 수 없어요 — 권장 용도는 참고용입니다. 가벼운 작업을 더 싼 모델로 옮기면 비용이 크게 줄고, 한도(토큰)엔 거의 영향이 없습니다.")
-            .font(.caption2).foregroundStyle(.tertiary)
+            .font(.caption2).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
 
@@ -684,7 +684,7 @@ struct MenuContentView: View {
             }
         }
         Text("비용이 큰 대화 순. 한 모델로만 비쌌다면 다음엔 작업에 맞춰 모델을 바꿔보세요. 주황 배지가 뜨면 그 대화를 다시 열 때 /compact부터 하세요.")
-            .font(.caption2).foregroundStyle(.tertiary)
+            .font(.caption2).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }
 
