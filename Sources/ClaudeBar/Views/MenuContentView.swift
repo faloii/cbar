@@ -126,14 +126,20 @@ struct MenuContentView: View {
             .help(snoozeHelp)
             .accessibilityLabel(store.isSnoozed ? "조용히 모드 해제" : "2시간 조용히")
             Button { store.refresh() } label: {
-                Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12, weight: .semibold))
-                    .rotationEffect(.degrees(store.isRefreshing ? 360 : 0))
-                    .animation(store.isRefreshing ? .linear(duration: 0.8).repeatForever(autoreverses: false) : .default,
-                               value: store.isRefreshing)
-                    .frame(width: 24, height: 24)
-                    .background(Color.primary.opacity(0.06), in: Circle())
-                    .contentShape(Circle())
+                // A native spinner while refreshing, not a repeatForever rotationEffect:
+                // that animation doesn't reliably stop when isRefreshing flips back,
+                // and could leave the glyph stuck invisible in an empty circle.
+                Group {
+                    if store.isRefreshing {
+                        ProgressView().controlSize(.small).scaleEffect(0.7)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                }
+                .frame(width: 24, height: 24)
+                .background(Color.primary.opacity(0.06), in: Circle())
+                .contentShape(Circle())
             }
             .buttonStyle(.plain)
             .help("새로고침")
