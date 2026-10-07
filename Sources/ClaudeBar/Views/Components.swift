@@ -120,10 +120,13 @@ extension RiskTier {
 
 struct MeterBar: View {
     let fraction: Double   // 0...1
+    /// Fixed fill instead of the risk tiers — for bars that show a SHARE, not a
+    /// limit (a model at 100% of usage isn't "danger", it just did all the work).
+    var tint: Color? = nil
 
     /// Green → amber → red by fill level. Shared so the headline % can match the bar.
     static func color(for fraction: Double) -> Color { RiskTier.forFraction(fraction).color }
-    private var color: Color { Self.color(for: fraction) }
+    private var color: Color { tint ?? Self.color(for: fraction) }
 
     var body: some View {
         GeometryReader { geo in
@@ -457,7 +460,7 @@ struct PaceLine: View {
             return ("좀 빠르게 쓰는 중 — 살짝 늦추면 리셋까지 안 막혀요", .orange, "hare.fill")
         case .safe:
             if measured > rec * 1.25 { return ("살짝 빠른 편 — 이대로도 괜찮지만 늦추면 더 여유로워요", .orange, "hare") }
-            if measured < rec * 0.6  { return ("여유롭게 쓰는 중 — 더 써도 리셋 전엔 안 막혀요", Color.brand, "tortoise") }
+            if measured < rec * 0.6  { return ("여유롭게 쓰는 중 — 더 써도 리셋 전엔 안 막혀요", .secondary, "tortoise") }
             return ("딱 좋은 속도로 쓰고 있어요", .green, "checkmark.circle")
         }
     }
@@ -803,7 +806,7 @@ struct ModelBurnRowView: View {
                     .font(.callout.weight(.semibold)).monospacedDigit()
                     .frame(width: 38, alignment: .trailing)
             }
-            MeterBar(fraction: row.shareFraction)
+            MeterBar(fraction: row.shareFraction, tint: .secondary)
             HStack(spacing: 5) {
                 Text(basis.formatPerTurn(row.perTurnWeight))
                 if basis != .cost {

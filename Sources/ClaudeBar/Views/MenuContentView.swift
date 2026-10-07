@@ -304,7 +304,7 @@ struct MenuContentView: View {
     private func adviceColor(_ level: AdviceTip.Level) -> Color {
         switch level {
         case .good:     return .green
-        case .info:     return Color.brand
+        case .info:     return .secondary   // informational, not a status — coral read as a warning
         case .warn:     return .orange
         case .critical: return .red
         }
@@ -437,7 +437,7 @@ struct MenuContentView: View {
     private func efficiencyColor(_ v: SessionCoach.EfficiencyVerdict) -> Color {
         switch v {
         case .optimal:    return .green
-        case .underusing: return .brand
+        case .underusing: return .secondary
         case .overpacing: return .orange
         case .fair, .idle, .measuring: return .secondary
         }
@@ -478,7 +478,7 @@ struct MenuContentView: View {
                     Text(heavyContextActionText(store.cacheEfficiency))
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .font(.caption2).foregroundStyle(Color.brand)
+                .font(.caption2).foregroundStyle(.orange)   // same /compact nudge color as the sessions card
             }
         }
         // Cache mix — purely informational context for the number above. The action
@@ -544,7 +544,7 @@ struct MenuContentView: View {
         }
         if let fit = store.planFitSignal {
             HStack(alignment: .top, spacing: 7) {
-                Image(systemName: "chart.bar").font(.caption).foregroundStyle(Color.brand)
+                Image(systemName: "chart.bar").font(.caption).foregroundStyle(.secondary)
                 Text(planFitText(fit)).font(.caption)
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -552,7 +552,7 @@ struct MenuContentView: View {
         }
         if let coaching = r.coaching {
             HStack(alignment: .top, spacing: 7) {
-                Image(systemName: "lightbulb").font(.caption).foregroundStyle(Color.brand)
+                Image(systemName: "lightbulb").font(.caption).foregroundStyle(.secondary)
                 Text(coaching).font(.caption)
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -687,7 +687,7 @@ struct MenuContentView: View {
                     HStack(spacing: 5) {
                         ForEach(Array(s.models.prefix(2)), id: \.self) { model in
                             Text(model)
-                                .foregroundStyle(ModelTier.of(model)?.short == "최고 성능" ? .orange : .secondary)
+                                .foregroundStyle(.secondary)
                         }
                         if s.models.count > 2 { Text("외 \(s.models.count - 2)") }
                         Text("·")

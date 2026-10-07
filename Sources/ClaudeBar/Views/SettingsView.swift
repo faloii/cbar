@@ -173,7 +173,7 @@ struct SettingsView: View {
                     diagnosticsRow("마지막 성공",
                         (store.limits?.hasData == true) ? Fmt.age(store.limits!.fetchedAt) : "없음")
                     if store.isRefreshing {
-                        diagnosticsNote("지금 새로고침 진행 중…", icon: "arrow.triangle.2.circlepath", color: .blue)
+                        diagnosticsNote("지금 새로고침 진행 중…", icon: "arrow.triangle.2.circlepath", color: .secondary)
                     }
                     if store.lastRefreshTimedOut {
                         diagnosticsNote("마지막 시도가 20초 안에 응답이 없어 건너뜀 — 키체인 응답 대기 등으로 멈췄을 수 있어요. 다음 시도 때 정상화됩니다.",
