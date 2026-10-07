@@ -152,12 +152,16 @@ enum LimitAlerts {
             state.weeklyTier = 0
         }
 
-        // 3) Actually blocked right now. Trust a cached `rejected` only while some
-        //    un-expired window still backs it — after every boundary has passed,
-        //    "blocked" is exactly the stale reading expiry exists to neutralize.
-        let allExpired = (session != nil || weekly != nil) && liveSession == nil && liveWeekly == nil
+        // 3) Actually blocked right now. A cached `rejected` came from the SAME fetch
+        //    as the windows — once ANY of them has passed its reset, that status is
+        //    stale. (Requiring ALL to expire let a still-live weekly window keep a
+        //    stale "blocked" alive after the session reset: the freed alert never
+        //    fired, `wasBlocked` stuck around, and auto-resume later ran on some
+        //    unrelated reset hours afterwards.) A live window genuinely at 100%
+        //    still counts via `maxUtil`.
+        let anyExpired = liveSession == nil && session != nil || liveWeekly == nil && weekly != nil
         let maxUtil = max(liveSession?.utilization ?? 0, liveWeekly?.utilization ?? 0)
-        let blocked = (status == "rejected" && !allExpired) || maxUtil >= 100
+        let blocked = (status == "rejected" && !anyExpired) || maxUtil >= 100
         if blocked {
             state.wasBlocked = true   // remembered until the next reset, for a punchier "freed" alert
             if !state.blocked {

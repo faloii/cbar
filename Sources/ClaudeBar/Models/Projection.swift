@@ -109,7 +109,7 @@ struct Projection: Equatable {
         guard util > 0 else {
             return Projection(ratePerHour: 0, timeToFull: nil, secondsToReset: secondsToReset, verdict: .idle)
         }
-        guard elapsed >= 6 * 3600 else {   // too early in the bucket to judge a pace
+        guard elapsed >= pacedMinElapsed else {   // too early in the bucket to judge a pace
             return Projection(ratePerHour: 0, timeToFull: nil, secondsToReset: secondsToReset, verdict: .safe)
         }
         let ratePerHour = util / (elapsed / 3600)
@@ -170,12 +170,26 @@ struct Projection: Equatable {
     /// signal until hour 6, often too late to react. `compute` catches that immediately.
     /// Whichever view is more urgent (`.atRisk` with the sooner time-to-full) wins;
     /// otherwise `paced` is the stable default.
+    ///
+    /// The burst override is limited to (a) that early blind spot, or (b) a burst
+    /// that would actually exhaust the week within `burstImminentHorizon`. Mid-week,
+    /// extrapolating a 30-minute sprint across the remaining DAYS is exactly the
+    /// noise `paced` exists to ignore — doing so fired "주간 한도 곧 소진" on every
+    /// focused stretch, then re-armed the moment it ended.
     static func combinedWeekly(points: [(Date, Double)], util: Double, resetsAt: Date?,
                                windowSeconds: TimeInterval, now: Date) -> Projection {
         let paced = Projection.paced(util: util, resetsAt: resetsAt, windowSeconds: windowSeconds, now: now)
         let burst = Projection.compute(points: points, resetsAt: resetsAt, now: now)
-        guard burst.verdict == .atRisk else { return paced }
-        guard paced.verdict == .atRisk, let pf = paced.timeToFull, let bf = burst.timeToFull else { return burst }
+        guard burst.verdict == .atRisk, let bf = burst.timeToFull else { return paced }
+        let elapsed = resetsAt.map { windowSeconds - $0.timeIntervalSince(now) } ?? 0
+        guard elapsed < pacedMinElapsed || bf <= burstImminentHorizon else { return paced }
+        guard paced.verdict == .atRisk, let pf = paced.timeToFull else { return burst }
         return bf <= pf ? burst : paced
     }
+
+    /// Below this much elapsed time in a fixed bucket, `paced` won't judge a pace.
+    static let pacedMinElapsed: TimeInterval = 6 * 3600
+    /// A burst this close to exhausting the window is an emergency regardless of
+    /// the longer-run average, so it may override `paced` at any point in the week.
+    static let burstImminentHorizon: TimeInterval = 6 * 3600
 }

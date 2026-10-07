@@ -17,11 +17,12 @@ struct OAuthUsageClient: Sendable {
     static let cacheTTL: TimeInterval = 180
 
     enum FetchError: LocalizedError {
-        case noCredentials, unauthorized, rateLimited, http(Int), badResponse
+        case noCredentials, awaitingKeychain, unauthorized, rateLimited, http(Int), badResponse
 
         var errorDescription: String? {
             switch self {
             case .noCredentials: return "Claude 자격증명을 찾을 수 없음 — Claude Code에서 로그인하세요."
+            case .awaitingKeychain: return "키체인 승인 대기 중 — 확인 창에 응답하면 이어서 가져와요."
             case .unauthorized:  return "인증 실패(401) — Claude Code에서 재인증하세요."
             case .rateLimited:   return "요청 제한(429) — 잠시 후 재시도합니다."
             case .http(let c):   return "서버 응답 HTTP \(c)."
@@ -108,7 +109,9 @@ struct OAuthUsageClient: Sendable {
     private func fetchRemote() async throws -> LimitsSnapshot {
         // Don't gate on expiresAt (its format is unreliable and a valid token can look
         // "expired"); just use the token and let a 401 trigger a refresh.
-        guard let creds = ClaudeCredentials.load() else { throw FetchError.noCredentials }
+        guard let creds = ClaudeCredentials.load() else {
+            throw ClaudeCredentials.isAwaitingKeychain ? FetchError.awaitingKeychain : FetchError.noCredentials
+        }
         do {
             return try await requestUsage(token: creds.accessToken)
         } catch FetchError.unauthorized {
@@ -240,14 +243,44 @@ struct ClaudeCredentials: Codable {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claudebar/token.json")
     }
 
-    static func load() -> ClaudeCredentials? {
+    /// `lock` only ever guards quick in-memory reads/writes. The Keychain read
+    /// (`SecItemCopyMatching`) can block indefinitely while its authorization dialog
+    /// is pending, so it runs under a SEPARATE single-flight `sourceLock` — holding
+    /// `lock` across it used to freeze the main thread (e.g. Settings' diagnostics
+    /// row reading `hasRefreshToken`) for as long as the dialog stayed unanswered.
+    private static let sourceLock = NSLock()
+    private static var awaitingSource = false
+
+    /// True while a Keychain read is in flight (typically: its dialog is waiting
+    /// for the user) — lets the fetch report "waiting for approval" instead of
+    /// "no credentials".
+    static var isAwaitingKeychain: Bool {
         lock.lock(); defer { lock.unlock() }
-        if let c = cached { return c }                 // in-memory (this launch)
-        if let c = readFile() { cached = c; return c } // our file — no prompt
+        return awaitingSource
+    }
+
+    static func load() -> ClaudeCredentials? {
+        if let c = cachedValue() { return c }          // in-memory (this launch)
+        // Single-flight, non-blocking: if another caller is already reading the source
+        // (likely stuck on the dialog), don't queue up behind it — each queued caller
+        // would pin a cooperative-pool thread for as long as the dialog stays open.
+        guard sourceLock.try() else { return nil }
+        defer { sourceLock.unlock() }
+        if let c = cachedValue() { return c }          // filled while we acquired sourceLock
+        if let c = readFile() { setCached(c); return c } // our file — no prompt
+        setAwaitingSource(true); defer { setAwaitingSource(false) }
         guard let c = readSource() else { return nil } // Claude Code (may prompt once)
         writeFile(c)
-        cached = c
+        setCached(c)
         return c
+    }
+
+    private static func cachedValue() -> ClaudeCredentials? {
+        lock.lock(); defer { lock.unlock() }
+        return cached
+    }
+    private static func setAwaitingSource(_ v: Bool) {
+        lock.lock(); awaitingSource = v; lock.unlock()
     }
 
     /// Drop the cached token (memory + file) so the next `load()` re-reads the

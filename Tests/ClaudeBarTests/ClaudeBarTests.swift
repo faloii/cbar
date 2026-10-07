@@ -368,6 +368,20 @@ final class ProjectionTests: XCTestCase {
         XCTAssertLessThanOrEqual(combined.timeToFull ?? .infinity, paced.timeToFull ?? .infinity)
     }
 
+    func testCombinedWeeklyIgnoresMidWeekSprintThatIsNotImminent() {
+        // Day 3, 40% used — paced is calm. A 30-min sprint at ~3%/h would "exhaust"
+        // in ~20h, still days before reset: not an emergency, so paced must win
+        // (this used to fire "주간 한도 곧 소진" on every focused stretch).
+        let week: TimeInterval = 7 * 24 * 3600
+        let resetsAt = t.addingTimeInterval(4 * 24 * 3600)
+        let pts: [(Date, Double)] = [(mins(-30), 38.5), (t, 40)]
+        let combined = Projection.combinedWeekly(points: pts, util: 40, resetsAt: resetsAt,
+                                                  windowSeconds: week, now: t)
+        let paced = Projection.paced(util: 40, resetsAt: resetsAt, windowSeconds: week, now: t)
+        XCTAssertEqual(paced.verdict, .safe)
+        XCTAssertEqual(combined, paced)
+    }
+
     func testCombinedWeeklyFallsBackToPacedWhenNoBurst() {
         // No burst signal (flat/insufficient data) → behaves exactly like `paced`.
         let week: TimeInterval = 7 * 24 * 3600
@@ -1390,6 +1404,22 @@ final class LimitAlertsTests: XCTestCase {
         XCTAssertFalse(after.contains { $0.id == "reset-after-block" || $0.id == "reset-done" })
     }
 
+    /// The realistic shape of the bug: the expiry tick still carries the cached
+    /// `rejected` from the last (pre-reset) fetch, and the weekly window is live
+    /// but well under 100%. The stale status must not keep it "blocked" — that
+    /// swallowed the freed alert and left `wasBlocked` set for a later, unrelated
+    /// reset to trip auto-resume on.
+    func testStaleRejectedWithLiveWeeklyStillFreesByTheClock() {
+        var s = LimitAlertState()
+        _ = eval(session: win(100, resetIn: 600), weekly: win(60, resetIn: 3 * 86400),
+                 status: "rejected", state: &s)
+        XCTAssertTrue(s.wasBlocked)
+        let out = eval(session: win(100, resetIn: -60), weekly: win(60, resetIn: 3 * 86400),
+                       status: "rejected", state: &s)
+        XCTAssertTrue(out.contains { $0.id == "reset-after-block" })
+        XCTAssertFalse(s.wasBlocked)
+    }
+
     func testExpiredWindowDoesNotCountAsBlockedOrThreshold() {
         var s = LimitAlertState()
         let out = eval(session: win(100, resetIn: -60), weekly: win(95, resetIn: -60),
@@ -1698,6 +1728,15 @@ final class AsyncTimeoutTests: XCTestCase {
     func testReturnsResultWhenOperationFinishesInTime() async {
         let result = await withTimeout(seconds: 1) { 42 }
         XCTAssertEqual(result, 42)
+    }
+
+    /// Regression guard: an earlier implementation slept the FULL timeout before
+    /// reading the result, so every refresh cycle waited 20s even for instant work.
+    func testFastOperationReturnsWithoutWaitingOutTheTimeout() async {
+        let start = Date()
+        let result = await withTimeout(seconds: 3) { 7 }
+        XCTAssertEqual(result, 7)
+        XCTAssertLessThan(Date().timeIntervalSince(start), 0.5)
     }
 
     /// Regression guard: an earlier implementation used `withTaskGroup`, which is

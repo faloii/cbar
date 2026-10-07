@@ -15,19 +15,33 @@ import Foundation
 /// call — it silently waited for the same hang it was supposed to escape (see
 /// `AsyncTimeoutTests.testReturnsNilWithoutWaitingForSlowOperation`, which would
 /// fail if this regressed back to that shape).
+///
+/// Returns as soon as EITHER side finishes — a fast operation must not wait out
+/// the full timeout (an earlier version slept unconditionally for `seconds`, so
+/// every refresh cycle took the whole timeout even when the work took 50ms).
 func withTimeout<T: Sendable>(seconds: TimeInterval,
                               operation: @escaping @Sendable () async -> T) async -> T? {
-    let box = TimeoutResultBox<T>()
-    Task {
-        let result = await operation()
-        await box.set(result)
+    let gate = TimeoutGate<T>()
+    return await withCheckedContinuation { (cont: CheckedContinuation<T?, Never>) in
+        let timer = Task {
+            // Cancelled → the operation already won; don't resume a second time.
+            do { try await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000)) } catch { return }
+            await gate.finish(nil, cont)
+        }
+        Task {
+            let result = await operation()
+            await gate.finish(result, cont)
+            timer.cancel()
+        }
     }
-    try? await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
-    return await box.get()
 }
 
-private actor TimeoutResultBox<T> {
-    private var value: T?
-    func set(_ v: T) { value = v }
-    func get() -> T? { value }
+/// Resumes the continuation exactly once — whichever of operation/timer gets here first.
+private actor TimeoutGate<T: Sendable> {
+    private var done = false
+    func finish(_ value: T?, _ cont: CheckedContinuation<T?, Never>) {
+        guard !done else { return }
+        done = true
+        cont.resume(returning: value)
+    }
 }

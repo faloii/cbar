@@ -152,12 +152,14 @@ extension UsageStore {
 
     /// True when you're currently rate-limited: a `rejected` status or a window at
     /// 100%. Drives the menu-bar "blocked" glyph, red tint, and the keep-awake
-    /// assertion. A cached `rejected` is only trusted while some un-expired window
-    /// backs it — a stale overnight "blocked" otherwise held keep-awake all night
-    /// for a limit that had already reset.
+    /// assertion. A cached `rejected` is only trusted while NO window from that same
+    /// fetch has passed its reset — same rule as `LimitAlerts` (one expired window
+    /// means the status is stale; a live window at 100% is still caught above).
     var isBlocked: Bool {
         if (maxLimitUtilization ?? 0) >= 100 { return true }
-        return limits?.status == "rejected" && (liveSession != nil || liveWeekly != nil)
+        let anyExpired = liveSession == nil && limits?.session5h != nil
+            || liveWeekly == nil && limits?.weekly7d != nil
+        return limits?.status == "rejected" && !anyExpired && (liveSession != nil || liveWeekly != nil)
     }
 
     /// Whether we're close enough to a limit to warrant the tighter refresh cadence
