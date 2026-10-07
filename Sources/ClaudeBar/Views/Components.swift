@@ -85,20 +85,40 @@ struct Card<Content: View>: View {
     }
 }
 
-/// Section header: a tinted SF Symbol + uppercase title.
-struct CardHeader: View {
+/// Section header: a tinted SF Symbol + uppercase title, plus an optional trailing
+/// slot (a timestamp, a basis label, a pill). One shared layout so every card's
+/// header lines up the same way — spacing, and trailing text in caption2/tertiary
+/// unless the trailing view sets its own color (e.g. a status pill).
+struct CardHeader<Trailing: View>: View {
     let icon: String
     let title: String
+    @ViewBuilder var trailing: Trailing
+
+    init(icon: String, title: String, @ViewBuilder trailing: () -> Trailing) {
+        self.icon = icon
+        self.title = title
+        self.trailing = trailing()
+    }
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 6) {
             Image(systemName: icon).font(.caption2.weight(.semibold)).foregroundStyle(Color.brand)
                 .accessibilityHidden(true)
             Text(title.uppercased())
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .kerning(0.4)
+            Spacer(minLength: 6)
+            trailing
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
+    }
+}
+
+extension CardHeader where Trailing == EmptyView {
+    init(icon: String, title: String) {
+        self.init(icon: icon, title: title) { EmptyView() }
     }
 }
 
@@ -299,7 +319,7 @@ struct ProjectionLine: View {
         let s = state
         if !s.text.isEmpty {
             HStack(alignment: .top, spacing: 5) {
-                Image(systemName: s.icon).frame(width: 12)
+                Image(systemName: s.icon).frame(width: 12).accessibilityHidden(true)
                 Text("\(tag) · \(s.text)").fixedSize(horizontal: false, vertical: true)
             }
             .font(.caption)   // one tier up from the reference lines below it (allowance/resets) —
@@ -347,7 +367,7 @@ struct WeeklyAllowanceLine: View {
         let s = state
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .top, spacing: 5) {
-                Image(systemName: s.icon).frame(width: 12)
+                Image(systemName: s.icon).frame(width: 12).accessibilityHidden(true)
                 Text(s.text).fixedSize(horizontal: false, vertical: true)
             }
             .font(.caption2)
@@ -423,7 +443,7 @@ struct PaceLine: View {
         let s = state
         if !s.text.isEmpty {
             HStack(alignment: .top, spacing: 5) {
-                Image(systemName: s.icon).frame(width: 12)
+                Image(systemName: s.icon).frame(width: 12).accessibilityHidden(true)
                 Text(s.text).fixedSize(horizontal: false, vertical: true)
             }
             .font(.caption)   // one tier up — this is the pace VERDICT, not a reference number
@@ -478,7 +498,7 @@ struct WorkTimeLine: View {
         let s = state
         if !s.text.isEmpty {
             HStack(alignment: .top, spacing: 6) {
-                Image(systemName: s.icon).font(.footnote)
+                Image(systemName: s.icon).font(.footnote).accessibilityHidden(true)
                 Text(s.text).fixedSize(horizontal: false, vertical: true)
             }
             .font(.footnote.weight(.semibold))
@@ -524,12 +544,12 @@ struct UpcomingResetsLine: View {
 
     var body: some View {
         if resets.count >= 2 {
-            HStack(alignment: .top, spacing: 5) {
-                Image(systemName: "calendar.badge.clock").frame(width: 12)
-                Text("오늘 리셋 · " + resets.map { Fmt.clock($0) }.joined(separator: " · "))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .font(.caption2).foregroundStyle(.secondary)
+            // No icon — it's plain info, not a status — but indented to line up with
+            // the status-iconed pace lines around it (12pt icon + 5pt gap).
+            Text("오늘 리셋 · " + resets.map { Fmt.clock($0) }.joined(separator: " · "))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 17)
+                .font(.caption2).foregroundStyle(.secondary)
         }
     }
 }

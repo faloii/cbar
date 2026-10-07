@@ -311,17 +311,15 @@ struct MenuContentView: View {
     }
 
     @ViewBuilder private var limitsSection: some View {
-        HStack(spacing: 6) {
-            CardHeader(icon: "gauge.with.dots.needle.67percent", title: "플랜 한도")
-            Spacer()
+        CardHeader(icon: "gauge.with.dots.needle.67percent", title: "플랜 한도") {
             if let l = store.limits, l.hasData {
                 Text("\(Fmt.age(l.fetchedAt, from: snap.generatedAt)) 갱신")
-                    .font(.caption2).foregroundStyle(.tertiary)
                     .help("이 수치가 마지막으로 갱신된 시점")
                 if l.stale {
                     Image(systemName: "wifi.exclamationmark")
-                        .font(.caption2).foregroundStyle(.orange)
+                        .foregroundStyle(.orange)
                         .help("캐시된 값 표시 중 — 마지막 새로고침 실패\n\(l.error ?? "원인 미상")")
+                        .accessibilityLabel("캐시된 값 — 마지막 새로고침 실패")
                 }
             }
         }
@@ -446,9 +444,7 @@ struct MenuContentView: View {
     @ViewBuilder private var efficiencySection: some View {
         let ctx = snap.currentContextTokens
         let verdict = store.efficiencyVerdict
-        HStack(spacing: 5) {
-            CardHeader(icon: "leaf", title: "효율")
-            Spacer()
+        CardHeader(icon: "leaf", title: "효율") {
             if verdict.showsPill {
                 Text(verdict.label)
                     .font(.caption2.weight(.semibold))
@@ -459,8 +455,7 @@ struct MenuContentView: View {
         }
         // Per-exchange consumption — the tangible efficiency dial (context size → burn).
         if ctx > 0 {
-            HStack(alignment: .top, spacing: 5) {
-                Image(systemName: "bubble.left.and.bubble.right").frame(width: 12)
+            Group {
                 if let p = store.perExchangePct {
                     Text("대화 ~\(Fmt.tokens(ctx)) · 주고받을 때마다 한도 ~\(ModelBurnRowView.pct(p))")
                 } else {
@@ -473,12 +468,9 @@ struct MenuContentView: View {
             // absolute size threshold — earlier than a bare `ctx >=
             // heavyContextTokens` check would.
             if CompactSuggestion.isHeavy(contextTokens: ctx, cacheReadShare: store.cacheEfficiency?.cacheReadShare ?? 0) {
-                HStack(alignment: .top, spacing: 5) {
-                    Image(systemName: "rectangle.compress.vertical").frame(width: 12)
-                    Text(heavyContextActionText(store.cacheEfficiency))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .font(.caption2).foregroundStyle(.orange)   // same /compact nudge color as the sessions card
+                Text(heavyContextActionText(store.cacheEfficiency))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .font(.caption2).foregroundStyle(.orange)   // same /compact nudge color as the sessions card
             }
         }
         // Cache mix — purely informational context for the number above. The action
@@ -487,19 +479,13 @@ struct MenuContentView: View {
         // makes a high re-read share normal even in a small conversation, so the
         // raw % alone doesn't tell you what to do about it.
         if let ce = store.cacheEfficiency {
-            HStack(alignment: .top, spacing: 5) {
-                Image(systemName: "arrow.triangle.2.circlepath").frame(width: 12)
-                Text("최근 5시간 새 작업 \(Int((ce.freshShare * 100).rounded()))% · 재읽기 \(Int((ce.cacheReadShare * 100).rounded()))%")
-            }
-            .font(.caption2).foregroundStyle(.secondary)
+            Text("최근 5시간 새 작업 \(Int((ce.freshShare * 100).rounded()))% · 재읽기 \(Int((ce.cacheReadShare * 100).rounded()))%")
+                .font(.caption2).foregroundStyle(.secondary)
         }
         // Learning loop: how the last completed session was spent.
         if let r = store.lastSessionRecap {
-            HStack(alignment: .top, spacing: 5) {
-                Image(systemName: "clock.arrow.circlepath").frame(width: 12)
-                Text(SessionCoach.recapText(r)).fixedSize(horizontal: false, vertical: true)
-            }
-            .font(.caption2).foregroundStyle(.tertiary)
+            Text(SessionCoach.recapText(r)).fixedSize(horizontal: false, vertical: true)
+                .font(.caption2).foregroundStyle(.tertiary)
         }
     }
 
@@ -543,19 +529,13 @@ struct MenuContentView: View {
                 .font(.caption2).foregroundStyle(.tertiary)
         }
         if let fit = store.planFitSignal {
-            HStack(alignment: .top, spacing: 7) {
-                Image(systemName: "chart.bar").font(.caption).foregroundStyle(.secondary)
-                Text(planFitText(fit)).font(.caption)
-            }
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.top, 2)
+            Text(planFitText(fit)).font(.caption)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
         }
         if let coaching = r.coaching {
-            HStack(alignment: .top, spacing: 7) {
-                Image(systemName: "lightbulb").font(.caption).foregroundStyle(.secondary)
-                Text(coaching).font(.caption)
-            }
-            .fixedSize(horizontal: false, vertical: true)
+            Text(coaching).font(.caption)
+                .fixedSize(horizontal: false, vertical: true)
         }
         Text("이번 주 vs 지난주").font(.caption2).foregroundStyle(.tertiary)
         // Which project is eating the weekly limit — useful when juggling several.
@@ -625,12 +605,10 @@ struct MenuContentView: View {
     }
 
     @ViewBuilder private var perModelSection: some View {
-        HStack {
-            CardHeader(icon: "chart.bar.fill", title: "모델별 소진 · 5시간")
-                .help(ModelTier.effortNote + " 이 Mac의 로그 기준이라, 다른 기기 사용은 빠져 있어요.")
-            Spacer()
-            Text(store.burnBasis.shortLabel).font(.caption2).foregroundStyle(.tertiary)
+        CardHeader(icon: "chart.bar.fill", title: "모델별 소진 · 5시간") {
+            Text(store.burnBasis.shortLabel)
         }
+        .help(ModelTier.effortNote + " 이 Mac의 로그 기준이라, 다른 기기 사용은 빠져 있어요.")
         VStack(alignment: .leading, spacing: 9) {
             ForEach(store.modelBurnRows) { ModelBurnRowView(row: $0, basis: store.burnBasis) }
         }
