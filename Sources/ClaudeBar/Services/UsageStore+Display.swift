@@ -124,11 +124,9 @@ extension UsageStore {
 
     /// The last few notifications CBar has posted (newest first) — a safety net
     /// for passive/no-banner ones and anything missed while away. See `NotificationLog`.
-    var recentNotifications: [NotificationLogEntry] {
-        // compacted() so pre-dedup historical duplicates already on disk disappear
-        // from the list on next open, not only after the next new notification.
-        NotificationLog.compacted(NotificationLog.load()).reversed()
-    }
+    /// compacted() (in `reloadDiskReadings`) so pre-dedup historical duplicates
+    /// already on disk disappear from the list on next open.
+    var recentNotifications: [NotificationLogEntry] { diskReadings.recentNotifications }
 
     /// Per-model burn comparison for the current 5-hour window.
     var modelBurnRows: [ModelBurnRow] {
@@ -168,35 +166,39 @@ extension UsageStore {
         isBlocked || isOverThreshold || sessionProjection?.verdict == .atRisk
     }
 
-    /// Menu-bar tint: green (safe) → orange (warning) → red (nearly out), based on
-    /// the utilization relevant to the chosen bar metric — escalated by pace the
-    /// same way the ring/badge in the popover are. This icon is the one thing
-    /// visible WITHOUT opening the popover, so it can't be allowed to stay calm
-    /// while an at-risk pace is already flagged once you do open it.
+    /// The session/weekly risk the rings, the status badge and the menu-bar tint
+    /// ALL read — one computation, so the three can't disagree (the menu bar used
+    /// to use warnThreshold/95% while the rings used fixed 60/85%, so the same
+    /// 70% showed green in the bar and orange in the popover).
+    var sessionRisk: WindowRisk? {
+        liveSession.map { WindowRisk(utilization: $0.utilization, projection: sessionProjection, imminentWindow: 3600) }
+    }
+    var weeklyRisk: WindowRisk? {
+        liveWeekly.map { WindowRisk(utilization: $0.utilization, projection: weeklyProjection, imminentWindow: 24 * 3600) }
+    }
+
+    /// The weekly window is the binding constraint right now — at/over the warn
+    /// threshold or projected to run out before reset. "Run heavy work now" style
+    /// encouragement must stay quiet while this is true.
+    var isWeeklyBinding: Bool {
+        (liveWeekly?.utilization ?? 0) >= Double(warnThreshold) || weeklyProjection?.verdict == .atRisk
+    }
+
+    /// Menu-bar tint — the same `WindowRisk` tier as the ring for the displayed
+    /// metric. When the warning glyph is up (raised by the WORST window), the tint
+    /// follows that worst window too, so a calm "12%" can't sit next to a triangle
+    /// the weekly window raised.
     var barColor: Color {
         if isBlocked { return .red }
-        let shown: Double?
-        let paceTier: RiskTier
+        let worst = [sessionRisk?.tier, weeklyRisk?.tier].compactMap { $0 }.max()
+        let shown: RiskTier?
         switch barMetric {
-        case .sessionLimit:
-            shown = liveSession?.utilization
-            paceTier = RiskTier.forPace(sessionProjection, imminentWindow: 3600)
-        case .weeklyLimit:
-            shown = liveWeekly?.utilization
-            paceTier = RiskTier.forPace(weeklyProjection, imminentWindow: 24 * 3600)
-        case .bothLimits:
-            shown = maxLimitUtilization
-            paceTier = max(RiskTier.forPace(sessionProjection, imminentWindow: 3600),
-                           RiskTier.forPace(weeklyProjection, imminentWindow: 24 * 3600))
-        default:
-            return isOverThreshold ? .orange : .primary
+        case .sessionLimit: shown = sessionRisk?.tier
+        case .weeklyLimit:  shown = weeklyRisk?.tier
+        case .bothLimits:   shown = worst
+        default:            return isOverThreshold ? .orange : .primary
         }
-        // The warning glyph keys on the WORST window (isOverThreshold) — don't let
-        // the tint contradict it by following only the displayed metric (a safe-green
-        // "12%" next to a triangle raised by the weekly window at 85%).
-        let effective: Double? = isOverThreshold ? max(shown ?? 0, maxLimitUtilization ?? 0) : shown
-        guard let u = effective else { return .primary }
-        let byThreshold: RiskTier = u >= 95 ? .danger : (u >= Double(warnThreshold) ? .caution : .safe)
-        return max(byThreshold, paceTier).color
+        guard let tier = isOverThreshold ? worst : shown else { return .primary }
+        return tier.color
     }
 }

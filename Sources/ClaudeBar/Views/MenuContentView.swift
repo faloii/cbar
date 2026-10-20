@@ -334,9 +334,7 @@ struct MenuContentView: View {
             // would contradict the bar's "—" with the same stale data.
             let session = store.liveSession
             let weekly = store.liveWeekly
-            PlanStatusBadge(
-                sessionTier: session.map { RiskTier.combined(fraction: $0.fraction, projection: store.sessionProjection, imminentWindow: 3600) },
-                weeklyTier: weekly.map { RiskTier.combined(fraction: $0.fraction, projection: store.weeklyProjection, imminentWindow: 24 * 3600) })
+            PlanStatusBadge(session: store.sessionRisk, weekly: store.weeklyRisk)
                 .padding(.top, 2)
             HStack(alignment: .top, spacing: 10) {
                 if let w = session {
@@ -365,7 +363,8 @@ struct MenuContentView: View {
             // stops here — badge + rings + this line is enough to answer "am I
             // fine?" without reading the pace/reset/chart detail below.
             if let w = session {
-                WorkTimeLine(window: w, projection: store.sessionProjection, now: snap.generatedAt)
+                WorkTimeLine(window: w, projection: store.sessionProjection, now: snap.generatedAt,
+                             weeklyBinding: store.isWeeklyBinding)
                     .padding(.top, 4)
             }
 

@@ -210,6 +210,35 @@ final class CompactSuggestionTests: XCTestCase {
     }
 }
 
+final class PlanStatusTests: XCTestCase {
+    private let atRiskSoon = Projection(ratePerHour: 40, timeToFull: 1800, secondsToReset: 7200, verdict: .atRisk)
+    private let calm = Projection(ratePerHour: 2, timeToFull: nil, secondsToReset: 7200, verdict: .safe)
+
+    func testSafeHeadline() {
+        let h = PlanStatus.headline(session: WindowRisk(utilization: 20, projection: calm, imminentWindow: 3600), weekly: nil)
+        XCTAssertEqual(h.tier, .safe)
+    }
+
+    func testHighUsageAtCalmPaceStatesUsageNotPace() {
+        // 72% used at a fine rate: caution by usage — must NOT say "페이스 주의"
+        // (the pace line right below would say "딱 좋은 속도").
+        let s = WindowRisk(utilization: 72, projection: calm, imminentWindow: 3600)
+        XCTAssertFalse(s.paceDriven)
+        let h = PlanStatus.headline(session: s, weekly: nil)
+        XCTAssertEqual(h.tier, .caution)
+        XCTAssertTrue(h.text.contains("세션 72%"))
+        XCTAssertFalse(h.text.contains("페이스"))
+    }
+
+    func testPaceDrivenDangerNamesTheWindow() {
+        let w = WindowRisk(utilization: 40, projection: atRiskSoon, imminentWindow: 24 * 3600)
+        XCTAssertTrue(w.paceDriven)
+        let h = PlanStatus.headline(session: WindowRisk(utilization: 10, projection: calm, imminentWindow: 3600), weekly: w)
+        XCTAssertEqual(h.tier, .danger)
+        XCTAssertTrue(h.text.hasPrefix("주간이 이 속도면"))
+    }
+}
+
 final class RiskTierTests: XCTestCase {
     func testForFractionMatchesMeterBarTiers() {
         XCTAssertEqual(RiskTier.forFraction(0.3), .safe)
@@ -808,6 +837,17 @@ final class AdviceTests: XCTestCase {
         let tips = Advice.compute(session: nil, weekly: nil, sessionUtil: 20, weeklyUtil: 20,
                                   models: models, warnThreshold: 80, now: now)
         XCTAssertTrue(tips.contains { $0.kind == .costModel })
+    }
+
+    func testWeeklyAtRiskBelowThresholdStillWarnsAndSuppressesHealthy() {
+        // Weekly at 60% (< warn 80) but projected to run out: used to yield NO weekly
+        // tip and fall through to "더 써도 됩니다" despite every other surface warning.
+        let session = Projection(ratePerHour: 5, timeToFull: 36000, secondsToReset: 3600, verdict: .safe)
+        let wk = Projection(ratePerHour: 2, timeToFull: 50_000, secondsToReset: 3 * 86400, verdict: .atRisk)
+        let tips = Advice.compute(session: session, weekly: wk, sessionUtil: 20, weeklyUtil: 60,
+                                  models: [], warnThreshold: 80, now: now)
+        XCTAssertTrue(tips.contains { $0.kind == .weeklyDefer })
+        XCTAssertFalse(tips.contains { $0.kind == .healthy })
     }
 
     func testHealthyWhenAllCalm() {
@@ -1592,8 +1632,8 @@ final class LogDedupeTests: XCTestCase {
 final class BurnAnomalyTests: XCTestCase {
     func testFlagsPaceWellAboveTypicalDay() {
         // Sorted [1.8, 1.9, 2.0, 2.2] → even-count median = (1.9+2.0)/2 = 1.95/day
-        // typical; 3h in and already at $6 → projected ~$48/day, well above 2x.
-        let v = BurnAnomaly.verdict(todayCost: 6, hoursElapsedToday: 3, pastDailyCosts: [2, 1.8, 2.2, 1.9])
+        // typical; 8h in and already at $16 → projected ~$48/day, well above 2x.
+        let v = BurnAnomaly.verdict(todayCost: 16, hoursElapsedToday: 8, pastDailyCosts: [2, 1.8, 2.2, 1.9])
         XCTAssertNotNil(v)
         XCTAssertEqual(v?.typicalDailyCost ?? 0, 1.95, accuracy: 0.01)
         XCTAssertGreaterThanOrEqual(v?.multiplier ?? 0, BurnAnomaly.minMultiplier)
@@ -1601,10 +1641,10 @@ final class BurnAnomalyTests: XCTestCase {
 
     func testMedianIsTrueAverageForEvenCount() {
         // Odd count → the middle element (unambiguous).
-        let odd = BurnAnomaly.verdict(todayCost: 10, hoursElapsedToday: 5, pastDailyCosts: [1, 2, 3])
+        let odd = BurnAnomaly.verdict(todayCost: 16, hoursElapsedToday: 8, pastDailyCosts: [1, 2, 3])
         XCTAssertEqual(odd?.typicalDailyCost ?? 0, 2, accuracy: 0.01)
         // Even count → average of the two middle elements, not just the upper one.
-        let even = BurnAnomaly.verdict(todayCost: 10, hoursElapsedToday: 5, pastDailyCosts: [1, 2, 3, 4])
+        let even = BurnAnomaly.verdict(todayCost: 16, hoursElapsedToday: 8, pastDailyCosts: [1, 2, 3, 4])
         XCTAssertEqual(even?.typicalDailyCost ?? 0, 2.5, accuracy: 0.01)
     }
 
@@ -1623,9 +1663,27 @@ final class BurnAnomalyTests: XCTestCase {
     }
 
     func testWeekdaySpecificVerdictCarriesTheFlag() {
-        let v = BurnAnomaly.verdict(todayCost: 6, hoursElapsedToday: 3, pastDailyCosts: [2, 1.8, 2.2, 1.9],
+        let v = BurnAnomaly.verdict(todayCost: 16, hoursElapsedToday: 8, pastDailyCosts: [2, 1.8, 2.2, 1.9],
                                     isWeekdaySpecific: true)
         XCTAssertEqual(v?.isWeekdaySpecific, true)
+    }
+
+    func testSilentShortlyAfterMidnight() {
+        // 2h into the day (a late-night session) — too little of the day to project
+        // to 24h; this used to fire "평소 대비 10배" every night.
+        XCTAssertNil(BurnAnomaly.verdict(todayCost: 8, hoursElapsedToday: 2, pastDailyCosts: [2, 1.8, 2.2, 1.9]))
+    }
+
+    func testWeekdayBaselineIgnoresNearZeroDays() {
+        // Only two REAL same-weekday days — not enough, so it must fall back to all
+        // days rather than pick a weekday baseline verdict() would then reject.
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "UTC")!
+        let today = cal.date(from: DateComponents(year: 2026, month: 10, day: 20))!   // a Tuesday
+        func ago(_ d: Int) -> Date { cal.date(byAdding: .day, value: -d, to: today)! }
+        let costs = [(date: ago(7), cost: 0.005), (date: ago(14), cost: 20.0), (date: ago(21), cost: 25.0),
+                     (date: ago(1), cost: 10.0), (date: ago(2), cost: 12.0)]
+        let (_, isWeekdaySpecific) = BurnAnomaly.personalBaseline(dailyCosts: costs, today: today, calendar: cal)
+        XCTAssertFalse(isWeekdaySpecific)
     }
 
     func testSilentWhenTypicalCostJustBelowMinimum() {

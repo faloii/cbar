@@ -64,6 +64,45 @@ enum RiskTier: Int, Comparable, Equatable {
     }
 }
 
+/// One live window's risk, plus WHY it's at that tier — the ring color, the status
+/// badge and the menu-bar tint all read this, so they can't disagree.
+struct WindowRisk: Equatable {
+    let tier: RiskTier
+    /// The pace verdict alone reaches `tier` (vs. raw usage alone) — decides whether
+    /// the headline says "이 속도면…" or just states how much is used.
+    let paceDriven: Bool
+    let utilization: Double
+
+    init(utilization: Double, projection: Projection?, imminentWindow: TimeInterval) {
+        let pace = RiskTier.forPace(projection, imminentWindow: imminentWindow)
+        let tier = max(RiskTier.forFraction(min(1, max(0, utilization / 100))), pace)
+        self.tier = tier
+        self.paceDriven = tier != .safe && pace >= tier
+        self.utilization = utilization
+    }
+}
+
+/// The 플랜 한도 card's one-line headline, built from the session/weekly risks.
+enum PlanStatus {
+    static func headline(session: WindowRisk?, weekly: WindowRisk?) -> (tier: RiskTier, text: String) {
+        let named: [(String, WindowRisk)] = [("세션", session), ("주간", weekly)].compactMap { n, r in r.map { (n, $0) } }
+        let tier = named.map(\.1.tier).max() ?? .safe
+        guard tier != .safe else { return (.safe, "지금 페이스면 오늘·이번 주 안 막혀요") }
+        let worst = named.filter { $0.1.tier == tier }
+        // Blame the pace only when the pace is what put it here — a 72% window used at
+        // a perfectly fine rate is "used a lot", not "going too fast" (the line under
+        // the rings would otherwise say "딱 좋은 속도" right below a pace warning).
+        let paced = worst.filter { $0.1.paceDriven }
+        if !paced.isEmpty {
+            let subject = paced.map(\.0).joined(separator: "·")
+            return (tier, tier == .danger ? "\(subject)이 이 속도면 리셋 전에 소진돼요"
+                                          : "\(subject) 페이스 주의 — 리셋 전에 빠듯할 수 있어요")
+        }
+        let used = worst.map { "\($0.0) \(Int($0.1.utilization.rounded()))%" }.joined(separator: " · ")
+        return (tier, tier == .danger ? "\(used) 사용 — 한도에 가까워요" : "\(used) 사용 — 여유가 줄었어요")
+    }
+}
+
 /// Burn-rate projection for a single limit window, derived from recent samples.
 struct Projection: Equatable {
     let ratePerHour: Double          // percentage points per hour (>= 0)

@@ -190,41 +190,23 @@ struct StatRow: View {
 /// for the whole card, built from the SAME `RiskTier` the rings use so the
 /// headline can never disagree with what they show.
 struct PlanStatusBadge: View {
-    let sessionTier: RiskTier?
-    let weeklyTier: RiskTier?
-
-    private var tier: RiskTier { max(sessionTier ?? .safe, weeklyTier ?? .safe) }
-
-    /// Which window(s) are driving the worst tier — without this, "이 속도면
-    /// 리셋 전에 소진돼요" reads as if it could be either ring, and you'd have
-    /// to go compare their colors yourself to find out which one it means.
-    private var subject: String {
-        let sessionWorst = (sessionTier ?? .safe) == tier
-        let weeklyWorst = (weeklyTier ?? .safe) == tier
-        switch (sessionWorst, weeklyWorst) {
-        case (true, true):  return "세션·주간"
-        case (true, false): return "세션"
-        case (false, true): return "주간"
-        default:            return ""
-        }
-    }
-
-    private var state: (text: String, icon: String) {
-        switch tier {
-        case .safe:    return ("지금 페이스면 오늘·이번 주 안 막혀요", "checkmark.circle.fill")
-        case .caution: return ("\(subject) 페이스 주의 — 리셋 전에 빠듯할 수 있어요", "exclamationmark.triangle.fill")
-        case .danger:  return ("\(subject)이 이 속도면 리셋 전에 소진돼요", "exclamationmark.octagon.fill")
-        }
-    }
+    let session: WindowRisk?
+    let weekly: WindowRisk?
 
     var body: some View {
-        let s = state
-        HStack(spacing: 6) {
-            Image(systemName: s.icon)
-            Text(s.text).fixedSize(horizontal: false, vertical: true)
+        let h = PlanStatus.headline(session: session, weekly: weekly)
+        let icon: String
+        switch h.tier {
+        case .safe:    icon = "checkmark.circle.fill"
+        case .caution: icon = "exclamationmark.triangle.fill"
+        case .danger:  icon = "exclamationmark.octagon.fill"
+        }
+        return HStack(spacing: 6) {
+            Image(systemName: icon).accessibilityHidden(true)
+            Text(h.text).fixedSize(horizontal: false, vertical: true)
         }
         .font(.subheadline.weight(.semibold))
-        .foregroundStyle(tier.color)
+        .foregroundStyle(h.tier.color)
     }
 }
 
@@ -499,6 +481,9 @@ struct WorkTimeLine: View {
     let window: LimitWindow
     let projection: Projection?
     let now: Date
+    /// Weekly is the binding constraint (`UsageStore.isWeeklyBinding`) — then
+    /// session headroom isn't a reason to "run heavy work now".
+    var weeklyBinding = false
 
     var body: some View {
         let s = state
@@ -533,7 +518,7 @@ struct WorkTimeLine: View {
             return ("앞으로 ~\(dur(b.workableSeconds)) 더 작업 가능\(clock)", .orange, "hourglass.tophalf.filled")
         }
         // Won't block before reset. Flag big leftover headroom as "go faster" room.
-        if let left = projection?.headroomAtReset, left >= 25 {
+        if let left = projection?.headroomAtReset, left >= 25, !weeklyBinding {
             return ("리셋까지 안 막힘 · ~\(dur(b.workableSeconds)) 여유 — 미룬 큰 작업 지금 돌리세요",
                     .green, "checkmark.circle")
         }

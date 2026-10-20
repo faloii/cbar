@@ -121,7 +121,29 @@ extension UsageStore {
     }
 
     /// "Re-read share has been creeping up lately" — see `CacheEfficiencyTrend`.
-    var cacheEfficiencyTrend: CacheEfficiencyTrend.Verdict? {
+    /// Served from `diskReadings` (loaded once per refresh), not decoded from disk
+    /// on every popover render.
+    var cacheEfficiencyTrend: CacheEfficiencyTrend.Verdict? { diskReadings.cacheEfficiencyTrend }
+
+    /// Your personal "usual speed at this hour" — see `HourlyBurnHistory`. nil
+    /// until enough same-hour history has accumulated (no false personalization
+    /// from day one). Served from `diskReadings`.
+    var typicalHourRate: Double? { diskReadings.typicalHourRate }
+
+    /// Re-reads the on-disk history files behind `cacheEfficiencyTrend`,
+    /// `typicalHourRate` and `recentNotifications`. Called once per refresh cycle
+    /// (and after any notification is posted) — previously each was a computed
+    /// property decoding JSON from disk, evaluated twice per popover body render.
+    func reloadDiskReadings() {
+        diskReadings = DiskReadings(
+            cacheEfficiencyTrend: Self.loadCacheEfficiencyTrend(),
+            typicalHourRate: HourlyBurnHistory.typicalRate(
+                forHour: Calendar.current.component(.hour, from: snapshot.generatedAt),
+                in: HourlyBurnHistory.load()),
+            recentNotifications: NotificationLog.compacted(NotificationLog.load()).reversed())
+    }
+
+    private static func loadCacheEfficiencyTrend() -> CacheEfficiencyTrend.Verdict? {
         let now = Date()
         let samples = CacheEfficiencyHistory.load()
         let recentCutoff = now.addingTimeInterval(-3 * 86400)      // last 3 days
@@ -129,14 +151,6 @@ extension UsageStore {
         let recent = samples.filter { $0.at >= recentCutoff }.map(\.freshShare)
         let baseline = samples.filter { $0.at >= baselineCutoff && $0.at < recentCutoff }.map(\.freshShare)
         return CacheEfficiencyTrend.verdict(recentShares: recent, baselineShares: baseline)
-    }
-
-    /// Your personal "usual speed at this hour" — see `HourlyBurnHistory`. nil
-    /// until enough same-hour history has accumulated (no false personalization
-    /// from day one).
-    var typicalHourRate: Double? {
-        let hour = Calendar.current.component(.hour, from: snapshot.generatedAt)
-        return HourlyBurnHistory.typicalRate(forHour: hour, in: HourlyBurnHistory.load())
     }
 
     /// The project driving most of this week's spend, when one clearly dominates —

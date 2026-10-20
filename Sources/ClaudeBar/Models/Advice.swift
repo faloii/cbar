@@ -32,6 +32,10 @@ enum Advice {
         func dur(_ s: TimeInterval?) -> String {
             s.map { Fmt.countdown(to: now.addingTimeInterval($0), from: now) } ?? "?"
         }
+        // Multi-day spans read as "3d 23h", not a raw "95h 21m".
+        func longDur(_ s: TimeInterval?) -> String {
+            s.map { Fmt.mediumCountdown(to: now.addingTimeInterval($0), from: now) } ?? "?"
+        }
         func rate(_ r: Double) -> String { r >= 10 ? "\(Int(r.rounded()))%/h" : String(format: "%.1f%%/h", r) }
         // Rough turn estimate from this window's realized burn (requests per util%).
         let totalRequests = models.reduce(0) { $0 + $1.requests }
@@ -116,14 +120,18 @@ enum Advice {
         if let p = topWeeklyProject, p.sharePct >= 50 {
             projectNote = " 이번 주는 주로 \(p.name) 프로젝트가 원인이에요(\(Int(p.sharePct.rounded()))%)."
         }
-        if let wu = weeklyUtil, wu >= t {
+        // `weeklyBinding`, not just `wu >= t`: an at-risk weekly pace below the
+        // threshold used to produce NO weekly tip at all, leaving the card empty
+        // enough to fall through to the "더 써도 됩니다" healthy line — while the
+        // ring, menu bar and notification all said the week would run out.
+        if let wu = weeklyUtil, weeklyBinding {
             if weekly?.verdict == .atRisk {
                 tips.append(AdviceTip(kind: .weeklyDefer, level: .warn, icon: "calendar.badge.exclamationmark",
-                    text: "주간 한도 \(Int(wu.rounded()))% — 지금 추세면 리셋(\(dur(weekly?.secondsToReset)) 뒤) 전에 바닥나요. "
+                    text: "주간 한도 \(Int(wu.rounded()))% — 지금 추세면 리셋(\(longDur(weekly?.secondsToReset)) 뒤) 전에 바닥나요. "
                         + "큰 작업은 리셋 후로 미루세요.\(projectNote)"))
             } else {
                 tips.append(AdviceTip(kind: .weeklyDefer, level: .warn, icon: "calendar",
-                    text: "주간 한도 \(Int(wu.rounded()))% — \(dur(weekly?.secondsToReset)) 후 리셋. 큰 작업은 리셋 후가 안전해요.\(projectNote)"))
+                    text: "주간 한도 \(Int(wu.rounded()))% — \(longDur(weekly?.secondsToReset)) 후 리셋. 큰 작업은 리셋 후가 안전해요.\(projectNote)"))
             }
         }
 

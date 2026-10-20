@@ -148,10 +148,22 @@ struct SettingsView: View {
                         store.resumeCommand = ResumeCommand.continueLastPreview()
                     }
                     .disabled(!store.enableLiveLimits)
-                    TextField("비우면 자동 ‘이전 대화 이어가기’. 예: cd ~/proj && claude --continue -p \"계속\" --model haiku",
-                              text: $store.resumeCommand, axis: .vertical)
-                        .lineLimit(1...3)
+                    // Not an inline TextField: this panel deliberately can't become key
+                    // (so it never steals focus and dismisses the popover), which also
+                    // means a TextField here never receives keystrokes. Edit in a
+                    // small modal prompt that CAN take keyboard focus instead.
+                    Text(store.resumeCommand.isEmpty ? "(비어 있음 — 자동 ‘이전 대화 이어가기’)" : store.resumeCommand)
                         .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(store.resumeCommand.isEmpty ? .secondary : .primary)
+                        .lineLimit(3)
+                        .textSelection(.enabled)
+                    HStack {
+                        Button("명령 편집…") { editResumeCommand() }
+                        if !store.resumeCommand.isEmpty {
+                            Button("비우기") { store.resumeCommand = "" }
+                        }
+                    }
+                    .disabled(!store.enableLiveLimits)
                     Text("명령칸을 채우면 그 명령이 대신 실행됩니다(모델·프롬프트·폴더 자유). 비워두면 위 자동 동작을 씁니다.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -232,6 +244,27 @@ struct SettingsView: View {
 
     private static var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+    }
+
+    /// Modal prompt for the resume command — an app-modal alert can take keyboard
+    /// focus, unlike this non-key Settings panel. (Opening it dismisses the popover,
+    /// and Settings with it; the saved value is there next time.)
+    private func editResumeCommand() {
+        let alert = NSAlert()
+        alert.messageText = "자동 재개 명령"
+        alert.informativeText = "비우면 자동 ‘이전 대화 이어가기’를 씁니다.\n예: cd ~/proj && claude --continue -p \"계속\" --model haiku"
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
+        field.stringValue = store.resumeCommand
+        field.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        field.placeholderString = "claude --continue …"
+        alert.accessoryView = field
+        alert.addButton(withTitle: "저장")
+        alert.addButton(withTitle: "취소")
+        alert.window.initialFirstResponder = field
+        NSApp.activate(ignoringOtherApps: true)
+        if alert.runModal() == .alertFirstButtonReturn {
+            store.resumeCommand = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
     }
 
     @ViewBuilder private func diagnosticsRow(_ label: String, _ value: String) -> some View {

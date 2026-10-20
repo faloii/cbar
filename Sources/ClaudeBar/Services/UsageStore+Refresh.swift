@@ -99,6 +99,7 @@ extension UsageStore {
             self.processModelDownshiftSuggestion()
             self.processAdviceFollowThrough()
             self.maybeWeeklySummary()
+            self.reloadDiskReadings()   // after the alert passes above may have logged a notification
             // If the risk level changed, re-arm the timer at the matching cadence.
             if self.isAtLimitRisk != self.lastUrgent {
                 self.lastUrgent = self.isAtLimitRisk

@@ -20,7 +20,9 @@ enum BurnAnomaly {
     }
 
     static let minMultiplier = 2.0       // only worth a nudge at 2x+ a normal day
-    static let minHoursElapsed = 1.0     // <1h of data is too noisy to extrapolate
+    // Extrapolating "today so far" to a full day right after midnight turned a
+    // late-night session into a nightly "10배" false alarm (2h of night work ×12).
+    static let minHoursElapsed = 6.0
     static let minTypicalCost = 0.5      // near-zero history makes any usage look "∞x"
     static let minHistoryDays = 3        // need a few real days to call anything "typical"
     static let minWeekdaySamples = 3     // need a few of the SAME weekday to trust that baseline
@@ -49,7 +51,12 @@ enum BurnAnomaly {
     static func personalBaseline(dailyCosts: [(date: Date, cost: Double)], today: Date,
                                  calendar: Calendar = .current) -> (costs: [Double], isWeekdaySpecific: Bool) {
         let todayWeekday = calendar.component(.weekday, from: today)
-        let sameWeekday = dailyCosts.filter { calendar.component(.weekday, from: $0.date) == todayWeekday }
+        // Count only days `verdict` will actually use (> $0.01) — counting near-zero
+        // days here picked the weekday baseline, then `verdict` dropped them and had
+        // too few left, silently disabling detection for that weekday entirely.
+        let sameWeekday = dailyCosts.filter {
+            $0.cost > 0.01 && calendar.component(.weekday, from: $0.date) == todayWeekday
+        }
         if sameWeekday.count >= minWeekdaySamples {
             return (sameWeekday.map(\.cost), true)
         }

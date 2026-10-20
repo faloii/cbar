@@ -5,6 +5,14 @@ import AppKit
 
 /// Popover cards the user can show/hide and reorder (Settings → 섹션).
 /// Declaration order is the default layout order.
+/// Readings derived from the on-disk history files (cache-efficiency samples,
+/// hourly burn history, notification log), cached per refresh cycle.
+struct DiskReadings {
+    var cacheEfficiencyTrend: CacheEfficiencyTrend.Verdict?
+    var typicalHourRate: Double?
+    var recentNotifications: [NotificationLogEntry] = []
+}
+
 enum PanelSection: String, CaseIterable, Identifiable {
     case advice, limits, efficiency, recent, perModel, modelGuide, sessions, today, weeklyReview, goals, notificationLog
     var id: String { rawValue }
@@ -89,6 +97,8 @@ final class UsageStore: ObservableObject {
     /// Efficiency recap of every completed session in roughly the last 12h, oldest →
     /// newest — lets `Advice` compare consecutive sessions for a feast/famine swing.
     @Published var sessionRecapsToday: [SessionCoach.Recap] = []
+    /// On-disk history readings, reloaded once per refresh — see `reloadDiskReadings()`.
+    @Published var diskReadings = DiskReadings()
     /// The most-recently-completed session (for the learning loop) — always just
     /// `sessionRecapsToday.last`; kept as a computed property so the two can't
     /// drift out of sync the way two independently-set `@Published` vars could.
@@ -236,6 +246,7 @@ final class UsageStore: ObservableObject {
 
     init() {
         if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() }
+        reloadDiskReadings()   // so the notification log etc. show before the first refresh completes
         // A plain Timer doesn't fire while the Mac sleeps, so the first tick after
         // lid-open could be minutes away — refresh immediately on wake instead.
         // NOT `force: true`: after any real sleep the cache TTL (60-180s) has long

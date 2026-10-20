@@ -143,7 +143,14 @@ struct OAuthUsageClient: Sendable {
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw FetchError.badResponse }
         switch http.statusCode {
-        case 200:  return Self.parse(data)
+        case 200:
+            // An undocumented endpoint can change shape and still answer 200. Treat a
+            // body with no usable windows as a failure, so the last good cache is kept
+            // (marked stale) and backoff applies — instead of overwriting it with an
+            // empty snapshot and re-requesting every TTL.
+            let snap = Self.parse(data)
+            guard snap.hasData else { throw FetchError.badResponse }
+            return snap
         case 401:  throw FetchError.unauthorized
         case 429:  throw FetchError.rateLimited
         default:   throw FetchError.http(http.statusCode)
