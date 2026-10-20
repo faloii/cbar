@@ -79,6 +79,11 @@ struct MenuContentView: View {
                 .padding(.horizontal, 14)
                 .padding(.vertical, 9)
         }
+        // Already-rendered text doesn't re-resolve its font when `dynamicTypeSize`
+        // changes at runtime here — "글씨 크게" only took effect after closing and
+        // reopening the popover. A new identity on toggle rebuilds the tree with
+        // the new size, exactly like a reopen, while Settings stays open beside it.
+        .id(store.largeText)
         .frame(width: 350)
         // MenuBarExtra(.window) sizes its panel to the FIRST layout pass and never
         // shrinks it afterwards — that first pass uses `maxScroll` (contentHeight is
@@ -594,7 +599,7 @@ struct MenuContentView: View {
             .help("이 Mac의 Claude Code 로그 기준이에요 — 다른 기기에서 쓴 건 이 수치에 반영되지 않아요. 세션/주간 한도 %는 계정 전체 기준입니다.")
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text("~\(Fmt.usd(snap.windowCost))")
-                .font(.system(size: 24, weight: .semibold, design: .rounded))
+                .font(.system(.title, design: .rounded, weight: .semibold))   // a text style, so it follows "글씨 크게"
                 .monospacedDigit()
             Spacer()
             Text("\(Fmt.tokens(snap.windowTokens.total)) 토큰")

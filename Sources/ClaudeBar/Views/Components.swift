@@ -251,6 +251,11 @@ struct RingGauge: View {
     /// the actual clock time instead, same as `preciseReset` always does.
     static let preciseResetWindow: TimeInterval = 24 * 3600
 
+    /// Grows the ring and its % with the popover's text size ("글씨 크게"), so the
+    /// centre number doesn't stay a fixed 17pt while everything around it scales.
+    @ScaledMetric(relativeTo: .title3) private var scale: CGFloat = 1
+    private var diameter: CGFloat { size * scale }
+
     private var color: Color {
         RiskTier.combined(fraction: window.fraction, projection: projection, imminentWindow: imminentWindow).color
     }
@@ -270,16 +275,16 @@ struct RingGauge: View {
                 if let pf = paceFraction {
                     Capsule().fill(Color.primary.opacity(0.55))
                         .frame(width: 2.5, height: 10)
-                        .frame(width: size, height: size, alignment: .top)
+                        .frame(width: diameter, height: diameter, alignment: .top)
                         .rotationEffect(.degrees(360 * min(1, max(0, pf))))
                 }
                 Text("\(Int(window.utilization.rounded()))%")
-                    .font(.system(size: 17, weight: .bold)).monospacedDigit()
+                    .font(.system(size: 17 * scale, weight: .bold)).monospacedDigit()
                     .foregroundStyle(color)
                     .contentTransition(.numericText())
                     .animation(.easeOut(duration: 0.5), value: window.utilization)
             }
-            .frame(width: size, height: size)
+            .frame(width: diameter, height: diameter)
             VStack(spacing: 1) {
                 Text(title).font(.caption.weight(.semibold))
                 if let reset = window.resetsAt {
@@ -578,6 +583,9 @@ struct UsageTrendChart: View {
     let windowSeconds: TimeInterval
     var height: CGFloat = 46
 
+    /// Pointer x inside the plot while hovering — drives the "M/d HH:mm · N%" readout.
+    @State private var hoverX: CGFloat?
+
     /// %-value of the even-pace guide at a given time: linear from window-start (0%)
     /// to reset (100%). nil when the reset time is unknown.
     private func paceValue(at t: Date) -> Double? {
@@ -635,6 +643,40 @@ struct UsageTrendChart: View {
                     ctx.fill(Path(ellipseIn: dot), with: .color(color))
                 }
                 .frame(height: height)
+                .overlay {
+                    // Hover readout: snap to the nearest recorded sample, mark it, and
+                    // label its time + utilization.
+                    GeometryReader { geo in
+                        if let hx = hoverX {
+                            let w = geo.size.width, h = geo.size.height
+                            let target = tMin.addingTimeInterval(Double(min(max(hx, 0), w) / w) * span)
+                            if let p = pts.min(by: { abs($0.t.timeIntervalSince(target)) < abs($1.t.timeIntervalSince(target)) }) {
+                                let x = CGFloat(p.t.timeIntervalSince(tMin) / span) * w
+                                let y = h - CGFloat(min(p.v, top) / top) * h
+                                Rectangle().fill(Color.primary.opacity(0.25))
+                                    .frame(width: 1, height: h)
+                                    .position(x: x, y: h / 2)
+                                Circle().fill(color).frame(width: 6, height: 6)
+                                    .overlay(Circle().strokeBorder(Color(nsColor: .controlBackgroundColor), lineWidth: 1))
+                                    .position(x: x, y: y)
+                                Text("\(Fmt.monthDay(p.t)) \(Fmt.clock(p.t)) · \(Int(p.v.rounded()))%")
+                                    .font(.caption2.weight(.semibold)).monospacedDigit()
+                                    .padding(.horizontal, 5).padding(.vertical, 2)
+                                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                                    .fixedSize()
+                                    // keep the label inside the plot horizontally, above the point
+                                    .position(x: min(max(x, 56), w - 56), y: max(7, y - 13))
+                            }
+                        }
+                    }
+                }
+                .contentShape(Rectangle())
+                .onContinuousHover { phase in
+                    switch phase {
+                    case .active(let loc): hoverX = loc.x
+                    case .ended: hoverX = nil
+                    }
+                }
                 .accessibilityHidden(true)
 
                 HStack(spacing: 5) {
