@@ -215,7 +215,20 @@ struct MenuContentView: View {
         case .advice:
             if store.enableLiveLimits, !store.adviceTips.isEmpty { Card { adviceSection } }
         case .limits:
-            if store.enableLiveLimits { Card { limitsSection } }
+            if store.enableLiveLimits {
+                Card { limitsSection }
+            } else {
+                // Turning live limits off used to make this card (and 조언/효율)
+                // vanish with no explanation — easy to mistake for a bug weeks later.
+                Card {
+                    CardHeader(icon: "gauge.with.dots.needle.67percent", title: "플랜 한도")
+                    Text("실시간 한도가 꺼져 있어요 — 세션·주간 사용률, 조언, 효율 카드는 켜야 보여요.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button("설정에서 켜기") { SettingsOpener.open() }
+                        .controlSize(.small)
+                }
+            }
         case .efficiency:
             if store.hasEfficiencyData { Card { efficiencySection } }
         case .recent:
@@ -649,7 +662,7 @@ struct MenuContentView: View {
     // Recent conversations by cost — spot which sessions ran on which model so you
     // can right-size the model next time, and which ones are worth /compact-ing.
     @ViewBuilder private var sessionsSection: some View {
-        CardHeader(icon: "rectangle.stack.fill", title: "세션별 · 최근")
+        CardHeader(icon: "rectangle.stack.fill", title: "대화별 · 최근")
         VStack(alignment: .leading, spacing: 9) {
             ForEach(snap.recentSessions.prefix(5)) { s in
                 let compact = CompactSuggestion.isHeavy(s)
@@ -698,7 +711,7 @@ struct MenuContentView: View {
             StatRow(label: "비용", value: "~\(Fmt.usd(snap.todayCost))")
             StatRow(label: "토큰", value: Fmt.tokens(snap.todayTokens.total))
             StatRow(label: "요청", value: Fmt.int(snap.todayRequests))
-            StatRow(label: "세션", value: Fmt.int(snap.todaySessions))
+            StatRow(label: "대화", value: Fmt.int(snap.todaySessions))
             StatRow(label: "도구 호출", value: Fmt.int(snap.todayToolCalls))
         }
     }

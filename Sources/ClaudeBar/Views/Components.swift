@@ -567,6 +567,11 @@ struct UsageTrendChart: View {
     let secondsToReset: TimeInterval?
     let windowSeconds: TimeInterval
     var height: CGFloat = 46
+    /// "세션" / "주간" — the two charts are stacked, so each footer names its window
+    /// instead of leaving you to infer it from the time span.
+    var label: String = ""
+    /// Only one of the stacked charts needs the guide-line legend.
+    var showsLegend = true
 
     /// Pointer x inside the plot while hovering — drives the "M/d HH:mm · N%" readout.
     @State private var hoverX: CGFloat?
@@ -665,10 +670,14 @@ struct UsageTrendChart: View {
                 .accessibilityHidden(true)
 
                 HStack(spacing: 5) {
+                    if !label.isEmpty {
+                        Text(label).fontWeight(.semibold).foregroundStyle(.primary)
+                        Text("·")
+                    }
                     Text("최근 \(Fmt.mediumCountdown(to: tMax, from: tMin))")
                     Text("·")
                     Text("\(Int(first.v.rounded()))% → \(Int(last.v.rounded()))%").monospacedDigit()
-                    if paceNow != nil {
+                    if paceNow != nil, showsLegend {
                         Spacer(minLength: 4)
                         HStack(spacing: 3) {
                             Rectangle().fill(Color.primary.opacity(0.35)).frame(width: 8, height: 1)
@@ -699,7 +708,7 @@ struct SessionTrendChart: View {
         let pts = self.pts
         if pts.count >= 2 {
             UsageTrendChart(pts: pts, now: now, secondsToReset: secondsToReset,
-                            windowSeconds: windowSeconds, height: height)
+                            windowSeconds: windowSeconds, height: height, label: "세션")
         } else {
             Text("세션 추이 측정 중… (몇 분 더 쌓이면 표시)")
                 .font(.caption2).foregroundStyle(.secondary)
@@ -725,7 +734,7 @@ struct WeeklyTrendChart: View {
         let pts = self.pts
         if pts.count >= 2 {
             UsageTrendChart(pts: pts, now: now, secondsToReset: secondsToReset,
-                            windowSeconds: windowSeconds, height: height)
+                            windowSeconds: windowSeconds, height: height, label: "주간", showsLegend: false)
         } else {
             Text("주간 추이 측정 중… (데이터가 더 쌓이면 표시)")
                 .font(.caption2).foregroundStyle(.secondary)

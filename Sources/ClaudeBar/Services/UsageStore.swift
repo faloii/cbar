@@ -24,7 +24,7 @@ enum PanelSection: String, CaseIterable, Identifiable {
         case .recent:         return "최근 5시간"
         case .perModel:       return "모델별 소진"
         case .modelGuide:     return "모델 가이드"
-        case .sessions:       return "세션별"
+        case .sessions:       return "대화별"
         case .today:          return "오늘"
         case .weeklyReview:   return "주간 리뷰"
         case .goals:          return "습관 목표"

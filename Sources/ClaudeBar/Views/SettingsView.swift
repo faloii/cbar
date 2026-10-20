@@ -243,7 +243,10 @@ struct SettingsView: View {
     }
 
     private static var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—"
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "—"
+        guard let build = info?["CFBundleVersion"] as? String, build != short else { return short }
+        return "\(short) (build \(build))"
     }
 
     /// Modal prompt for the resume command — an app-modal alert can take keyboard

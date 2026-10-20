@@ -28,6 +28,7 @@ if [ -f Resources/AppIcon.icns ]; then
 fi
 
 VERSION="${CLAUDEBAR_VERSION:-$(cat VERSION 2>/dev/null || echo 1.0.0)}"
+BUILD="${CLAUDEBAR_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -40,7 +41,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 ${ICON_KEY}
     <key>CFBundlePackageType</key>     <string>APPL</string>
     <key>CFBundleShortVersionString</key> <string>${VERSION}</string>
-    <key>CFBundleVersion</key>         <string>${VERSION}</string>
+    <key>CFBundleVersion</key>         <string>${BUILD}</string>
     <key>LSMinimumSystemVersion</key>  <string>14.0</string>
     <!-- Menu-bar-only: no Dock icon, no app-switcher entry. -->
     <key>LSUIElement</key>             <true/>

@@ -15,7 +15,7 @@ jobs:
     # macOS 15 ships Xcode 16 / Swift 6, required by Package.swift (tools 6.0).
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Toolchain
         run: swift --version
