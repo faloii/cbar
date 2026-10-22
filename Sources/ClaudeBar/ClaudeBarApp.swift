@@ -56,7 +56,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.banner, .sound, .list])
+        // fyi alerts are posted `.passive` — notification list only, no banner
+        // (the quiet-coach rule); everything else banners. Sound is set per alert.
+        if notification.request.content.interruptionLevel == .passive {
+            completionHandler([.list])
+        } else {
+            completionHandler([.banner, .sound, .list])
+        }
     }
 
     /// Handle the action buttons registered in `Notifier.registerCategories()`.

@@ -44,9 +44,13 @@ enum DailyAllowance {
         // in the last minutes before reset.
         let daysRemaining = max(secondsToReset / 86400, 1.0 / 24)
         let recommended = max(0, 100 - util) / daysRemaining
-        // A baseline ABOVE the current reading means the week reset overnight —
-        // everything on the meter now accrued today (≈), not "0% used today".
-        let usedToday = todayStartUtil.map { $0 > util ? util : util - $0 }
+        // The week started after midnight (reset at e.g. 02:00) → everything on the
+        // meter accrued today; subtracting last week's midnight baseline would read
+        // 45% as "5%". The `baseline > util` check stays as a fallback for when the
+        // reset time is off by a little.
+        let weekStart = reset.addingTimeInterval(-7 * 86400)
+        let weekStartedToday = weekStart > calendar.startOfDay(for: now)
+        let usedToday = todayStartUtil.map { weekStartedToday || $0 > util ? util : util - $0 }
 
         let workdays = remainingWorkdays(now: now, resetsAt: reset, calendar: calendar)
         var recommendedPerWorkday: Double?

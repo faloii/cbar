@@ -526,7 +526,7 @@ struct WorkTimeLine: View {
     }
 }
 
-/// Today's remaining session-window reset times, so you can plan around the
+/// The next few session-window reset times (assuming continuous use), so you can plan around the
 /// day's rhythm ("리셋 직후에 큰 작업을 걸어두자") instead of only reacting once
 /// the current window is nearly up. Quiet by design — a plain info line, not
 /// an alert.
@@ -537,7 +537,12 @@ struct UpcomingResetsLine: View {
         if resets.count >= 2 {
             // No icon — it's plain info, not a status — but indented to line up with
             // the status-iconed pace lines around it (12pt icon + 5pt gap).
-            Text("오늘 리셋 · " + resets.map { Fmt.clock($0) }.joined(separator: " · "))
+            // A 5h window restarts at the first message AFTER a reset, so the later
+            // times hold only if you keep working straight through — say so, and
+            // mark times that fall past midnight instead of calling them "오늘".
+            Text("계속 쓰면 리셋 · " + resets.map { d in
+                (Calendar.current.isDateInToday(d) ? "" : "내일 ") + Fmt.clock(d)
+            }.joined(separator: " · "))
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.leading, 17)
                 .font(.caption2).foregroundStyle(.secondary)

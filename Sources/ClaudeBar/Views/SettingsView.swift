@@ -144,8 +144,18 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
 
                 DisclosureGroup("명령 직접 지정 (선택)") {
-                    Button("기본 명령 채워서 보기/수정") {
-                        store.resumeCommand = ResumeCommand.continueLastPreview()
+                    // Opens the editor PRE-FILLED instead of saving straight away: a saved
+                    // command pins today's folder, silently replacing the dynamic
+                    // "find the last project" default — only save if the user means to.
+                    // Built off the main thread (walks every log + spawns a login shell).
+                    Button("기본 명령으로 시작해서 편집…") {
+                        Task {
+                            let preview = await Task.detached(priority: .userInitiated) {
+                                ResumeCommand.continueLastPreview()
+                            }.value
+                            editResumeCommand(initial: preview,
+                                              note: "저장하면 이 폴더로 고정돼요 — 비워두면 매번 마지막 작업 폴더를 찾아요.")
+                        }
                     }
                     .disabled(!store.enableLiveLimits)
                     // Not an inline TextField: this panel deliberately can't become key
@@ -252,12 +262,12 @@ struct SettingsView: View {
     /// Modal prompt for the resume command — an app-modal alert can take keyboard
     /// focus, unlike this non-key Settings panel. (Opening it dismisses the popover,
     /// and Settings with it; the saved value is there next time.)
-    private func editResumeCommand() {
+    private func editResumeCommand(initial: String? = nil, note: String? = nil) {
         let alert = NSAlert()
         alert.messageText = "자동 재개 명령"
-        alert.informativeText = "비우면 자동 ‘이전 대화 이어가기’를 씁니다.\n예: cd ~/proj && claude --continue -p \"계속\" --model haiku"
+        alert.informativeText = note ?? "비우면 자동 ‘이전 대화 이어가기’를 씁니다.\n예: cd ~/proj && claude --continue -p \"계속\" --model haiku"
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 420, height: 24))
-        field.stringValue = store.resumeCommand
+        field.stringValue = initial ?? store.resumeCommand
         field.font = .monospacedSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
         field.placeholderString = "claude --continue …"
         alert.accessoryView = field

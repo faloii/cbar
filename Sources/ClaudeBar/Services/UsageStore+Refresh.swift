@@ -21,46 +21,63 @@ extension UsageStore {
 
         let sessionStillStale = limits?.session5h.map { $0.expired(asOf: now) } ?? false
         let weeklyStillStale = limits?.weekly7d.map { $0.expired(asOf: now) } ?? false
-        if sessionStillStale || weeklyStillStale, resetConfirmAttempts < Self.maxResetConfirmAttempts {
-            resetConfirmAttempts += 1
-            let timer = Timer(fire: now.addingTimeInterval(Self.resetConfirmRetryInterval), interval: 0, repeats: false) { [weak self] _ in
-                Task { @MainActor in self?.refresh(force: true) }
+        if sessionStillStale || weeklyStillStale {
+            // Quick retries until a fetch shows the new window. The counter resets
+            // only once the window actually rolls over — resetting it after the last
+            // retry restarted the burst on every ordinary tick while offline or
+            // rate-limited, hammering the endpoint indefinitely.
+            if resetConfirmAttempts < Self.maxResetConfirmAttempts {
+                resetConfirmAttempts += 1
+                let timer = Timer(fire: now.addingTimeInterval(Self.resetConfirmRetryInterval), interval: 0, repeats: false) { [weak self] _ in
+                    Task { @MainActor in self?.refresh(cacheTTL: 0) }
+                }
+                RunLoop.main.add(timer, forMode: .common)
+                resetBoundaryTimer = timer
+                return
             }
-            RunLoop.main.add(timer, forMode: .common)
-            resetBoundaryTimer = timer
-            return
+        } else {
+            resetConfirmAttempts = 0
         }
-        resetConfirmAttempts = 0
 
         guard let next = [limits?.session5h?.resetsAt, limits?.weekly7d?.resetsAt]
             .compactMap({ $0 }).filter({ $0 > now }).min() else { return }
+        // ttl 0 (not `force`): skip the cache but still honor the failure backoff.
         let timer = Timer(fire: next.addingTimeInterval(5), interval: 0, repeats: false) { [weak self] _ in
-            Task { @MainActor in self?.refresh(force: true) }
+            Task { @MainActor in self?.refresh(cacheTTL: 0) }
         }
         RunLoop.main.add(timer, forMode: .common)
         resetBoundaryTimer = timer
     }
 
     /// Refresh local usage and (if enabled) the live limits. `force` bypasses the
-    /// limits cache TTL — used when the user explicitly hits Refresh.
-    func refresh(force: Bool = false) {
-        guard !isRefreshing else { return }
+    /// limits cache TTL and the failure backoff — used when the user explicitly hits
+    /// Refresh. `cacheTTL` overrides only the TTL (automatic retries use 0: fresh
+    /// data, but still backing off from a failing/rate-limited endpoint).
+    func refresh(force: Bool = false, cacheTTL: TimeInterval? = nil) {
+        guard !isRefreshing else { pendingRefresh = true; return }
+        pendingRefresh = false
         isRefreshing = true
         lastRefreshAttemptAt = Date()
         let reader = self.reader
         let client = self.limitsClient
         let live = enableLiveLimits
         // Always parse the cheap stats cache (for the menu-bar/weekly summary); skip
-        // only the heavy session-log scan when the popover is closed and the bar metric
-        // is a limit % (driven by `limits` alone). Exception: the "current conversation
-        // got heavy" nudge needs `currentSessionId` to stay fresh to be worth anything,
-        // so keep scanning every tick while that's on (the per-file parse cache makes
-        // repeat scans cheap — only the most recently modified log actually reparses).
-        let full = popoverVisible || !barMetric.needsLiveLimits
+        // the session-log scan when the popover is closed and the bar metric is a
+        // limit % (driven by `limits` alone) — but not for long: rescan at least every
+        // `maxSessionScanAge` and after midnight, so "today", the window and the
+        // current-conversation id don't sit on yesterday's scan. (Rescans are cheap:
+        // the parse cache reads only what was appended since.)
         let previous = snapshot
+        let now = Date()
+        let lastScan = previous.sessionLogsScannedAt
+        let scanStale = lastScan.map {
+            now.timeIntervalSince($0) >= Self.maxSessionScanAge
+                || !Calendar.current.isDate($0, inSameDayAs: now)
+        } ?? true
+        let full = popoverVisible || !barMetric.needsLiveLimits || scanStale
         // Near a limit, fetch fresher data (shorter cache TTL) so the warning is
         // timely; when safe, stay gentle on the rate-limited endpoint.
-        let ttl: TimeInterval = isAtLimitRisk ? 60 : OAuthUsageClient.cacheTTL
+        let ttl: TimeInterval = cacheTTL ?? (isAtLimitRisk ? 60 : OAuthUsageClient.cacheTTL)
         Task {
             // Timeout-wrapped too (not just the live-limits fetch below): this is
             // plain file I/O and shouldn't hang, but "shouldn't" is exactly what we
@@ -74,7 +91,9 @@ extension UsageStore {
                 self.snapshot = snap
                 // Feeds CacheEfficiencyTrend's multi-week "재읽기 비율이 늘고 있어요"
                 // read — a single 5h-window snapshot in isolation can't show a trend.
-                if let ce = CacheEfficiency.verdict(snap.windowTokens) {
+                // Fresh scans only: a carried-over window re-logged under a new
+                // timestamp would skew the trend toward stale readings.
+                if full, let ce = CacheEfficiency.verdict(snap.windowTokens) {
                     CacheEfficiencyHistory.append(freshShare: ce.freshShare, at: snap.generatedAt)
                 }
             }
@@ -106,6 +125,7 @@ extension UsageStore {
                 self.restartTimer()
             }
             self.isRefreshing = false
+            if self.pendingRefresh { self.refresh() }
         }
     }
 

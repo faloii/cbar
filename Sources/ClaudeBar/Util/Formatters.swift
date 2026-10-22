@@ -30,6 +30,7 @@ enum Fmt {
     static func countdown(to date: Date, from now: Date = Date()) -> String {
         let secs = max(0, Int(date.timeIntervalSince(now)))
         let h = secs / 3600, m = (secs % 3600) / 60
+        if h >= 24 { return "\(h / 24)d \(h % 24)h" }   // "140h 32m" reads poorly
         if h > 0 { return "\(h)h \(m)m" }
         if m > 0 { return "\(m)m" }
         return "<1m"

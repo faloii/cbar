@@ -50,12 +50,15 @@ extension UsageStore {
     /// so it has its own opt-in toggle.
     func processModelDownshiftSuggestion() {
         guard notifyModelDownshift, enableLiveLimits else { return }
+        // Quiet check FIRST: shouldNotify consumes the one-shot, so checking it
+        // during a snooze silently discarded the suggestion instead of deferring it.
+        guard !isQuietNow(Date()) else { return }
         guard ModelDownshiftSuggestion.shouldNotify(modelRecap, state: &modelDownshiftState) else { return }
-        guard !isQuietNow(Date()), let v = modelRecap, let to = v.downshiftTo else { return }
+        guard let v = modelRecap, let to = v.downshiftTo else { return }
         let savingPct = Int(((v.downshiftSaving ?? 0) * 100).rounded())
         Notifier.notify(
-            title: "\(v.model) 대신 \(to)면 충분해 보여요",
-            body: "최근 턴 출력이 가벼운 편이에요 — \(to)로 바꾸면 이 창에서 비용 \(savingPct)% 절감돼요 (한도 소모량은 동일).",
+            title: "\(v.model) 대신 \(to) 정도면 충분해 보여요",
+            body: "최근 턴 출력이 가벼운 편이에요 — 모델을 \(to) 쪽으로 바꾸면 이 창에서 비용 \(savingPct)% 절감돼요 (한도 소모량은 동일).",
             id: "model-downshift-\(v.model)", urgency: .nudge, category: .limit)
     }
 

@@ -26,7 +26,10 @@ struct ClaudeDataReader {
     func load(now: Date = Date(), includeSessionLogs: Bool = true) -> UsageSnapshot {
         var snap = UsageSnapshot(generatedAt: now)
         applyStatsCache(to: &snap, now: now)
-        if includeSessionLogs { applySessionLogs(to: &snap, now: now) }
+        if includeSessionLogs {
+            applySessionLogs(to: &snap, now: now)
+            snap.sessionLogsScannedAt = now
+        }
         return snap
     }
 
@@ -237,7 +240,12 @@ struct ClaudeDataReader {
         let cwd: String         // working dir → project label for the per-session view
         let model: String
         let tokens: TokenCounts? // assistant turns only
-        let toolUseCount: Int
+        /// tool_use block ids in this line. Claude Code writes ONE response as several
+        /// lines (one per content block) sharing message.id/requestId/usage, so dedup
+        /// collapses them to one record — the ids are unioned there so the tool_use
+        /// lines it drops still count.
+        var toolUseIds: [String]
+        var toolUseCount: Int { toolUseIds.count }
         /// "message.id:requestId" — the identity of one API response. The same
         /// response is written to the logs again whenever a conversation is
         /// resumed/forked into a new session file, so summing raw lines counts the
@@ -255,9 +263,11 @@ struct ClaudeDataReader {
     /// Key-less records pass through. Result is sorted by timestamp.
     static func dedupe(_ records: [LogRecord]) -> [LogRecord] {
         var best: [String: LogRecord] = [:]
+        var tools: [String: Set<String>] = [:]
         var out: [LogRecord] = []
         for r in records {
             guard let k = r.dedupKey else { out.append(r); continue }
+            if !r.toolUseIds.isEmpty { tools[k, default: []].formUnion(r.toolUseIds) }
             if let cur = best[k] {
                 let rT = r.tokens?.total ?? 0, cT = cur.tokens?.total ?? 0
                 if rT > cT || (rT == cT && r.timestamp < cur.timestamp) { best[k] = r }
@@ -265,13 +275,19 @@ struct ClaudeDataReader {
                 best[k] = r
             }
         }
-        out.append(contentsOf: best.values)
+        for (k, var r) in best {
+            if let ids = tools[k] { r.toolUseIds = ids.sorted() }
+            out.append(r)
+        }
         return out.sorted { $0.timestamp < $1.timestamp }
     }
 
     // Per-file parse cache so a refresh re-parses only files that actually changed
-    // (keyed by modification date + size); unchanged logs are reused.
-    private struct CachedParse { let mtime: Date; let size: Int; let records: [LogRecord] }
+    // (keyed by modification date + size); unchanged logs are reused. Session logs
+    // are append-only, so a file that only GREW is parsed from `offset` (the end of
+    // its last complete line) instead of from the top — the active conversation's
+    // log can be 100MB+ and changes on every turn.
+    private struct CachedParse { let mtime: Date; let size: Int; let offset: UInt64; let records: [LogRecord] }
     private static let parseCacheLock = NSLock()
     private static var parseCache: [String: CachedParse] = [:]
 
@@ -326,16 +342,25 @@ struct ClaudeDataReader {
         }
         Self.pruneCache(keeping: Set(recent.map { $0.url.path }))
 
-        // 2) Parse them in parallel across cores (cache hits skip the work).
+        // 2) Parse them in parallel across cores (cache hits skip the work). Each
+        // iteration writes only its own slot through the buffer pointer — writing a
+        // Swift Array element from several threads is a data race.
         var results = [[LogRecord]](repeating: [], count: recent.count)
-        DispatchQueue.concurrentPerform(iterations: recent.count) { i in
-            let f = recent[i]
-            if let cached = Self.cachedRecords(key: f.url.path, mtime: f.mtime, size: f.size) {
-                results[i] = cached
-            } else {
-                let parsed = self.parse(fileAt: f.url)
-                Self.storeRecords(key: f.url.path, mtime: f.mtime, size: f.size, records: parsed)
-                results[i] = parsed
+        results.withUnsafeMutableBufferPointer { slots in
+            DispatchQueue.concurrentPerform(iterations: recent.count) { i in
+                let f = recent[i]
+                let key = f.url.path
+                let cached = Self.cachedParse(key: key)
+                if let c = cached, c.mtime == f.mtime, c.size == f.size {
+                    slots[i] = c.records
+                    return
+                }
+                // Grown since last time → parse only the appended tail.
+                let resume = cached.flatMap { $0.size <= f.size && $0.offset > 0 ? $0 : nil }
+                let (parsed, offset) = self.parse(fileAt: f.url, from: resume?.offset ?? 0)
+                let records = (resume?.records ?? []) + parsed
+                Self.storeRecords(key: key, entry: CachedParse(mtime: f.mtime, size: f.size, offset: offset, records: records))
+                slots[i] = records
             }
         }
         // Dedup must happen at merge time (the copies live in DIFFERENT files), so
@@ -343,15 +368,14 @@ struct ClaudeDataReader {
         return Self.dedupe(results.flatMap { $0 })
     }
 
-    private static func cachedRecords(key: String, mtime: Date, size: Int) -> [LogRecord]? {
+    private static func cachedParse(key: String) -> CachedParse? {
         parseCacheLock.lock(); defer { parseCacheLock.unlock() }
-        guard let c = parseCache[key], c.mtime == mtime, c.size == size else { return nil }
-        return c.records
+        return parseCache[key]
     }
 
-    private static func storeRecords(key: String, mtime: Date, size: Int, records: [LogRecord]) {
+    private static func storeRecords(key: String, entry: CachedParse) {
         parseCacheLock.lock(); defer { parseCacheLock.unlock() }
-        parseCache[key] = CachedParse(mtime: mtime, size: size, records: records)
+        parseCache[key] = entry
     }
 
     private static func pruneCache(keeping keys: Set<String>) {
@@ -359,26 +383,36 @@ struct ClaudeDataReader {
         parseCache = parseCache.filter { keys.contains($0.key) }
     }
 
-    /// Stream the file line-by-line via a FileHandle so a large session log isn't
-    /// loaded into memory all at once (peak memory ≈ one chunk + one line).
-    private func parse(fileAt url: URL) -> [LogRecord] {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return [] }
+    /// Stream the file line-by-line from byte `offset` via a FileHandle so a large
+    /// session log isn't loaded into memory all at once (peak memory ≈ one chunk +
+    /// one line). Returns the records and the offset just past the last complete
+    /// line — a trailing line still being written is left for the next pass.
+    func parse(fileAt url: URL, from offset: UInt64 = 0) -> (records: [LogRecord], offset: UInt64) {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return ([], offset) }
         defer { try? handle.close() }
+        if offset > 0 { try? handle.seek(toOffset: offset) }
 
         var out: [LogRecord] = []
         var buffer = Data()
+        var consumed = offset
         let newline = UInt8(0x0A)
 
         while let chunk = try? handle.read(upToCount: 1 << 16), !chunk.isEmpty {
             buffer.append(chunk)
-            while let nl = buffer.firstIndex(of: newline) {
-                let line = buffer.subdata(in: buffer.startIndex..<nl)
-                buffer.removeSubrange(buffer.startIndex...nl)
-                if let record = Self.record(from: line) { out.append(record) }
+            var start = buffer.startIndex
+            while let nl = buffer[start...].firstIndex(of: newline) {
+                if let record = Self.record(from: buffer[start..<nl]) { out.append(record) }
+                start = nl + 1
             }
+            consumed += UInt64(start - buffer.startIndex)
+            buffer = Data(buffer[start...])   // one copy per chunk, not one per line
         }
-        if let record = Self.record(from: buffer) { out.append(record) }
-        return out
+        // A final line without a newline: take it only if it's complete JSON.
+        if !buffer.isEmpty, let record = Self.record(from: buffer) {
+            out.append(record)
+            consumed += UInt64(buffer.count)
+        }
+        return (out, consumed)
     }
 
     /// Parse one JSONL line (as raw bytes) into a `LogRecord`, or nil to skip.
@@ -386,6 +420,9 @@ struct ClaudeDataReader {
         guard !line.isEmpty,
               let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
               let type = obj["type"] as? String,
+              // Only assistant turns feed any aggregate (tokens, tool calls, sessions);
+              // dropping user/system lines roughly halves the cache's memory.
+              type == "assistant",
               let ts = obj["timestamp"] as? String,
               let date = DateParse.iso(ts)
         else { return nil }
@@ -394,7 +431,7 @@ struct ClaudeDataReader {
         let message = obj["message"] as? [String: Any]
 
         var tokens: TokenCounts?
-        var toolUses = 0
+        var toolUseIds: [String] = []
         if let message {
             if let usage = message["usage"] as? [String: Any] {
                 tokens = TokenCounts(
@@ -405,7 +442,9 @@ struct ClaudeDataReader {
                 )
             }
             if let content = message["content"] as? [[String: Any]] {
-                toolUses = content.reduce(0) { $0 + (($1["type"] as? String) == "tool_use" ? 1 : 0) }
+                for (i, block) in content.enumerated() where (block["type"] as? String) == "tool_use" {
+                    toolUseIds.append(block["id"] as? String ?? "\(ts)#\(i)")
+                }
             }
         }
 
@@ -422,7 +461,7 @@ struct ClaudeDataReader {
             cwd: obj["cwd"] as? String ?? "",
             model: message?["model"] as? String ?? "unknown",
             tokens: tokens,
-            toolUseCount: toolUses,
+            toolUseIds: toolUseIds,
             dedupKey: dedupKey
         )
     }

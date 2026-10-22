@@ -1392,6 +1392,7 @@ final class LimitAlertsTests: XCTestCase {
         // Verdict leaves .atRisk with a clear margin (well under 100% at reset) → re-arms.
         let safe = Projection(ratePerHour: 1, timeToFull: 99999, secondsToReset: 7200, verdict: .safe, projectedAtReset: 40)
         _ = eval(weekly: win(62), wp: safe, state: &s)
+        s.lastFired = [:]   // per-id cooldown elapsed (covered in AuditFixTests)
         XCTAssertTrue(eval(weekly: win(64), wp: atRisk, state: &s).contains { $0.id == "risk-weekly" })
     }
 
@@ -1424,6 +1425,7 @@ final class LimitAlertsTests: XCTestCase {
         // Once genuinely safe (clear margin), re-arms.
         let safe = Projection(ratePerHour: 1, timeToFull: 99999, secondsToReset: 6 * 3600, verdict: .safe, projectedAtReset: 30)
         _ = eval(session: win(60, resetIn: 6 * 3600), sp: safe, state: &s)
+        s.lastFired = [:]   // per-id cooldown elapsed
         XCTAssertTrue(eval(session: win(60, resetIn: 6 * 3600), sp: atRisk, state: &s).contains { $0.id == "risk-session" })
     }
 
@@ -1598,7 +1600,7 @@ final class LogDedupeTests: XCTestCase {
     private func rec(_ key: String?, at: Date, session: String = "s", output: Int = 1) -> ClaudeDataReader.LogRecord {
         ClaudeDataReader.LogRecord(timestamp: at, type: "assistant", sessionId: session, cwd: "",
                                    model: "m", tokens: TokenCounts(input: 1, output: output, cacheWrite: 0, cacheRead: 0),
-                                   toolUseCount: 0, dedupKey: key)
+                                   toolUseIds: [], dedupKey: key)
     }
 
     func testIdenticalForkCopiesKeepEarliestAttribution() {
@@ -1888,5 +1890,118 @@ final class NotificationLogDedupTests: XCTestCase {
         XCTAssertEqual(out.count, 3)
         XCTAssertEqual(out.filter { $0.title == "주간 곧 소진" }.count, 2)   // first + the far-later one
         XCTAssertEqual(out.filter { $0.title == "세션 곧 소진" }.count, 1)
+    }
+}
+
+final class AuditFixTests: XCTestCase {
+    let now = Date(timeIntervalSince1970: 1_000_000)
+
+    private func rec(_ key: String, at: Date, output: Int, tools: [String]) -> ClaudeDataReader.LogRecord {
+        ClaudeDataReader.LogRecord(timestamp: at, type: "assistant", sessionId: "s", cwd: "",
+                                   model: "m", tokens: TokenCounts(input: 1, output: output, cacheWrite: 0, cacheRead: 0),
+                                   toolUseIds: tools, dedupKey: key)
+    }
+
+    func testDedupeKeepsToolUsesFromDroppedContentBlockLines() {
+        // One response written as three lines (thinking, tool_use, tool_use) — same
+        // key, same usage. Dedup keeps one record but must still count both tools.
+        let out = ClaudeDataReader.dedupe([rec("a", at: now, output: 10, tools: []),
+                                           rec("a", at: now.addingTimeInterval(1), output: 10, tools: ["t1"]),
+                                           rec("a", at: now.addingTimeInterval(2), output: 10, tools: ["t2"]),
+                                           // a resumed-session copy of the same tool line: no double count
+                                           rec("a", at: now.addingTimeInterval(9), output: 10, tools: ["t1"])])
+        XCTAssertEqual(out.count, 1)
+        XCTAssertEqual(out.first?.toolUseCount, 2)
+    }
+
+    func testIncrementalParseReadsOnlyAppendedCompleteLines() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("cbar-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+        func line(_ id: String) -> String {
+            #"{"type":"assistant","timestamp":"2026-10-20T01:00:00Z","sessionId":"s","requestId":"r\#(id)","message":{"id":"m\#(id)","model":"x","usage":{"input_tokens":1,"output_tokens":2},"content":[{"type":"tool_use","id":"tu\#(id)"}]}}"#
+        }
+        let user = #"{"type":"user","timestamp":"2026-10-20T01:00:00Z","sessionId":"s"}"#
+        try (line("1") + "\n" + user + "\n" + String(line("2").prefix(40))).write(to: url, atomically: true, encoding: .utf8)
+        let reader = ClaudeDataReader()
+        let first = reader.parse(fileAt: url)
+        XCTAssertEqual(first.records.count, 1)                 // user line skipped, partial line left
+        XCTAssertEqual(first.records.first?.toolUseIds, ["tu1"])
+
+        try (line("1") + "\n" + user + "\n" + line("2") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        let next = reader.parse(fileAt: url, from: first.offset)
+        XCTAssertEqual(next.records.map(\.dedupKey), ["m2:r2"])  // only the completed tail
+    }
+
+    func testWeeklyBlockClearingFiresFreedOnceAndDisarmsAutoResume() {
+        var s = LimitAlertState()
+        let session = LimitWindow(utilization: 60, resetsAt: now.addingTimeInterval(3600))
+        _ = LimitAlerts.evaluate(session: session, weekly: LimitWindow(utilization: 100, resetsAt: now.addingTimeInterval(600)),
+                                 sessionProjection: nil, weeklyProjection: nil, status: "rejected",
+                                 warnThreshold: 80, state: &s, now: now)
+        XCTAssertTrue(s.wasBlocked)
+        // The week rolls over while the session sits mid-window (no sharp session drop).
+        let freed = LimitAlerts.evaluate(session: session, weekly: LimitWindow(utilization: 2, resetsAt: now.addingTimeInterval(7 * 86400)),
+                                         sessionProjection: nil, weeklyProjection: nil, status: "allowed",
+                                         warnThreshold: 80, state: &s, now: now)
+        XCTAssertTrue(freed.contains { $0.id == "reset-after-block" })
+        XCTAssertFalse(s.wasBlocked)
+        // A later ordinary session reset must not fire it (and auto-resume) again.
+        var later = s
+        later.prevSessionUtil = 70
+        let reset = LimitAlerts.evaluate(session: LimitWindow(utilization: 3, resetsAt: now.addingTimeInterval(5 * 3600)),
+                                         weekly: LimitWindow(utilization: 5, resetsAt: now.addingTimeInterval(7 * 86400)),
+                                         sessionProjection: nil, weeklyProjection: nil, status: "allowed",
+                                         warnThreshold: 80, state: &later, now: now)
+        XCTAssertFalse(reset.contains { $0.id == "reset-after-block" })
+    }
+
+    func testWeeklyRiskWaitsUntilExhaustionIsNear() {
+        var s = LimitAlertState()
+        let weekly = LimitWindow(utilization: 40, resetsAt: now.addingTimeInterval(6 * 86400))
+        let far = Projection(ratePerHour: 0.5, timeToFull: 120 * 3600, secondsToReset: 6 * 86400, verdict: .atRisk)
+        let out = LimitAlerts.evaluate(session: nil, weekly: weekly, sessionProjection: nil, weeklyProjection: far,
+                                       status: nil, warnThreshold: 80, state: &s, now: now)
+        XCTAssertFalse(out.contains { $0.id == "risk-weekly" })
+        let near = Projection(ratePerHour: 2, timeToFull: 30 * 3600, secondsToReset: 6 * 86400, verdict: .atRisk)
+        let out2 = LimitAlerts.evaluate(session: nil, weekly: weekly, sessionProjection: nil, weeklyProjection: near,
+                                        status: nil, warnThreshold: 80, state: &s, now: now)
+        XCTAssertTrue(out2.contains { $0.id == "risk-weekly" })
+    }
+
+    func testWeeklyRiskCooldownSuppressesQuickRefire() {
+        var s = LimitAlertState()
+        let weekly = LimitWindow(utilization: 60, resetsAt: now.addingTimeInterval(2 * 86400))
+        let risk = Projection(ratePerHour: 2, timeToFull: 20 * 3600, secondsToReset: 2 * 86400, verdict: .atRisk)
+        let safe = Projection(ratePerHour: 0, timeToFull: nil, secondsToReset: 2 * 86400, verdict: .safe, projectedAtReset: 60)
+        func run(_ p: Projection, at: Date) -> [LimitAlert] {
+            LimitAlerts.evaluate(session: nil, weekly: weekly, sessionProjection: nil, weeklyProjection: p,
+                                 status: nil, warnThreshold: 80, state: &s, now: at)
+        }
+        XCTAssertTrue(run(risk, at: now).contains { $0.id == "risk-weekly" })
+        _ = run(safe, at: now.addingTimeInterval(600))   // re-arms
+        XCTAssertFalse(run(risk, at: now.addingTimeInterval(1200)).contains { $0.id == "risk-weekly" })
+        _ = run(safe, at: now.addingTimeInterval(7 * 3600))
+        XCTAssertTrue(run(risk, at: now.addingTimeInterval(7 * 3600 + 60)).contains { $0.id == "risk-weekly" })
+    }
+
+    func testRestoredStateDropsWasBlocked() throws {
+        var s = LimitAlertState()
+        s.wasBlocked = true; s.weeklyTier = 2
+        let decoded = try JSONDecoder().decode(LimitAlertState.self, from: JSONEncoder().encode(s)).restoredForLaunch
+        XCTAssertFalse(decoded.wasBlocked)
+        XCTAssertEqual(decoded.weeklyTier, 2)
+    }
+
+    func testUsedTodayCountsEverythingWhenWeekStartedAfterMidnight() {
+        // Week began 2h ago (after local midnight): last week's 40% midnight
+        // baseline is meaningless — all 45% accrued today.
+        let v = DailyAllowance.verdict(util: 45, resetsAt: now.addingTimeInterval(7 * 86400 - 2 * 3600),
+                                       now: now, todayStartUtil: 40)
+        XCTAssertEqual(v?.usedTodayPct ?? 0, 45, accuracy: 0.01)
+    }
+
+    func testCountdownUsesDaysPastADay() {
+        XCTAssertEqual(Fmt.countdown(to: now.addingTimeInterval(140 * 3600 + 32 * 60), from: now), "5d 20h")
+        XCTAssertEqual(Fmt.countdown(to: now.addingTimeInterval(3 * 3600 + 5 * 60), from: now), "3h 5m")
     }
 }

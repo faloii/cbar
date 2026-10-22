@@ -231,7 +231,20 @@ final class UsageStore: ObservableObject {
     }
 
     // Rising-edge state so each limit alert fires once per episode (see LimitAlerts).
-    var alertState = LimitAlertState()
+    // Persisted so restarting the app (or installing an update) doesn't replay the
+    // 50/75% weekly tiers and threshold alerts the user already got.
+    var alertState: LimitAlertState = UsageStore.loadAlertState() {
+        didSet { if alertState != oldValue { Self.saveAlertState(alertState) } }
+    }
+    private static let alertStateKey = "limitAlertState"
+    private static func loadAlertState() -> LimitAlertState {
+        guard let data = UserDefaults.standard.data(forKey: alertStateKey),
+              let s = try? JSONDecoder().decode(LimitAlertState.self, from: data) else { return LimitAlertState() }
+        return s.restoredForLaunch
+    }
+    private static func saveAlertState(_ s: LimitAlertState) {
+        if let data = try? JSONEncoder().encode(s) { UserDefaults.standard.set(data, forKey: alertStateKey) }
+    }
     // Tracks whether we're in the tighter "near a limit" refresh cadence.
     var lastUrgent = false
 
@@ -277,6 +290,14 @@ final class UsageStore: ObservableObject {
     var resetConfirmAttempts = 0
     static let maxResetConfirmAttempts = 6           // ~1 minute of quick retries
     static let resetConfirmRetryInterval: TimeInterval = 10
+    /// A refresh requested while another cycle was in flight (e.g. the popover
+    /// opening mid-cycle) — run once more when the current cycle finishes, instead
+    /// of silently dropping it and showing a background cycle's carried-over data.
+    var pendingRefresh = false
+    /// Background cycles skip the session-log scan, but never for longer than this
+    /// (and always after midnight), so carried-over "today"/window figures and the
+    /// current-conversation id can't go stale indefinitely.
+    static let maxSessionScanAge: TimeInterval = 30 * 60
 
     @AppStorage("lastWeeklySummaryAt") var lastWeeklySummaryAt: Double = 0
     /// Last-seen weekly-limit `resetsAt` (epoch seconds; 0 = never observed), to

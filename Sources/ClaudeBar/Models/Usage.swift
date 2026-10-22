@@ -68,6 +68,10 @@ struct SessionStat: Identifiable {
 /// Everything the UI needs for one refresh.
 struct UsageSnapshot {
     var generatedAt = Date()
+    /// When the session logs (window/today/per-conversation figures) were last
+    /// actually scanned — `generatedAt` advances on every cheap refresh too, but
+    /// the session-log fields may have been carried over from an older scan.
+    var sessionLogsScannedAt: Date?
 
     // Rolling 5-hour window (Claude's session-limit window).
     var windowTokens = TokenCounts()
@@ -136,6 +140,7 @@ struct UsageSnapshot {
         s.currentSessionId = o.currentSessionId
         s.todayTokens = o.todayTokens; s.todayCost = o.todayCost; s.todayByModel = o.todayByModel
         s.todayRequests = o.todayRequests; s.todaySessions = o.todaySessions; s.todayToolCalls = o.todayToolCalls
+        s.sessionLogsScannedAt = o.sessionLogsScannedAt
         return s
     }
 }

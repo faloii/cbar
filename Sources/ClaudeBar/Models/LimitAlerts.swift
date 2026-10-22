@@ -20,7 +20,7 @@ struct LimitAlert: Equatable {
 
 /// Rising-edge state so each alert fires once per episode (not every refresh).
 /// `UsageStore` owns one of these and threads it through `LimitAlerts.evaluate`.
-struct LimitAlertState: Equatable {
+struct LimitAlertState: Equatable, Codable {
     var session = false       // session threshold notified
     var sessionRisk = false   // session projected-to-exhaust notified
     var weeklyRisk = false    // weekly projected-to-exhaust notified
@@ -30,6 +30,19 @@ struct LimitAlertState: Equatable {
     var blockImminent = false // session block within the lead time notified
     var weeklyTier = 0        // highest weekly severity tier notified (0 = none)
     var prevSessionUtil: Double?
+    /// When each cooled-down alert id last fired (see `LimitAlerts.cooldowns`).
+    var lastFired: [String: Date] = [:]
+
+    /// The copy restored at launch (`UsageStore` persists the state so a restart
+    /// doesn't replay alerts already delivered). `wasBlocked` is deliberately NOT
+    /// carried over: it arms the auto-resume command, and a block remembered from a
+    /// previous run could fire it hours or days later. If still blocked at launch,
+    /// section 3 re-arms it on the first tick.
+    var restoredForLaunch: LimitAlertState {
+        var s = self
+        s.wasBlocked = false
+        return s
+    }
 }
 
 /// Pure decision logic for the proactive limit notifications — "warn before you're
@@ -49,6 +62,17 @@ enum LimitAlerts {
     /// below 100% before a firing "atRisk" flag re-arms — see `evaluate`'s
     /// `clearlySafe` for why a raw verdict flip isn't enough.
     static let riskClearMargin = 10.0
+    /// The weekly trajectory alert only fires once exhaustion is this close. A
+    /// paced projection can say "full before reset" while that's still 5 days off —
+    /// "곧 소진" then is noise, and the weekly tier alerts already cover the level.
+    static let weeklyRiskHorizon: TimeInterval = 48 * 3600
+    /// Minimum gap before the same alert id may fire again. The re-arm margin
+    /// absorbs most burn-rate noise, but a projection flipping between the burst and
+    /// paced estimate can still re-arm within minutes (seen: risk-weekly 3× in 1h).
+    static let cooldowns: [String: TimeInterval] = [
+        "risk-weekly": 6 * 3600,
+        "risk-session": 3600,
+    ]
 
     static func evaluate(session: LimitWindow?, weekly: LimitWindow?,
                          sessionProjection: Projection?, weeklyProjection: Projection?,
@@ -80,16 +104,16 @@ enum LimitAlerts {
 
         // 1) Trajectory — fires earlier than a static %: you can be at 60% but
         //    burning so fast you'll hit 100% before the reset.
-        func risk(_ p: Projection?, name: String, key: String, flag: inout Bool) {
+        func risk(_ p: Projection?, name: String, key: String, horizon: TimeInterval, flag: inout Bool) {
             guard let p = p else { return }
-            if p.verdict == .atRisk, !flag {
+            if p.verdict == .atRisk, !flag, (p.timeToFull ?? 0) <= horizon {
                 flag = true
                 let full = p.timeToFull.map(countdown) ?? "곧"
                 out.append(LimitAlert(id: "risk-\(key)", title: "\(name) 한도 곧 소진",
                     body: "이 속도면 약 \(full) 뒤 \(name) 한도가 찹니다. 잠깐 쉬거나 천천히 쓰세요."))
             } else if clearlySafe(p) { flag = false }
         }
-        risk(weeklyProjection, name: "주간", key: "weekly", flag: &state.weeklyRisk)
+        risk(weeklyProjection, name: "주간", key: "weekly", horizon: weeklyRiskHorizon, flag: &state.weeklyRisk)
 
         // 1b) Session trajectory, split by urgency around the user's lead time:
         //     • beyond the lead time → an early heads-up ("곧 소진")
@@ -227,6 +251,24 @@ enum LimitAlerts {
                 }
             }
         }
+        // 5) Freed by anything other than the session reset above — e.g. a weekly
+        //    block whose week rolled over while the session sat mid-window, or a
+        //    `rejected` status lifting below 100%. Without this, `wasBlocked` lingered
+        //    and the next ordinary session reset days later fired "한도 풀렸어요"
+        //    (and the auto-resume command) out of nowhere.
+        if !blocked, state.wasBlocked {
+            out.append(LimitAlert(id: "reset-after-block", title: "한도 풀렸어요 — 다시 시작하세요",
+                body: "막혔던 한도가 풀렸어요. 지금 바로 이어서 작업하세요."))
+            state.wasBlocked = false
+        }
+
+        // Cooldowns: drop a repeat of the same id inside its minimum gap.
+        out.removeAll { a in
+            guard let gap = cooldowns[a.id], let last = state.lastFired[a.id] else { return false }
+            return now.timeIntervalSince(last) < gap
+        }
+        for a in out where cooldowns[a.id] != nil { state.lastFired[a.id] = now }
+
         // nil while expired, so the eventual fresh low reading doesn't look like a
         // "sharp drop" and re-fire the reset alerts a second time.
         state.prevSessionUtil = liveSession?.utilization
