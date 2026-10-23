@@ -210,15 +210,9 @@ struct SettingsView: View {
                     } else if store.limits?.stale != true, store.limits?.hasData == true {
                         diagnosticsNote("정상", icon: "checkmark.circle", color: .green)
                     }
-                    if ClaudeCredentials.hasRefreshToken {
-                        diagnosticsRow("조용한 갱신", "가능 — 재시작해도 키체인 안 물어요")
-                    } else {
-                        diagnosticsNote("조용한 갱신 불가 — 토큰 만료 시 키체인을 다시 물어요. 한 번 더 응답하면 다음부터 다시 조용해져요.",
-                                       icon: "key", color: .orange)
-                    }
                     Button("자격증명 캐시 초기화 후 재시도") { store.resetCredentialsAndRetry() }
                         .controlSize(.small)
-                    Text("멈춘 것처럼 계속 안 풀리면 눌러보세요 — 캐시된 토큰을 지우고 새로 가져옵니다(키체인 확인 창이 다시 뜰 수 있어요). 문제가 반복되면 이 화면을 캡처해서 알려주세요.")
+                    Text("멈춘 것처럼 계속 안 풀리면 눌러보세요 — 캐시된 토큰을 지우고 Claude Code에서 새로 읽어옵니다. 문제가 반복되면 이 화면을 캡처해서 알려주세요.")
                         .font(.caption2).foregroundStyle(.tertiary)
                 } else {
                     Text("라이브 한도가 꺼져 있어요 — 진단할 대상이 없습니다.")

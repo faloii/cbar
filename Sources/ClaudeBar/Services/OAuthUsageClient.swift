@@ -23,7 +23,7 @@ struct OAuthUsageClient: Sendable {
             switch self {
             case .noCredentials: return "Claude 자격증명을 찾을 수 없음 — Claude Code에서 로그인하세요."
             case .awaitingKeychain: return "키체인 승인 대기 중 — 확인 창에 응답하면 이어서 가져와요."
-            case .unauthorized:  return "인증 실패(401) — Claude Code에서 재인증하세요."
+            case .unauthorized:  return "인증 실패(401) — 토큰이 만료됐어요. Claude Code를 한 번 쓰면 갱신돼요(안 되면 /login)."
             case .rateLimited:   return "요청 제한(429) — 잠시 후 재시도합니다."
             case .http(let c):   return "서버 응답 HTTP \(c)."
             case .badResponse:   return "사용량 응답이 예상과 다릅니다."
@@ -115,16 +115,12 @@ struct OAuthUsageClient: Sendable {
         do {
             return try await requestUsage(token: creds.accessToken)
         } catch FetchError.unauthorized {
-            // The cached access token was rotated/revoked (Claude Code refreshes the shared
-            // credential out from under us). Try a SILENT refresh with the in-memory refresh
-            // token — no keychain read, so no "Always Allow" prompt — and retry once.
-            if let fresh = await ClaudeCredentials.refreshSilently() {
+            // Claude Code rotated the token since we cached it — re-read the source
+            // (prompt-free) and retry once if it actually changed.
+            ClaudeCredentials.invalidate()
+            if let fresh = ClaudeCredentials.load(), fresh.accessToken != creds.accessToken {
                 return try await requestUsage(token: fresh.accessToken)
             }
-            // No in-memory refresh token (e.g. first 401 after an app restart). Drop the
-            // cache so the next load() re-reads the keychain once — that restores the
-            // refresh token, and subsequent refreshes are silent again.
-            ClaudeCredentials.invalidate()
             throw FetchError.unauthorized
         }
     }
@@ -221,65 +217,60 @@ struct OAuthUsageClient: Sendable {
     }
 }
 
-/// Reads Claude Code's OAuth token, then caches it in a 0600 file
-/// (`~/.claudebar/token.json`). File reads never prompt, so Claude Code's
-/// (prompting) Keychain item is read only on first run, or when both this
-/// file AND the in-memory refresh token are unavailable.
+/// Reads Claude Code's OAuth access token — WITHOUT a Keychain prompt.
 ///
-/// The refresh token is persisted here too (not memory-only) so a CBar
-/// restart doesn't lose the ability to refresh silently — without it, every
-/// relaunch eventually hits an expired cached access token with no refresh
-/// token in memory, forcing a fresh Keychain read (and its prompt) the moment
-/// that happens. Accepted trade-off: a long-lived credential now lives on
-/// disk, guarded only by the 0600 permission and normal disk access — deemed
-/// reasonable for a personal, single-user local app.
-struct ClaudeCredentials: Codable {
+/// Claude Code stores its credential in the login Keychain by shelling out to
+/// `/usr/bin/security`, so that tool is always on the item's access list. Every
+/// time Claude Code refreshes its token it recreates the item, and any other app
+/// the user had approved ("Always Allow") drops off the list — that's why reading
+/// it in-process (`SecItemCopyMatching`) kept re-prompting for the login password.
+/// Reading through `/usr/bin/security` instead rides on that permanent entry.
+///
+/// CBar no longer refreshes tokens itself. It used to exchange Claude Code's
+/// refresh token directly and keep the rotated one in `~/.claudebar/token.json`;
+/// that left two clients racing over one refresh token (each rotation can
+/// invalidate the other's copy) and kept a long-lived secret on disk. Now a 401
+/// just re-reads the source: Claude Code keeps the token fresh while it's in use,
+/// and the read is free.
+struct ClaudeCredentials {
     let accessToken: String
-    let expiresAt: Date?
-    var refreshToken: String? = nil
 
-    /// Claude Code's public OAuth client id + token endpoint, used to exchange the
-    /// refresh token for a new access token directly (the same flow Claude Code uses).
-    private static let oauthClientID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-    private static let tokenEndpoint = URL(string: "https://console.anthropic.com/v1/oauth/token")!
     private static let keychainService = "Claude Code-credentials"
-
     private static let lock = NSLock()
     private static var cached: ClaudeCredentials?
-    private static var fileURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claudebar/token.json")
-    }
-
-    /// `lock` only ever guards quick in-memory reads/writes. The Keychain read
-    /// (`SecItemCopyMatching`) can block indefinitely while its authorization dialog
-    /// is pending, so it runs under a SEPARATE single-flight `sourceLock` — holding
-    /// `lock` across it used to freeze the main thread (e.g. Settings' diagnostics
-    /// row reading `hasRefreshToken`) for as long as the dialog stayed unanswered.
+    /// Single-flight for the source read (spawns a short-lived process).
     private static let sourceLock = NSLock()
     private static var awaitingSource = false
 
-    /// True while a Keychain read is in flight (typically: its dialog is waiting
-    /// for the user) — lets the fetch report "waiting for approval" instead of
-    /// "no credentials".
+    /// True while a Keychain read is in flight — `security` itself can still block
+    /// on a LOCKED keychain's unlock dialog — so the fetch can report "waiting for
+    /// approval" instead of "no credentials".
     static var isAwaitingKeychain: Bool {
         lock.lock(); defer { lock.unlock() }
         return awaitingSource
     }
 
     static func load() -> ClaudeCredentials? {
-        if let c = cachedValue() { return c }          // in-memory (this launch)
-        // Single-flight, non-blocking: if another caller is already reading the source
-        // (likely stuck on the dialog), don't queue up behind it — each queued caller
-        // would pin a cooperative-pool thread for as long as the dialog stays open.
+        if let c = cachedValue() { return c }
         guard sourceLock.try() else { return nil }
         defer { sourceLock.unlock() }
-        if let c = cachedValue() { return c }          // filled while we acquired sourceLock
-        if let c = readFile() { setCached(c); return c } // our file — no prompt
+        if let c = cachedValue() { return c }
         setAwaitingSource(true); defer { setAwaitingSource(false) }
-        guard let c = readSource() else { return nil } // Claude Code (may prompt once)
-        writeFile(c)
-        setCached(c)
+        guard let c = readSource() else { return nil }
+        lock.lock(); cached = c; lock.unlock()
         return c
+    }
+
+    /// Drop the in-memory token so the next `load()` re-reads the source — after a
+    /// 401 (Claude Code rotated it) or from the diagnostics "retry" button.
+    static func invalidate() {
+        lock.lock(); cached = nil; lock.unlock()
+    }
+
+    /// Older builds persisted the token AND refresh token here; remove that copy.
+    static func removeLegacyTokenFile() {
+        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claudebar/token.json")
+        try? FileManager.default.removeItem(at: url)
     }
 
     private static func cachedValue() -> ClaudeCredentials? {
@@ -290,135 +281,40 @@ struct ClaudeCredentials: Codable {
         lock.lock(); awaitingSource = v; lock.unlock()
     }
 
-    /// Drop the cached token (memory + file) so the next `load()` re-reads the
-    /// source — used after a 401 when no refresh token is available.
-    static func invalidate() {
-        lock.lock(); cached = nil
-        try? FileManager.default.removeItem(at: fileURL)
-        lock.unlock()
-    }
-
-    /// Whether a refresh token is currently available (memory or token.json) —
-    /// i.e. whether the next expired-access-token 401 can refresh silently, or
-    /// will fall back to a (prompting) Keychain read. Exposed for the Settings
-    /// diagnostics panel; doesn't touch Keychain itself, so checking this never
-    /// causes a prompt on its own.
-    static var hasRefreshToken: Bool {
-        lock.lock()
-        if let c = cached { lock.unlock(); return !(c.refreshToken ?? "").isEmpty }
-        lock.unlock()
-        return !(readFile()?.refreshToken ?? "").isEmpty
-    }
-
-    // MARK: refresh (no keychain prompt)
-
-    /// Exchange the cached refresh token for a fresh access token via the OAuth
-    /// endpoint — no keychain read, so no prompt. Only updates our OWN in-memory +
-    /// file cache; deliberately does NOT write back into Claude Code's shared
-    /// keychain item (that used to happen here, but `SecItemUpdate` on a shared
-    /// item can trigger its own separate Keychain access prompt even when reads
-    /// are already "Always Allow"-trusted — a real cause of recurring prompts).
-    /// Since Claude Code CLI sessions refresh their own copy independently in the
-    /// background, we no longer need to keep it in sync from here. The refresh
-    /// token is persisted to `token.json`, so this works across app restarts too
-    /// — not just within one still-running process. Returns nil if no refresh
-    /// token is available at all (e.g. very first run, before anything's been
-    /// cached yet) or the refresh call itself failed.
-    static func refreshSilently() async -> ClaudeCredentials? {
-        guard let rt = cachedRefreshToken(), !rt.isEmpty else { return nil }
-        guard let fresh = try? await performRefresh(refreshToken: rt) else { return nil }
-        setCached(fresh)
-        writeFile(fresh)
-        return fresh
-    }
-
-    // `NSLock.lock()/unlock()` are flagged unavailable when called directly inside
-    // an `async` function body (Swift 6 strict concurrency) — wrapping each in a
-    // plain synchronous function (as `load()`/`invalidate()` above already do)
-    // sidesteps that without changing the locking behavior at all.
-    private static func cachedRefreshToken() -> String? {
-        lock.lock(); defer { lock.unlock() }
-        return cached?.refreshToken
-    }
-    private static func setCached(_ c: ClaudeCredentials) {
-        lock.lock(); cached = c; lock.unlock()
-    }
-
-    private static func performRefresh(refreshToken: String) async throws -> ClaudeCredentials {
-        var req = URLRequest(url: tokenEndpoint)
-        req.httpMethod = "POST"
-        req.timeoutInterval = 15
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let body: [String: String] = [
-            "grant_type": "refresh_token",
-            "refresh_token": refreshToken,
-            "client_id": oauthClientID,
-        ]
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, resp) = try await URLSession.shared.data(for: req)
-        guard let http = resp as? HTTPURLResponse, http.statusCode == 200,
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let access = root["access_token"] as? String, !access.isEmpty
-        else { throw OAuthUsageClient.FetchError.unauthorized }
-        let newRefresh = (root["refresh_token"] as? String) ?? refreshToken
-        var expires: Date?
-        if let secs = root["expires_in"] as? Double { expires = Date().addingTimeInterval(secs) }
-        else if let secs = root["expires_in"] as? Int { expires = Date().addingTimeInterval(Double(secs)) }
-        return ClaudeCredentials(accessToken: access, expiresAt: expires, refreshToken: newRefresh)
-    }
-
-    // MARK: file cache
-
-    private static func readFile() -> ClaudeCredentials? {
-        guard let data = try? Data(contentsOf: fileURL) else { return nil }
-        let dec = JSONDecoder(); dec.dateDecodingStrategy = .iso8601
-        guard let c = try? dec.decode(ClaudeCredentials.self, from: data), !c.accessToken.isEmpty else { return nil }
-        // Deliberately NOT gating on `expiresAt` here, for the same reason
-        // `fetchRemote()` doesn't: it's unreliable and a still-valid token can look
-        // expired. Gating here used to discard a perfectly good cached token on
-        // every refresh past that (possibly wrong) instant, forcing a fresh
-        // Keychain read — and its password prompt — far more often than an actual
-        // 401 ever would. A real expiry surfaces as a 401 in `fetchRemote()`, which
-        // already refreshes silently (no Keychain) or invalidates correctly.
-        return c
-    }
-    private static func writeFile(_ c: ClaudeCredentials) {
-        let enc = JSONEncoder(); enc.dateEncodingStrategy = .iso8601
-        guard let data = try? enc.encode(c) else { return }
-        let dir = fileURL.deletingLastPathComponent()
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try? data.write(to: fileURL, options: .atomic)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
-    }
-
     // MARK: source (Claude Code)
 
     private static func readSource() -> ClaudeCredentials? {
         let url = ClaudeDataReader.configDir.appendingPathComponent(".credentials.json")
         if let data = try? Data(contentsOf: url), let c = parse(data) { return c }
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "Claude Code-credentials",
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-        var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else { return nil }
+        guard let data = readKeychainViaSecurityTool() else { return nil }
         return parse(data)
     }
 
-    private static func parse(_ data: Data) -> ClaudeCredentials? {
+    /// `security find-generic-password -s <service> -w` — prints only the secret,
+    /// to our pipe (never logged). Fixed argv, no shell. Killed after 10s if it
+    /// hangs (e.g. a locked keychain whose unlock dialog nobody answers).
+    private static func readKeychainViaSecurityTool() -> Data? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        p.arguments = ["find-generic-password", "-s", keychainService, "-w"]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 10, execute: killer)
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        killer.cancel()
+        guard p.terminationStatus == 0, !data.isEmpty else { return nil }
+        return data
+    }
+
+    static func parse(_ data: Data) -> ClaudeCredentials? {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let oauth = root["claudeAiOauth"] as? [String: Any],
               let token = oauth["accessToken"] as? String, !token.isEmpty
         else { return nil }
-        var expires: Date?
-        if let ms = oauth["expiresAt"] as? Double { expires = Date(timeIntervalSince1970: ms / 1000) }
-        else if let ms = oauth["expiresAt"] as? Int { expires = Date(timeIntervalSince1970: Double(ms) / 1000) }
-        // Cached (and persisted to token.json by the caller) so we can refresh
-        // silently later — including after an app restart, not just this run.
-        let refresh = oauth["refreshToken"] as? String
-        return ClaudeCredentials(accessToken: token, expiresAt: expires, refreshToken: refresh)
+        return ClaudeCredentials(accessToken: token)
     }
 }

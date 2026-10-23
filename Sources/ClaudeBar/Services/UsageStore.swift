@@ -260,6 +260,7 @@ final class UsageStore: ObservableObject {
     init() {
         if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() }
         reloadDiskReadings()   // so the notification log etc. show before the first refresh completes
+        ClaudeCredentials.removeLegacyTokenFile()   // no longer used; held a refresh token
         // A plain Timer doesn't fire while the Mac sleeps, so the first tick after
         // lid-open could be minutes away — refresh immediately on wake instead.
         // NOT `force: true`: after any real sleep the cache TTL (60-180s) has long

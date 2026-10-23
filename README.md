@@ -147,7 +147,7 @@ xcrun notarytool store-credentials claudebar-notary --apple-id you@example.com -
 ```
 
 For personal use this isn't needed — the stable Apple Development signature is enough to
-run locally (approve the Keychain prompt once with *Always Allow*). If you hand an
+run locally. If you hand an
 **un-notarized** build to someone else, macOS Gatekeeper will block it; they can run it
 once via **right-click → Open** (or *System Settings → Privacy & Security → Open Anyway*)
 — see [Install a prebuilt DMG](#install-a-prebuilt-dmg).
@@ -211,8 +211,9 @@ same numbers as Claude Code's `/usage`. This is the one feature that uses the ne
 - Calls `GET https://api.anthropic.com/api/oauth/usage` with your Claude Code OAuth
   token, `anthropic-beta: oauth-2025-04-20`, and a `claude-code/<version>` User-Agent.
 - The token is read from `~/.claude/.credentials.json` if present, otherwise from the
-  macOS login Keychain (`Claude Code-credentials`). The **first** fetch may ask your
-  permission to read that Keychain item — click *Always Allow* to silence it.
+  macOS login Keychain (`Claude Code-credentials`) via `/usr/bin/security` — the same
+  tool Claude Code writes it with, so reading it doesn't prompt. CBar never refreshes or
+  stores the token itself; Claude Code keeps it fresh.
 - Responses are cached to `~/.claudebar/usage-cache.json` for 3 minutes (the endpoint
   is rate-limited / 429-prone). On a failed refresh, the last good value is shown and
   flagged with a ⚠︎.
