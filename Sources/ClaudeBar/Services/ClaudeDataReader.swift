@@ -409,19 +409,27 @@ struct ClaudeDataReader {
         var buffer = Data()
         var consumed = offset
         let newline = UInt8(0x0A)
+        var strings = StringPool()
 
-        while let chunk = try? handle.read(upToCount: 1 << 16), !chunk.isEmpty {
+        // `read(upToCount:)` hands back autoreleased storage: without a pool per
+        // chunk the whole file stays resident until the GCD work item ends.
+        while let chunk = autoreleasepool(invoking: { try? handle.read(upToCount: 1 << 16) }), !chunk.isEmpty {
             buffer.append(chunk)
             var start = buffer.startIndex
             while let nl = buffer[start...].firstIndex(of: newline) {
-                if let record = Self.record(from: buffer[start..<nl]) { out.append(record) }
+                // Per-line pool: JSONSerialization's objects are autoreleased, and a
+                // GCD work item (one whole file here) otherwise holds every line's
+                // parse tree until the file is done.
+                if let record = autoreleasepool(invoking: { Self.record(from: buffer[start..<nl], pool: &strings) }) {
+                    out.append(record)
+                }
                 start = nl + 1
             }
             consumed += UInt64(start - buffer.startIndex)
             buffer = Data(buffer[start...])   // one copy per chunk, not one per line
         }
         // A final line without a newline: take it only if it's complete JSON.
-        if !buffer.isEmpty, let record = Self.record(from: buffer) {
+        if !buffer.isEmpty, let record = Self.record(from: buffer, pool: &strings) {
             out.append(record)
             consumed += UInt64(buffer.count)
         }
@@ -429,8 +437,14 @@ struct ClaudeDataReader {
     }
 
     /// Parse one JSONL line (as raw bytes) into a `LogRecord`, or nil to skip.
-    private static func record(from line: Data) -> LogRecord? {
+    private static func record(from line: Data, pool: inout StringPool) -> LogRecord? {
         guard !line.isEmpty,
+              // Byte pre-filter before the full JSON parse: user lines carry the
+              // tool results (often 100s of KB each) and were being parsed only to
+              // be dropped (~15% less CPU per cold scan). An assistant line always
+              // holds the bare token "assistant" (type, message.role); inside a
+              // string value its quotes would be escaped, so this never skips one.
+              Self.contains(line, Self.assistantToken),
               let obj = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
               let type = obj["type"] as? String,
               // Only assistant turns feed any aggregate (tokens, tool calls, sessions);
@@ -475,15 +489,37 @@ struct ClaudeDataReader {
         return LogRecord(
             timestamp: date,
             type: type,
-            sessionId: sessionId,
-            cwd: obj["cwd"] as? String ?? "",
-            model: message?["model"] as? String ?? "unknown",
+            sessionId: pool.intern(sessionId),
+            cwd: pool.intern(obj["cwd"] as? String ?? ""),
+            model: pool.intern(message?["model"] as? String ?? "unknown"),
             tokens: tokens,
             toolUseIds: toolUseIds,
             dedupKey: dedupKey,
             isSidechain: obj["isSidechain"] as? Bool ?? false,
             hourCache: hourCache
         )
+    }
+
+    private static let assistantToken = Data("\"assistant\"".utf8)
+
+    private static func contains(_ haystack: Data, _ needle: Data) -> Bool {
+        haystack.withUnsafeBytes { h in
+            needle.withUnsafeBytes { n in
+                memmem(h.baseAddress, h.count, n.baseAddress, n.count) != nil
+            }
+        }
+    }
+
+    /// Shares one storage per distinct value within a file: sessionId, cwd and
+    /// model repeat on every line, and each parsed copy is its own heap string —
+    /// thousands of identical copies held in the parse cache.
+    struct StringPool {
+        private var seen: [String: String] = [:]
+        mutating func intern(_ s: String) -> String {
+            if let hit = seen[s] { return hit }
+            seen[s] = s
+            return s
+        }
     }
 
     /// Project label for a working directory ("/Users/me/Foo" → "Foo").

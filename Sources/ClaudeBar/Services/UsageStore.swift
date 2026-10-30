@@ -348,5 +348,8 @@ final class UsageStore: ObservableObject {
     /// while near a limit so the warning icon still stays timely.
     static let idleInterval: TimeInterval = 300
     static let urgentIdleInterval: TimeInterval = 60
-    var popoverVisible = false
+    /// Published so views can stop continuous animations while closed — a
+    /// MenuBarExtra keeps its view tree alive after the panel hides, and a
+    /// `repeatForever` animation there kept the main thread at ~40% CPU.
+    @Published var popoverVisible = false
 }

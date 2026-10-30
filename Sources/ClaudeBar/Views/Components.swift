@@ -764,6 +764,9 @@ struct TodaySessionsBar: View {
     let recaps: [SessionCoach.Recap]        // oldest → newest, completed sessions only
     let liveUtilization: Double?            // the in-progress session's %, if any
     var height: CGFloat = 28
+    /// Off while the panel is hidden: the pulse is a `repeatForever` animation
+    /// and would otherwise keep re-rendering an invisible view tree.
+    var animateLive = true
 
     /// Single source of truth for both the rendered bars and the accessibility
     /// summary below — one shared traversal so the two can't drift apart (a bar
@@ -816,7 +819,7 @@ struct TodaySessionsBar: View {
                 // The dashed outline alone reads as "different", not "still
                 // moving right now" — a pulse makes the live bar legible even
                 // without matching it back to the legend text below.
-                if hollow { PulsingLiveDot(color: color).offset(y: -4) }
+                if hollow && animateLive { PulsingLiveDot(color: color).offset(y: -4) }
             }
             .frame(width: 10, height: max(2, height * clamped / 100))
     }

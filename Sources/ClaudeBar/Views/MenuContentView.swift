@@ -431,7 +431,8 @@ struct MenuContentView: View {
                         .padding(.top, 4)
                 }
 
-                TodaySessionsBar(recaps: store.sessionRecapsToday, liveUtilization: session?.utilization)
+                TodaySessionsBar(recaps: store.sessionRecapsToday, liveUtilization: session?.utilization,
+                                 animateLive: store.popoverVisible)
                     .padding(.top, 4)
             }
         } else {
