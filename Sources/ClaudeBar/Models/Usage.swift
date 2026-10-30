@@ -100,6 +100,10 @@ struct UsageSnapshot {
     /// actually in right now" (best-effort: whichever session log was touched most
     /// recently). Looks up into `recentSessions` for that session's own stats.
     var currentSessionId = ""
+    /// When the current conversation's last main-thread turn happened, and the
+    /// prompt-cache TTL it runs on (3600 or 300s) — together: when its cache expires.
+    var currentTurnAt: Date?
+    var currentCacheTTL: TimeInterval = 300
 
     // Today (local calendar day), computed from the session logs.
     var todayTokens = TokenCounts()
@@ -138,6 +142,7 @@ struct UsageSnapshot {
         s.weeklyTokens = o.weeklyTokens
         s.currentContextTokens = o.currentContextTokens
         s.currentSessionId = o.currentSessionId
+        s.currentTurnAt = o.currentTurnAt; s.currentCacheTTL = o.currentCacheTTL
         s.todayTokens = o.todayTokens; s.todayCost = o.todayCost; s.todayByModel = o.todayByModel
         s.todayRequests = o.todayRequests; s.todaySessions = o.todaySessions; s.todayToolCalls = o.todayToolCalls
         s.sessionLogsScannedAt = o.sessionLogsScannedAt

@@ -51,6 +51,13 @@ extension UsageStore {
     /// to `CompactSuggestion.isHeavy` — the SAME predicate the 효율 card and the
     /// per-session badges use, including its earlier catch for a conversation
     /// that's already re-read-dominated before it's fully ballooned in size.
+    /// The current conversation's prompt-cache expiry (nil for small conversations
+    /// or before any turn is seen).
+    var cacheExpiry: CacheExpiry.Status? {
+        CacheExpiry.status(lastTurnAt: snapshot.currentTurnAt, ttl: snapshot.currentCacheTTL,
+                           contextTokens: snapshot.currentContextTokens)
+    }
+
     var isHeavyContextWithReuse: Bool {
         CompactSuggestion.isHeavy(contextTokens: snapshot.currentContextTokens,
                                   cacheReadShare: cacheEfficiency?.cacheReadShare ?? 0)

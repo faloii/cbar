@@ -193,6 +193,12 @@ final class UsageStore: ObservableObject {
     @AppStorage("notifyModelDownshift") var notifyModelDownshift: Bool = false {
         didSet { objectWillChange.send() }
     }
+    /// Heads-up ~10 min before a big conversation's prompt cache expires (see
+    /// `CacheExpiry`). On by default: it targets the single biggest avoidable cost
+    /// measured in real logs, and fires at most once per idle stretch.
+    @AppStorage("notifyCacheExpiry") var notifyCacheExpiry: Bool = true {
+        didSet { objectWillChange.send() }
+    }
     /// When the downshift suggestion last fired — persisted so the rising-edge state
     /// resetting on every relaunch (or verdict flicker) can't repeat the same nudge
     /// daily (seen: 9× in 7 days, identical text).
@@ -286,6 +292,15 @@ final class UsageStore: ObservableObject {
     /// notices the rollover (freed alert, auto-resume, fresh %) within seconds
     /// instead of waiting out the idle tick + cache TTL. See `UsageStore+Refresh.swift`.
     var resetBoundaryTimer: Timer?
+    /// Fires ~10 min before the current conversation's prompt cache expires, to
+    /// rescan the logs and (if still idle) post the heads-up — background refreshes
+    /// alone are too coarse to land inside that window.
+    var cacheExpiryTimer: Timer?
+    /// "\(sessionId)@\(lastTurnAt)" of the last cache-expiry heads-up, so one idle
+    /// stretch gets one notification.
+    @AppStorage("cacheExpiryNotifiedKey") var cacheExpiryNotifiedKey: String = ""
+    /// A refresh queued mid-cycle that must include the session-log scan.
+    var pendingSessionScan = false
     /// The server can lag a few seconds past the predicted reset before it
     /// actually reflects the new window — the first forced refetch right after a
     /// reset can still come back with the OLD (now-expired) window. Without this,

@@ -53,9 +53,15 @@ extension UsageStore {
     /// limits cache TTL and the failure backoff — used when the user explicitly hits
     /// Refresh. `cacheTTL` overrides only the TTL (automatic retries use 0: fresh
     /// data, but still backing off from a failing/rate-limited endpoint).
-    func refresh(force: Bool = false, cacheTTL: TimeInterval? = nil) {
-        guard !isRefreshing else { pendingRefresh = true; return }
+    func refresh(force: Bool = false, cacheTTL: TimeInterval? = nil, forceSessionScan: Bool = false) {
+        guard !isRefreshing else {
+            pendingRefresh = true
+            pendingSessionScan = pendingSessionScan || forceSessionScan
+            return
+        }
+        let forceScan = forceSessionScan || pendingSessionScan
         pendingRefresh = false
+        pendingSessionScan = false
         isRefreshing = true
         lastRefreshAttemptAt = Date()
         let reader = self.reader
@@ -74,7 +80,7 @@ extension UsageStore {
             now.timeIntervalSince($0) >= Self.maxSessionScanAge
                 || !Calendar.current.isDate($0, inSameDayAs: now)
         } ?? true
-        let full = popoverVisible || !barMetric.needsLiveLimits || scanStale
+        let full = popoverVisible || !barMetric.needsLiveLimits || scanStale || forceScan
         // Near a limit, fetch fresher data (shorter cache TTL) so the warning is
         // timely; when safe, stay gentle on the rate-limited endpoint.
         let ttl: TimeInterval = cacheTTL ?? (isAtLimitRisk ? 60 : OAuthUsageClient.cacheTTL)
@@ -117,6 +123,7 @@ extension UsageStore {
             self.processLimitAlerts()
             self.processModelDownshiftSuggestion()
             self.processAdviceFollowThrough()
+            self.processCacheExpiry()
             self.maybeWeeklySummary()
             self.reloadDiskReadings()   // after the alert passes above may have logged a notification
             // If the risk level changed, re-arm the timer at the matching cadence.

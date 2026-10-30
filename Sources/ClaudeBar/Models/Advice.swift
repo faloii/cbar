@@ -105,8 +105,10 @@ enum Advice {
         //      so it pairs with the over-pace tip as the "here's how to fix it" lever.
         if contextTokens >= SessionCoach.heavyContextTokens, (sessionUtil ?? 0) >= 1 {
             let k = contextTokens / 1000
-            tips.append(AdviceTip(kind: .contextHeavy, level: .info, icon: "rectangle.compress.vertical",
-                text: "이번 대화 컨텍스트가 큼(~\(k)k토큰) — 턴마다 한도를 많이 먹어요. "
+            let very = contextTokens >= SessionCoach.veryHeavyContextTokens
+            tips.append(AdviceTip(kind: .contextHeavy, level: very ? .warn : .info, icon: "rectangle.compress.vertical",
+                text: (very ? "이번 대화가 매우 큼(~\(k)k토큰) — 주고받을 때마다 이만큼을 다시 읽어요. "
+                            : "이번 대화 컨텍스트가 큼(~\(k)k토큰) — 턴마다 한도를 많이 먹어요. ")
                     + "/compact 하거나 새 대화로 시작하면 같은 한도로 더 오래 갈 수 있어요."))
         }
 

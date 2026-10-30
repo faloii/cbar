@@ -186,21 +186,21 @@ final class CompactSuggestionTests: XCTestCase {
     }
 
     func testHeavyRequiresBothContextAndReuse() {
-        XCTAssertTrue(CompactSuggestion.isHeavy(session("a", ctx: 150_000, reuse: 0.8)))
-        XCTAssertFalse(CompactSuggestion.isHeavy(session("a", ctx: 150_000, reuse: 0.5)))   // low reuse
+        XCTAssertTrue(CompactSuggestion.isHeavy(session("a", ctx: 350_000, reuse: 0.8)))
+        XCTAssertFalse(CompactSuggestion.isHeavy(session("a", ctx: 350_000, reuse: 0.5)))   // low reuse
         XCTAssertFalse(CompactSuggestion.isHeavy(session("a", ctx: 50_000, reuse: 0.9)))    // small context
     }
 
     func testEarlyCatchFiresAtHalfSizeWithVeryHighReuse() {
-        // 70k is below the 120k full threshold but above the 60k early floor;
+        // 200k is below the 300k full threshold but above the 150k early floor;
         // 0.9 clears the stricter 0.85 early bar.
-        XCTAssertTrue(CompactSuggestion.isHeavy(contextTokens: 70_000, cacheReadShare: 0.9))
+        XCTAssertTrue(CompactSuggestion.isHeavy(contextTokens: 200_000, cacheReadShare: 0.9))
     }
 
     func testEarlyCatchStaysQuietBelowItsOwnStricterBar() {
         // Same size, but only the (lower) full-size bar's reuse level — not
         // enough to trip the stricter early-catch threshold yet.
-        XCTAssertFalse(CompactSuggestion.isHeavy(contextTokens: 70_000, cacheReadShare: 0.8))
+        XCTAssertFalse(CompactSuggestion.isHeavy(contextTokens: 200_000, cacheReadShare: 0.8))
     }
 
     func testEarlyCatchStaysQuietBelowItsContextFloor() {
@@ -860,7 +860,7 @@ final class AdviceTests: XCTestCase {
     func testContextHeavyTipFiresWhenLargeAndActive() {
         let safe = Projection(ratePerHour: 8, timeToFull: 20000, secondsToReset: 7200, verdict: .safe)
         let tips = Advice.compute(session: safe, weekly: nil, sessionUtil: 40, weeklyUtil: 20,
-                                  models: [], contextTokens: 150_000, warnThreshold: 80, now: now)
+                                  models: [], contextTokens: 350_000, warnThreshold: 80, now: now)
         let ctx = tips.first { $0.kind == .contextHeavy }
         XCTAssertNotNil(ctx)
         XCTAssertTrue(ctx?.text.contains("compact") ?? false)
@@ -2035,5 +2035,34 @@ final class RealLogRegressionTests: XCTestCase {
         let pts: [(Date, Double)] = [(now.addingTimeInterval(-1800), 2), (now.addingTimeInterval(-60), 9)]
         let p = Projection.combinedWeekly(points: pts, util: 9, resetsAt: reset, windowSeconds: 7 * 86400, now: now)
         XCTAssertEqual(p.verdict, .atRisk)
+    }
+}
+
+final class CacheExpiryTests: XCTestCase {
+    let now = Date(timeIntervalSince1970: 1_000_000)
+
+    func testSmallConversationsHaveNoStatus() {
+        XCTAssertNil(CacheExpiry.status(lastTurnAt: now, ttl: 3600, contextTokens: 50_000))
+        XCTAssertNil(CacheExpiry.status(lastTurnAt: nil, ttl: 3600, contextTokens: 400_000))
+    }
+
+    func testWarnsOnlyInsideLeadWindowForBigContexts() {
+        let s = CacheExpiry.status(lastTurnAt: now.addingTimeInterval(-55 * 60), ttl: 3600, contextTokens: 300_000)!
+        XCTAssertTrue(CacheExpiry.shouldWarn(s, now: now))                                // 5 min left
+        XCTAssertFalse(CacheExpiry.shouldWarn(s, now: now.addingTimeInterval(-10 * 60)))  // 15 min left
+        XCTAssertFalse(CacheExpiry.shouldWarn(s, now: now.addingTimeInterval(6 * 60)))    // already expired
+        let mid = CacheExpiry.status(lastTurnAt: now.addingTimeInterval(-55 * 60), ttl: 3600, contextTokens: 150_000)!
+        XCTAssertFalse(CacheExpiry.shouldWarn(mid, now: now))                              // below notify size
+    }
+
+    func testReaderCapturesSidechainAndCacheTTL() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("cbar-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let main = #"{"type":"assistant","timestamp":"2026-10-20T01:00:00Z","sessionId":"s","requestId":"r1","message":{"id":"m1","model":"x","usage":{"input_tokens":1,"output_tokens":2,"cache_creation":{"ephemeral_1h_input_tokens":500,"ephemeral_5m_input_tokens":0}}}}"#
+        let side = #"{"type":"assistant","isSidechain":true,"timestamp":"2026-10-20T01:01:00Z","sessionId":"s","requestId":"r2","message":{"id":"m2","model":"x","usage":{"input_tokens":1,"output_tokens":2,"cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":300}}}}"#
+        try (main + "\n" + side + "\n").write(to: url, atomically: true, encoding: .utf8)
+        let recs = ClaudeDataReader().parse(fileAt: url).records
+        XCTAssertEqual(recs.map(\.isSidechain), [false, true])
+        XCTAssertEqual(recs.map(\.hourCache), [true, false])
     }
 }

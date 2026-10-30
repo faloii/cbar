@@ -459,6 +459,22 @@ struct MenuContentView: View {
         }
     }
 
+    /// Prompt-cache countdown for the current conversation — resuming before it
+    /// lapses only re-reads the context; after, the whole thing is written again.
+    @ViewBuilder private var cacheExpiryLine: some View {
+        if let c = store.cacheExpiry {
+            let now = snap.generatedAt
+            if !c.expired(at: now) {
+                Text("캐시 유지 \(Fmt.countdown(to: c.expiresAt, from: now)) 남음 — 그 안에 이어가면 다시 읽기만 해요")
+                    .font(.caption2).foregroundStyle(.secondary)
+            } else if -c.remaining(at: now) < CacheExpiry.showExpiredFor {
+                Text("캐시 만료됨 — 이어가면 ~\(Fmt.tokens(c.contextTokens))를 처음부터 다시 써요. 새 대화가 나을 수 있어요")
+                    .fixedSize(horizontal: false, vertical: true)
+                    .font(.caption2).foregroundStyle(.orange)
+            }
+        }
+    }
+
     @ViewBuilder private var efficiencySection: some View {
         let ctx = snap.currentContextTokens
         let verdict = store.efficiencyVerdict
@@ -481,6 +497,7 @@ struct MenuContentView: View {
                 }
             }
             .font(.caption2).foregroundStyle(.primary)
+            cacheExpiryLine
             // CompactSuggestion.isHeavy also catches a conversation that's
             // already re-read-dominated before it's fully ballooned to the
             // absolute size threshold — earlier than a bare `ctx >=

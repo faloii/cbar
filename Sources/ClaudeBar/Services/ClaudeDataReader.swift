@@ -110,12 +110,15 @@ struct ClaudeDataReader {
         var todayToolCalls = 0
         var todaySessions = Set<String>()
 
-        // The latest assistant turn's context size (input + cache read/write ≈ prompt
-        // tokens carried into that turn) — a "how big is my current conversation" signal
-        // that drives the /compact-or-new-session lever.
+        // The latest MAIN-THREAD assistant turn's context size (input + cache
+        // read/write ≈ prompt tokens carried into that turn) — "how big is my current
+        // conversation", driving the /compact-or-new-session lever and the cache-expiry
+        // countdown. Subagent turns are skipped: their small contexts used to stand in
+        // for the conversation whenever a subagent happened to answer last.
         var latestTurnAt = Date.distantPast
         var currentContextTokens = 0
         var currentSessionId = ""
+        var cacheTTLBySession: [String: Bool] = [:]   // latest known: true = 1h
 
         // Per-conversation accumulation for the session breakdown.
         struct SessAcc { var cost = 0.0; var requests = 0; var last = Date.distantPast
@@ -143,8 +146,9 @@ struct ClaudeDataReader {
             let cost = Pricing.cost(for: tokens, model: r.model)
             let key = ModelName.display(r.model)
 
+            if let h = r.hourCache, !r.isSidechain, !r.sessionId.isEmpty { cacheTTLBySession[r.sessionId] = h }
             // Track the single most-recent turn's context size (prompt tokens, not output).
-            if r.timestamp > latestTurnAt {
+            if !r.isSidechain, r.timestamp > latestTurnAt {
                 latestTurnAt = r.timestamp
                 currentContextTokens = tokens.input + tokens.cacheRead + tokens.cacheWrite
                 currentSessionId = r.sessionId
@@ -230,6 +234,11 @@ struct ClaudeDataReader {
             .sorted { $0.tokens.total > $1.tokens.total }
         snap.currentContextTokens = currentContextTokens
         snap.currentSessionId = currentSessionId
+        if latestTurnAt > .distantPast {
+            snap.currentTurnAt = latestTurnAt
+            // Unknown TTL (no cache write seen yet) → assume the shorter 5m.
+            snap.currentCacheTTL = (cacheTTLBySession[currentSessionId] ?? false) ? 3600 : 300
+        }
     }
 
     /// One parsed line from a session log.
@@ -252,6 +261,10 @@ struct ClaudeDataReader {
         /// same tokens repeatedly (measured ~2× on real logs). nil when either id
         /// is missing (no dedup possible for that line).
         let dedupKey: String?
+        /// A subagent's turn — not the conversation the user is typing into.
+        var isSidechain = false
+        /// Cache TTL this turn wrote with: true = 1h, false = 5m, nil = no write.
+        var hourCache: Bool? = nil
     }
 
     /// Drops repeated copies of the same API response (see `LogRecord.dedupKey`),
@@ -432,8 +445,13 @@ struct ClaudeDataReader {
 
         var tokens: TokenCounts?
         var toolUseIds: [String] = []
+        var hourCache: Bool?
         if let message {
             if let usage = message["usage"] as? [String: Any] {
+                if let cc = usage["cache_creation"] as? [String: Any] {
+                    if (cc["ephemeral_1h_input_tokens"] as? Int ?? 0) > 0 { hourCache = true }
+                    else if (cc["ephemeral_5m_input_tokens"] as? Int ?? 0) > 0 { hourCache = false }
+                }
                 tokens = TokenCounts(
                     input: usage["input_tokens"] as? Int ?? 0,
                     output: usage["output_tokens"] as? Int ?? 0,
@@ -462,7 +480,9 @@ struct ClaudeDataReader {
             model: message?["model"] as? String ?? "unknown",
             tokens: tokens,
             toolUseIds: toolUseIds,
-            dedupKey: dedupKey
+            dedupKey: dedupKey,
+            isSidechain: obj["isSidechain"] as? Bool ?? false,
+            hourCache: hourCache
         )
     }
 

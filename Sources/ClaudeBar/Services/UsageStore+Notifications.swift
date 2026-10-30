@@ -91,6 +91,38 @@ extension UsageStore {
         followThroughState = AdviceFollowThroughState()
     }
 
+    /// Heads-up shortly before a big conversation's prompt cache expires, plus the
+    /// timer that wakes us for it. Only acts on a FRESH scan: a carried-over snapshot
+    /// could still show the turn from 50 minutes ago while the user has been typing
+    /// all along — the timer forces that scan right before deciding.
+    func processCacheExpiry() {
+        cacheExpiryTimer?.invalidate()
+        cacheExpiryTimer = nil
+        guard notifyCacheExpiry, let s = cacheExpiry else { return }
+        let now = Date()
+        let fresh = snapshot.sessionLogsScannedAt.map { now.timeIntervalSince($0) < 120 } ?? false
+        let key = "\(snapshot.currentSessionId)@\(Int(s.expiresAt.timeIntervalSince1970))"
+        if CacheExpiry.shouldWarn(s, now: now), fresh, key != cacheExpiryNotifiedKey, !isQuietNow(now) {
+            cacheExpiryNotifiedKey = key
+            let project = snapshot.recentSessions.first { $0.sessionId == snapshot.currentSessionId }?.project
+            let what = project.map { "‘\($0)’ 대화" } ?? "지금 대화"
+            Notifier.notify(
+                title: "대화 캐시 \(Fmt.countdown(to: s.expiresAt, from: now)) 뒤 만료",
+                body: "\(what)(~\(Fmt.tokens(s.contextTokens)))를 곧 이어갈 거면 그 전에 한 마디 보내 두세요 — 만료 뒤에 이어가면 컨텍스트 전체를 캐시에 다시 써요. 오래 비울 거면 /compact 하거나 다음엔 새 대화로 시작하세요.",
+                id: "cache-expiry", urgency: .nudge, category: .limit)
+            return
+        }
+        // Wake ~10 min before expiry (if that's still ahead) to rescan and decide.
+        let wake = s.expiresAt.addingTimeInterval(-CacheExpiry.warnLead + 30)
+        guard s.contextTokens >= CacheExpiry.notifyMinContextTokens, wake > now,
+              key != cacheExpiryNotifiedKey else { return }
+        let timer = Timer(fire: wake, interval: 0, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.refresh(forceSessionScan: true) }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        cacheExpiryTimer = timer
+    }
+
     /// Evaluate the proactive limit alerts (threshold, trajectory, blocked, reset
     /// timing) once, then act: post notifications (if enabled) and run the optional
     /// auto-resume command when the limit frees up after a block.

@@ -128,6 +128,10 @@ struct SettingsView: View {
                 Text("주간 한도가 실제로 리셋되는 시점에 맞춰(라이브 한도가 꺼져 있으면 대략 7일마다) 지난 7일 비용·Opus 비중·재읽기 비율·가장 많이 쓴 프로젝트와 코칭을 한 번에 요약해 보냅니다.")
                     .font(.caption).foregroundStyle(.secondary)
 
+                Toggle("큰 대화의 캐시가 곧 만료되면 알림", isOn: $store.notifyCacheExpiry)
+                Text("20만 토큰 넘는 대화를 1시간(일부는 5분) 넘게 쉬면 캐시가 만료돼, 이어갈 때 대화 전체를 다시 캐시에 씁니다. 만료 10분 전에 한 번 알려줘요 — 곧 돌아올 거면 한 마디 보내 두면 유지되고, 오래 비울 거면 새 대화가 낫습니다.")
+                    .font(.caption).foregroundStyle(.secondary)
+
                 Toggle("가벼운 대화인데 Opus면 모델 전환 제안", isOn: $store.notifyModelDownshift)
                     .disabled(!store.enableLiveLimits)
                 Text("5시간 창의 주력 모델이 Opus인데 최근 턴들의 출력이 가벼워 보이면, Sonnet으로 바꿔도 될 것 같다고 한 번 알려줍니다. 한도 소모량은 그대로고 비용만 바뀝니다 — 모델 선택은 비용을 줄이는 수단이지 한도를 늘리는 수단은 아니에요. 기본은 꺼져 있습니다.")

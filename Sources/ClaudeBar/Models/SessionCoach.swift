@@ -38,8 +38,13 @@ enum SessionCoach {
     }
 
     /// Context size above which each turn eats a notable chunk of the limit, so
-    /// `/compact` or a fresh session is worth suggesting. ~60% of the 200k window.
-    static let heavyContextTokens = 120_000
+    /// `/compact` or a fresh session is worth suggesting. Was 120k (60% of a 200k
+    /// window), but with 1M-context models 95% of real turns sat above it (median
+    /// ~290k) — a warning that's always on gets ignored. 36% of main-thread re-reads
+    /// came from context beyond 300k, 16% from beyond 500k.
+    static let heavyContextTokens = 300_000
+    /// The stronger tier: past this, /compact or a fresh conversation clearly pays.
+    static let veryHeavyContextTokens = 500_000
 
     // MARK: - Efficiency (spend less per unit of work)
 
