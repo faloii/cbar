@@ -74,6 +74,21 @@ enum LimitAlerts {
         "risk-session": 3600,
     ]
 
+    /// Which window is doing the blocking, and when it frees up. A full window's
+    /// reset is the real wait — the session resetting first doesn't help while the
+    /// weekly is at 100% (seen: "4h 13m 후 리셋" for a block that lasted 6h). With
+    /// both full, the later reset wins. A `rejected` status with neither at 100%
+    /// can't say which, so it falls back to the session (the usual case).
+    static func blockingReset(session: LimitWindow?, weekly: LimitWindow?) -> (name: String, reset: Date?) {
+        let full = [("주간", weekly), ("세션", session)].compactMap { n, w in
+            w.flatMap { $0.utilization >= 100 ? (n, $0.resetsAt) : nil }
+        }
+        if let latest = full.max(by: { ($0.1 ?? .distantFuture) < ($1.1 ?? .distantFuture) }) {
+            return latest
+        }
+        return session != nil ? ("세션", session?.resetsAt) : ("주간", weekly?.resetsAt)
+    }
+
     static func evaluate(session: LimitWindow?, weekly: LimitWindow?,
                          sessionProjection: Projection?, weeklyProjection: Projection?,
                          status: String?, warnThreshold: Int,
@@ -190,12 +205,10 @@ enum LimitAlerts {
             state.wasBlocked = true   // remembered until the next reset, for a punchier "freed" alert
             if !state.blocked {
                 state.blocked = true
-                // Live windows only: an expired session's past resetsAt would render
-                // as "곧 리셋" when the actual wait is the weekly window, days away.
-                let reset = liveSession?.resetsAt ?? liveWeekly?.resetsAt
-                let when = reset.map { "\(Fmt.countdown(to: $0, from: now)) 후 리셋" } ?? "곧 리셋"
-                out.append(LimitAlert(id: "blocked", title: "한도 도달 — 지금 막힘",
-                    body: "지금은 한도에 막혔습니다. \(when)."))
+                let (name, reset) = blockingReset(session: liveSession, weekly: liveWeekly)
+                let when = reset.map { "\(Fmt.countdown(to: $0, from: now)) 후 풀려요" } ?? "곧 풀려요"
+                out.append(LimitAlert(id: "blocked", title: "\(name) 한도 도달 — 지금 막힘",
+                    body: "지금은 \(name) 한도에 막혔습니다. \(when)."))
             }
         } else {
             state.blocked = false

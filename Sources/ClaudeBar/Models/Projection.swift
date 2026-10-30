@@ -219,11 +219,30 @@ struct Projection: Equatable {
                                windowSeconds: TimeInterval, now: Date) -> Projection {
         let paced = Projection.paced(util: util, resetsAt: resetsAt, windowSeconds: windowSeconds, now: now)
         let burst = Projection.compute(points: points, resetsAt: resetsAt, now: now)
-        guard burst.verdict == .atRisk, let bf = burst.timeToFull else { return paced }
+        guard burst.verdict == .atRisk, let bf = burst.timeToFull,
+              recentRise(points: points, now: now) >= burstMinRise else { return paced }
         let elapsed = resetsAt.map { windowSeconds - $0.timeIntervalSince(now) } ?? 0
         guard elapsed < pacedMinElapsed || bf <= burstImminentHorizon else { return paced }
         guard paced.verdict == .atRisk, let pf = paced.timeToFull else { return burst }
         return bf <= pf ? burst : paced
+    }
+
+    /// Utilization arrives as whole percents, so right after a weekly reset a single
+    /// 0→1 step inside the 45-min lookback reads as several %/h — "주간 한도 곧 소진"
+    /// fired at 1% and the week then sat at 1% for hours. A burst must show at least
+    /// this many points of real rise before it may override `paced`.
+    static let burstMinRise = 2.0
+
+    /// Rise across the lookback, counted only since the most recent reset drop.
+    static func recentRise(points: [(Date, Double)], now: Date) -> Double {
+        let recent = points.filter { now.timeIntervalSince($0.0) <= lookback && $0.0 <= now }
+            .sorted { $0.0 < $1.0 }
+        var start = 0
+        for i in stride(from: recent.count - 1, to: 0, by: -1) where recent[i].1 + resetDrop < recent[i - 1].1 {
+            start = i; break
+        }
+        guard recent.count - start >= 2 else { return 0 }
+        return recent[recent.count - 1].1 - recent[start].1
     }
 
     /// Below this much elapsed time in a fixed bucket, `paced` won't judge a pace.

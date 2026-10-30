@@ -484,6 +484,9 @@ struct WorkTimeLine: View {
     /// Weekly is the binding constraint (`UsageStore.isWeeklyBinding`) — then
     /// session headroom isn't a reason to "run heavy work now".
     var weeklyBinding = false
+    /// The weekly window when it's at 100% — then nothing the session ring says
+    /// matters until the WEEKLY reset.
+    var weeklyBlocked: LimitWindow? = nil
 
     var body: some View {
         let s = state
@@ -501,6 +504,10 @@ struct WorkTimeLine: View {
 
     private var state: (text: String, color: Color, icon: String) {
         let toReset = window.resetsAt?.timeIntervalSince(now)
+        if let wb = weeklyBlocked {
+            let r = wb.resetsAt.map { Fmt.countdown(to: $0, from: now) } ?? "?"
+            return ("주간 한도에 막힘 · \(r) 후 풀려요", .red, "nosign")
+        }
         if window.utilization >= 100 {
             let r = window.resetsAt.map { Fmt.countdown(to: $0, from: now) } ?? "?"
             return ("지금 막힘 · \(r) 후 새로 채워져요", .red, "nosign")

@@ -52,9 +52,12 @@ extension UsageStore {
         guard notifyModelDownshift, enableLiveLimits else { return }
         // Quiet check FIRST: shouldNotify consumes the one-shot, so checking it
         // during a snooze silently discarded the suggestion instead of deferring it.
-        guard !isQuietNow(Date()) else { return }
+        let now = Date()
+        guard !isQuietNow(now),
+              now.timeIntervalSince1970 - modelDownshiftNotifiedAt >= Self.modelDownshiftCooldown else { return }
         guard ModelDownshiftSuggestion.shouldNotify(modelRecap, state: &modelDownshiftState) else { return }
         guard let v = modelRecap, let to = v.downshiftTo else { return }
+        modelDownshiftNotifiedAt = now.timeIntervalSince1970
         let savingPct = Int(((v.downshiftSaving ?? 0) * 100).rounded())
         Notifier.notify(
             title: "\(v.model) 대신 \(to) 정도면 충분해 보여요",

@@ -1997,3 +1997,43 @@ final class AuditFixTests: XCTestCase {
         XCTAssertEqual(Fmt.countdown(to: now.addingTimeInterval(3 * 3600 + 5 * 60), from: now), "3h 5m")
     }
 }
+
+final class RealLogRegressionTests: XCTestCase {
+    let now = Date(timeIntervalSince1970: 1_000_000)
+
+    func testWeeklyBlockReportsWeeklyResetNotSession() {
+        // 10-27: weekly hit 100% with the session at 60% resetting in ~4h; the
+        // real wait was the weekly reset ~6h out.
+        var s = LimitAlertState()
+        let out = LimitAlerts.evaluate(session: LimitWindow(utilization: 60, resetsAt: now.addingTimeInterval(4 * 3600 + 13 * 60)),
+                                       weekly: LimitWindow(utilization: 100, resetsAt: now.addingTimeInterval(6 * 3600)),
+                                       sessionProjection: nil, weeklyProjection: nil, status: "rejected",
+                                       warnThreshold: 80, state: &s, now: now)
+        let blocked = out.first { $0.id == "blocked" }
+        XCTAssertEqual(blocked?.title, "주간 한도 도달 — 지금 막힘")
+        XCTAssertTrue(blocked?.body.contains("6h 0m 후") ?? false, blocked?.body ?? "")
+    }
+
+    func testBothFullUsesLaterReset() {
+        let r = LimitAlerts.blockingReset(session: LimitWindow(utilization: 100, resetsAt: now.addingTimeInterval(3600)),
+                                          weekly: LimitWindow(utilization: 100, resetsAt: now.addingTimeInterval(9000)))
+        XCTAssertEqual(r.name, "주간")
+        XCTAssertEqual(r.reset, now.addingTimeInterval(9000))
+    }
+
+    func testSingleStepAfterWeeklyResetIsNotABurst() {
+        // 2h into a new week, 0→1% within the lookback: compute() alone says atRisk.
+        let reset = now.addingTimeInterval(7 * 86400 - 2 * 3600)
+        let pts: [(Date, Double)] = [(now.addingTimeInterval(-1500), 0), (now.addingTimeInterval(-60), 1)]
+        XCTAssertEqual(Projection.compute(points: pts, resetsAt: reset, now: now).verdict, .atRisk)
+        let p = Projection.combinedWeekly(points: pts, util: 1, resetsAt: reset, windowSeconds: 7 * 86400, now: now)
+        XCTAssertNotEqual(p.verdict, .atRisk)
+    }
+
+    func testRealEarlyWeekBurstStillCaught() {
+        let reset = now.addingTimeInterval(7 * 86400 - 2 * 3600)
+        let pts: [(Date, Double)] = [(now.addingTimeInterval(-1800), 2), (now.addingTimeInterval(-60), 9)]
+        let p = Projection.combinedWeekly(points: pts, util: 9, resetsAt: reset, windowSeconds: 7 * 86400, now: now)
+        XCTAssertEqual(p.verdict, .atRisk)
+    }
+}

@@ -377,7 +377,8 @@ struct MenuContentView: View {
             // fine?" without reading the pace/reset/chart detail below.
             if let w = session {
                 WorkTimeLine(window: w, projection: store.sessionProjection, now: snap.generatedAt,
-                             weeklyBinding: store.isWeeklyBinding)
+                             weeklyBinding: store.isWeeklyBinding,
+                             weeklyBlocked: store.liveWeekly.flatMap { $0.utilization >= 100 ? $0 : nil })
                     .padding(.top, 4)
             }
 

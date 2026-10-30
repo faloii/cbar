@@ -193,6 +193,11 @@ final class UsageStore: ObservableObject {
     @AppStorage("notifyModelDownshift") var notifyModelDownshift: Bool = false {
         didSet { objectWillChange.send() }
     }
+    /// When the downshift suggestion last fired — persisted so the rising-edge state
+    /// resetting on every relaunch (or verdict flicker) can't repeat the same nudge
+    /// daily (seen: 9× in 7 days, identical text).
+    @AppStorage("modelDownshiftNotifiedAt") var modelDownshiftNotifiedAt: Double = 0
+    static let modelDownshiftCooldown: TimeInterval = 3 * 86400
     /// Rising-edge state for `processModelDownshiftSuggestion` (`UsageStore+Notifications.swift`).
     var modelDownshiftState = ModelDownshiftSuggestion.State()
     /// A past "compact this conversation" nudge that then actually paid off —
