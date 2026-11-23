@@ -86,6 +86,39 @@ final class ClaudeDataReaderTests: XCTestCase {
         XCTAssertEqual(stale.windowTokens.total, 1900)
     }
 
+    func testWeeklyWindowByModelFollowsLiveWeeklyReset() {
+        // Weekly reset in 6.5d → window started 12h ago: the 1h/2h-ago turns are in,
+        // the 20h-ago and 3d-ago ones belong to the previous week.
+        let reset = now.addingTimeInterval(6.5 * 86400)
+        let snap = ClaudeDataReader().load(now: now, weeklyResetsAt: reset)
+        XCTAssertEqual(Set(snap.weeklyWindowByModel.map(\.model)), ["Opus 4.8", "Sonnet 4.6"])
+        XCTAssertEqual(snap.weeklyWindowResetAt, reset)
+        XCTAssertEqual(snap.weeklyWindowCost,
+                       snap.weeklyProjectUsage.compactMap(\.limitWindowCost).reduce(0, +), accuracy: 1e-9)
+
+        // Unknown weekly reset → no weekly window to read the % against.
+        let none = ClaudeDataReader().load(now: now)
+        XCTAssertTrue(none.weeklyWindowByModel.isEmpty)
+        XCTAssertNil(none.weeklyWindowResetAt)
+    }
+
+    func testSyntheticTurnsAreNotCounted() throws {
+        let before = ClaudeDataReader().load(now: now)
+        // Claude Code's zero-usage placeholder ("Login expired"), the latest turn.
+        let obj: [String: Any] = [
+            "type": "assistant", "timestamp": ts(-60), "sessionId": "s2",
+            "message": ["model": "<synthetic>", "usage": [
+                "input_tokens": 0, "output_tokens": 0,
+                "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0]],
+        ]
+        try JSONSerialization.data(withJSONObject: obj)
+            .write(to: configDir.appendingPathComponent("projects/proj/synthetic.jsonl"))
+        let after = ClaudeDataReader().load(now: now)
+        XCTAssertEqual(after.todayRequests, before.todayRequests)
+        XCTAssertEqual(after.currentSessionId, "s1")
+        XCTAssertEqual(after.currentContextTokens, 100 + 1000)   // the 1h-ago Opus turn, not 0
+    }
+
     func testUnpricedModelsAreReported() {
         let snap = ClaudeDataReader().load(now: now)
         XCTAssertEqual(snap.unpricedModels, ["claude-gizmo-9"])

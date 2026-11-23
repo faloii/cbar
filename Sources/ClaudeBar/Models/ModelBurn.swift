@@ -51,7 +51,7 @@ struct ModelBurnRow: Identifiable {
     let requests: Int
     let shareFraction: Double     // 0...1 of the window's total weight (basis-dependent)
     let perTurnWeight: Double     // avg basis-weight per turn (the "burn weight")
-    let burnMultiplier: Double    // per-turn weight relative to the lightest model
+    let burnMultiplier: Double    // per-turn weight relative to the lightest model (see `ModelBurn.baselineMinRequests`)
     /// What % of the session limit ONE turn of this model consumes — always limit
     /// (total-token) based, nil when session utilization is unknown. Higher = greedier.
     /// Answers "how much does one use of this model cost me?" without the confusing
@@ -64,12 +64,22 @@ struct ModelBurnRow: Identifiable {
 /// budget from the local window total and live session utilization. The *comparison*
 /// between models is the point, not the absolute numbers.
 enum ModelBurn {
+    /// Turns a model needs in the window before its per-turn weight can be the ×1
+    /// baseline: a model touched once or twice (a stray Haiku subagent call) has a
+    /// per-turn figure that's mostly noise, and made every other model look ×10+.
+    static let baselineMinRequests = 3
+
     static func rows(window: [ModelWindowUsage], sessionUtil: Double?, basis: BurnBasis) -> [ModelBurnRow] {
         guard !window.isEmpty else { return [] }
 
         let totalWeight = max(1e-9, window.map { basis.weight($0) }.reduce(0, +))
-        let perTurnWeights = window.compactMap { $0.requests > 0 ? basis.weight($0) / Double($0.requests) : nil }
-        let lightest = perTurnWeights.filter { $0 > 0 }.min() ?? 1
+        func perTurnWeights(minRequests: Int) -> [Double] {
+            window.compactMap { $0.requests >= max(1, minRequests) ? basis.weight($0) / Double($0.requests) : nil }
+                .filter { $0 > 0 }
+        }
+        // Lightest among models with enough turns; if none has enough, any model.
+        let lightest = perTurnWeights(minRequests: baselineMinRequests).min()
+            ?? perTurnWeights(minRequests: 1).min() ?? 1
 
         // "Limit share per turn" is always cost-weighted, independent of the display
         // basis: list-price cost tracks plan utilization far better than raw tokens

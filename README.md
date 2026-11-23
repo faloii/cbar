@@ -49,14 +49,16 @@ Plus an **optional live fetch** of your real plan limits (see
 - **5-hour window** — tokens and estimated cost in the live session window (from the
   plan's reset time when live limits are on, else the trailing 5 hours).
 - **Per-model burn** (live 5h session window) — compares each model by share, per-turn
-  weight, a burn multiplier vs the lightest model, and the share of the session limit one
-  turn takes. Switch the basis in Settings between **cost** (default — list-price cost is
+  weight, a burn multiplier vs the lightest model with at least 3 turns in the window, and
+  the share of the session limit one turn takes. Switch the basis in Settings between **cost** (default — list-price cost is
   what tracks plan utilization; see [Pricing](#pricing)), **total tokens**, or **fresh
   tokens** (new work, no cache reads). Below the rows: "1% ≈ $X" read off the live window,
-  how many turns of each top model the remaining limit covers, and a warning when that
-  ratio drifts far from its usual value or a model isn't in the price table.
+  how many turns of each top model the remaining limit covers, the same two figures for the
+  weekly limit (read off the live weekly window), and a warning when the session ratio
+  drifts far from its usual value or a model isn't in the price table.
 - **Today** — tokens, estimated cost, request count, sessions, and tool calls (computed
-  live from the session logs).
+  live from the session logs; Claude Code's zero-usage `<synthetic>` placeholder turns
+  don't count).
 - **Menu-bar mini gauge** — when safely under your warning threshold, the idle icon is a
   tiny ring showing the worse of session/weekly utilization instead of a static glyph.
 - **Daily allowance / weekly recap** — "how much can I safely use *today*" turns the

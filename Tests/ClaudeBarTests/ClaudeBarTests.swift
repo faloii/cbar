@@ -582,6 +582,23 @@ final class ModelBurnTests: XCTestCase {
         XCTAssertEqual(fable.limitSharePerTurn ?? 0, 2.5, accuracy: 0.05)
     }
 
+    func testMultiplierBaselineIgnoresBarelyUsedModels() {
+        // One stray Haiku turn ($0.01) must not become ×1 and make Opus ×500;
+        // the baseline is the lightest model with enough turns (Sonnet, $2/turn).
+        let window = [model("Opus", total: 1, requests: 10, cost: 50),
+                      model("Sonnet", total: 1, requests: 5, cost: 10),
+                      model("Haiku", total: 1, requests: 1, cost: 0.01)]
+        let rows = ModelBurn.rows(window: window, sessionUtil: nil, basis: .cost)
+        XCTAssertEqual(rows.first { $0.model == "Opus" }!.burnMultiplier, 2.5, accuracy: 0.001)
+        XCTAssertEqual(rows.first { $0.model == "Sonnet" }!.burnMultiplier, 1.0, accuracy: 0.001)
+
+        // Nobody has enough turns → fall back to the lightest of all.
+        let sparse = ModelBurn.rows(window: [model("Opus", total: 1, requests: 2, cost: 10),
+                                             model("Haiku", total: 1, requests: 1, cost: 1)],
+                                    sessionUtil: nil, basis: .cost)
+        XCTAssertEqual(sparse.first { $0.model == "Opus" }!.burnMultiplier, 5.0, accuracy: 0.001)
+    }
+
     func testCostBasisChangesShareAndMultiplier() {
         // Equal tokens, but Opus costs far more → cost basis reorders & re-weights.
         let window = [model("Opus", total: 500_000, requests: 5, cost: 300),
@@ -917,6 +934,18 @@ final class AdviceTests: XCTestCase {
                                   models: [], warnThreshold: 80, now: now)
         let weekly = tips.first { $0.kind == .weeklyDefer }
         XCTAssertTrue(weekly?.text.contains("바닥") ?? false)
+    }
+
+    func testWeeklyAtRiskTipOffersModelLever() {
+        // Weekly is the binding limit: the at-risk weekly tip names the step down too.
+        let wk = Projection(ratePerHour: 2, timeToFull: 1000, secondsToReset: 3 * 24 * 3600, verdict: .atRisk)
+        let tokens = TokenCounts(input: 0, output: 400, cacheWrite: 0, cacheRead: 10_000)
+        let fable = ModelWindowUsage(model: "Fable 5.2", tokens: tokens,
+                                     cost: Pricing.cost(for: tokens, model: "claude-fable-5-2"), requests: 5)
+        let tips = Advice.compute(session: nil, weekly: wk, sessionUtil: nil, weeklyUtil: 85,
+                                  models: [fable], warnThreshold: 80, now: now)
+        let text = tips.first { $0.kind == .weeklyDefer }?.text ?? ""
+        XCTAssertTrue(text.contains("Fable 5.2 대신 Opus 5.5로"), text)
     }
 
     func testWeeklyDeferNamesDominantProject() {

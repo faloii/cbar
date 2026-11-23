@@ -45,6 +45,15 @@ enum Advice {
             return n > 0 ? n : nil
         }
 
+        // Model lever: utilization tracks list-price cost, so moving light turns off
+        // a top-tier model cuts the limit drawn per turn (session AND weekly), not
+        // just the bill. Shared by the at-risk session and weekly tips below.
+        var modelLever = ""
+        if let v = ModelRecap.verdict(window: models), let to = v.downshiftTo,
+           let saving = v.downshiftSaving, saving >= 0.2 {
+            modelLever = " 가벼운 작업이면 \(v.model) 대신 \(to)로 바꿔도 돼요(그 몫의 한도 소모 약 \(Int((saving * 100).rounded()))%↓)."
+        }
+
         // 1) Session over-pace — quantified: when you hit the wall, roughly how many
         //    turns that is, and the exact rate you'd need to drop to to survive.
         if let s = session, s.verdict == .atRisk, let u = sessionUtil {
@@ -66,13 +75,6 @@ enum Advice {
                 } else if s.ratePerHour <= typical * 1.2 {
                     hourNote = " 이 시간대엔 원래 이 정도 속도예요."
                 }
-            }
-            // Model lever: utilization tracks list-price cost, so moving light turns
-            // off a top-tier model cuts the limit drawn per turn, not just the bill.
-            var modelLever = ""
-            if let v = ModelRecap.verdict(window: models), let to = v.downshiftTo,
-               let saving = v.downshiftSaving, saving >= 0.2 {
-                modelLever = " 가벼운 작업이면 \(v.model) 대신 \(to)로 바꿔도 돼요(그 몫의 한도 소모 약 \(Int((saving * 100).rounded()))%↓)."
             }
             if (s.blockedBy ?? 0) < 600 {   // barely blocked → don't over-alarm
                 tips.append(AdviceTip(kind: .sessionPacing, level: .warn, icon: "speedometer",
@@ -137,7 +139,7 @@ enum Advice {
             if weekly?.verdict == .atRisk {
                 tips.append(AdviceTip(kind: .weeklyDefer, level: .warn, icon: "calendar.badge.exclamationmark",
                     text: "주간 한도 \(Int(wu.rounded()))% — 지금 추세면 리셋(\(longDur(weekly?.secondsToReset)) 뒤) 전에 바닥나요. "
-                        + "큰 작업은 리셋 후로 미루세요.\(projectNote)"))
+                        + "큰 작업은 리셋 후로 미루세요.\(modelLever)\(projectNote)"))
             } else {
                 tips.append(AdviceTip(kind: .weeklyDefer, level: .warn, icon: "calendar",
                     text: "주간 한도 \(Int(wu.rounded()))% — \(longDur(weekly?.secondsToReset)) 후 리셋. 큰 작업은 리셋 후가 안전해요.\(projectNote)"))

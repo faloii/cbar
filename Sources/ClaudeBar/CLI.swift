@@ -194,6 +194,11 @@ enum CLI {
            let d = LimitCalibration.dollarsPerPercent(windowCost: s.windowCost, util: u) {
             obj["sessionDollarsPerPercent"] = d
         }
+        if let w = limits?.weekly7d, let reset = w.resetsAt, let snapReset = s.weeklyWindowResetAt,
+           LimitCalibration.sameWindow(reset, snapReset),
+           let d = LimitCalibration.dollarsPerPercent(windowCost: s.weeklyWindowCost, util: w.utilization) {
+            obj["weeklyDollarsPerPercent"] = d
+        }
         if let l = limits {
             obj["planLimits"] = [
                 "fetchedAt": ISO8601DateFormatter().string(from: l.fetchedAt),

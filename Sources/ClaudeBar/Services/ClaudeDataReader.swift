@@ -102,6 +102,9 @@ struct ClaudeDataReader {
         var windowCost = 0.0
         var oldestInWindow: Date?
         var winByModel: [String: ModelWindowUsage] = [:]
+        // Per-model usage inside the plan's live weekly window — the weekly
+        // counterpart of `winByModel`, for "weekly 1% ≈ $X" and weekly turns left.
+        var weekWinByModel: [String: ModelWindowUsage] = [:]
 
         var todayTokens = TokenCounts()
         var todayCost = 0.0
@@ -143,8 +146,11 @@ struct ClaudeDataReader {
                 todayToolCalls += r.toolUseCount
             }
 
-            // Only assistant turns carry token usage / cost.
-            guard let tokens = r.tokens, r.type == "assistant" else { continue }
+            // Only assistant turns carry token usage / cost. `<synthetic>` turns are
+            // Claude Code's own placeholders ("Login expired" etc.) with zero usage:
+            // counting them inflated today's request count, and one landing last
+            // read as a zero-token current conversation.
+            guard let tokens = r.tokens, r.type == "assistant", r.model != "<synthetic>" else { continue }
             let cost = Pricing.turnCost(for: tokens, model: r.model, hourCache: r.hourCache == true)
             let key = ModelName.display(r.model)
 
@@ -174,11 +180,18 @@ struct ClaudeDataReader {
                     bySession[r.sessionId] = acc
                 }
                 var pAcc = byProject[proj] ?? ProjAcc()
-                if tokens.total > 0, r.model != "<synthetic>", !Pricing.isKnown(r.model) { unpriced.insert(r.model) }
+                if tokens.total > 0, !Pricing.isKnown(r.model) { unpriced.insert(r.model) }
                 days.add(r, model: key, tokens: tokens, cost: cost)
                 pAcc.tokens += tokens.total
                 pAcc.cost += cost
-                if let weeklyStart, r.timestamp >= weeklyStart { pAcc.limitWindowCost += cost }
+                if let weeklyStart, r.timestamp >= weeklyStart {
+                    pAcc.limitWindowCost += cost
+                    var mw = weekWinByModel[key] ?? ModelWindowUsage(model: key, tokens: TokenCounts(), cost: 0, requests: 0)
+                    mw.tokens += tokens
+                    mw.cost += cost
+                    mw.requests += 1
+                    weekWinByModel[key] = mw
+                }
                 byProject[proj] = pAcc
                 weeklyTokens += tokens
             }
@@ -224,6 +237,10 @@ struct ClaudeDataReader {
             .filter { $0.cost > 0 }
             .sorted { $0.cost > $1.cost }
         snap.weeklyTokens = weeklyTokens
+        snap.weeklyWindowResetAt = weeklyStart != nil ? weeklyResetsAt : nil
+        snap.weeklyWindowByModel = weekWinByModel.values
+            .filter { $0.tokens.total > 0 }
+            .sorted { $0.cost > $1.cost }
         snap.unpricedModels = unpriced.sorted()
         snap.dailyFresh = days.days()
         // The scan starts mid-day `weekFloor`; only the days after it are complete.

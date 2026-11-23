@@ -172,6 +172,25 @@ extension UsageStore {
         return ModelBurn.turnsLeft(rows: modelBurnRows, sessionUtil: u)
     }
 
+    /// Live list-price $ per 1% of the WEEKLY limit — the weekly window's cost on
+    /// this Mac ÷ live weekly utilization. Only when the scan's weekly window is the
+    /// live one. Not tracked for drift: other devices and plan changes move it, and
+    /// the session ratio already watches the price table.
+    var weeklyDollarsPerPercent: Double? {
+        guard let w = liveWeekly, let reset = w.resetsAt,
+              let snapReset = snapshot.weeklyWindowResetAt, LimitCalibration.sameWindow(reset, snapReset)
+        else { return nil }
+        return LimitCalibration.dollarsPerPercent(windowCost: snapshot.weeklyWindowCost, util: w.utilization)
+    }
+
+    /// "남은 주간 N% ≈ 모델 X 약 M턴" — per-turn cost over the weekly window, which
+    /// is steadier than the 5h window's.
+    var weeklyModelTurnsLeft: [(model: String, turns: Int)] {
+        guard let u = liveWeekly?.utilization, weeklyDollarsPerPercent != nil else { return [] }
+        let rows = ModelBurn.rows(window: snapshot.weeklyWindowByModel, sessionUtil: u, basis: .cost)
+        return ModelBurn.turnsLeft(rows: rows, sessionUtil: u)
+    }
+
     /// Highest of the live session/weekly utilizations, or nil if unavailable.
     /// Expired windows (reset boundary passed) don't count — see `liveSession`.
     var maxLimitUtilization: Double? {

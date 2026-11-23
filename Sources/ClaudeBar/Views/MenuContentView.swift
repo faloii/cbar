@@ -648,7 +648,7 @@ struct MenuContentView: View {
         VStack(alignment: .leading, spacing: 9) {
             ForEach(store.modelBurnRows) { ModelBurnRowView(row: $0, basis: store.burnBasis) }
         }
-        Text("× = 턴당 \(store.burnBasis.shortLabel) (최저 모델 대비) · 한도 %/턴 = 한 번 쓸 때 세션 한도를 먹는 비중")
+        Text("× = 턴당 \(store.burnBasis.shortLabel) (\(ModelBurn.baselineMinRequests)턴 이상 쓴 모델 중 최저 대비) · 한도 %/턴 = 한 번 쓸 때 세션 한도를 먹는 비중")
             .font(.caption2).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         if let c = store.limitCalibration {
@@ -663,6 +663,13 @@ struct MenuContentView: View {
                     .font(.caption2).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+        if let d = store.weeklyDollarsPerPercent {
+            let turns = store.weeklyModelTurnsLeft.map { "\($0.model) 약 \($0.turns)턴" }.joined(separator: " · ")
+            Text("주간 1% ≈ \(Fmt.usd(d))" + (turns.isEmpty ? "" : " · 남은 주간 한도 ≈ \(turns)"))
+                .font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                .fixedSize(horizontal: false, vertical: true)
+                .help("이번 주간 창(리셋 7일 전부터)에서 이 Mac 로그의 정가 기준 비용 ÷ 주간 사용률. 턴 수는 남은 주간 한도를 전부 그 모델로 쓴다고 가정한 비교용 값이에요.")
         }
         if !snap.unpricedModels.isEmpty {
             Label("단가표에 없는 모델: \(snap.unpricedModels.joined(separator: ", ")) — 비용·한도 추정이 부정확해요. ~/.claudebar/pricing.json에 단가를 넣을 수 있어요.",

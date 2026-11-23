@@ -98,6 +98,13 @@ struct UsageSnapshot {
     /// weekly recap notification ("how much of the week was re-reading vs new work").
     var weeklyTokens = TokenCounts()
 
+    /// Per-model usage inside the plan's live weekly window (reset − 7d → now), and
+    /// that window's reset time — empty/nil when the weekly reset wasn't known at
+    /// scan time. Lets the weekly % be read in dollars and turns like the session's.
+    var weeklyWindowByModel: [ModelWindowUsage] = []
+    var weeklyWindowResetAt: Date?
+    var weeklyWindowCost: Double { weeklyWindowByModel.reduce(0) { $0 + $1.cost } }
+
     /// Context size (prompt tokens) of the most-recent assistant turn — how big the
     /// active conversation is. Large = each turn eats more of the limit, so /compact
     /// or a fresh session stretches the window.
@@ -154,6 +161,7 @@ struct UsageSnapshot {
         s.windowByModel = o.windowByModel; s.recentSessions = o.recentSessions
         s.weeklyProjectUsage = o.weeklyProjectUsage
         s.weeklyTokens = o.weeklyTokens
+        s.weeklyWindowByModel = o.weeklyWindowByModel; s.weeklyWindowResetAt = o.weeklyWindowResetAt
         s.currentContextTokens = o.currentContextTokens
         s.currentSessionId = o.currentSessionId
         s.currentTurnAt = o.currentTurnAt; s.currentCacheTTL = o.currentCacheTTL
