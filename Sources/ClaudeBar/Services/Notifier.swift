@@ -15,7 +15,6 @@ enum Notifier {
     enum Action: String {
         case snooze = "cbar.snooze"             // "2시간 조용히" — same as the header snooze button
         case resumeNow = "cbar.resumeNow"       // "지금 이어가기" — manually run the resume command
-        case copyCompact = "cbar.copyCompact"   // "/compact 복사" — copies the command to the clipboard
     }
 
     /// Notification categories, each wiring up the one action that's actually
@@ -23,7 +22,6 @@ enum Notifier {
     enum Category: String {
         case limit = "cbar.limit"                 // any limit-related nudge/danger → can snooze
         case freed = "cbar.freed"                 // "한도 풀렸어요" → can resume immediately
-        case compactSuggest = "cbar.compactSuggest"  // "/compact 하세요" → can snooze or copy the command
     }
 
     /// Registers the action buttons notifications can carry. Must run before any
@@ -34,14 +32,10 @@ enum Notifier {
                                           title: "2시간 조용히", options: [])
         let resume = UNNotificationAction(identifier: Action.resumeNow.rawValue,
                                           title: "지금 이어가기", options: [.foreground])
-        let copyCompact = UNNotificationAction(identifier: Action.copyCompact.rawValue,
-                                               title: "/compact 복사", options: [])
         UNUserNotificationCenter.current().setNotificationCategories([
             UNNotificationCategory(identifier: Category.limit.rawValue, actions: [snooze],
                                    intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: Category.freed.rawValue, actions: [resume],
-                                   intentIdentifiers: [], options: []),
-            UNNotificationCategory(identifier: Category.compactSuggest.rawValue, actions: [copyCompact, snooze],
                                    intentIdentifiers: [], options: []),
         ])
     }

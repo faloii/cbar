@@ -99,8 +99,8 @@ enum Advice {
                     + "\(turnPart)미뤘던 무거운 작업을 지금 돌리세요."))
         }
 
-        // 3.5) Heavy context — a concrete way to cut per-turn burn (the only real
-        //      limit lever besides slowing down; model choice barely moves it). Shown
+        // 3.5) Heavy context — a concrete way to cut per-turn burn (with a cheaper
+        //      model, the main limit lever besides slowing down). Shown
         //      whenever the conversation is large and the window is actively in use,
         //      so it pairs with the over-pace tip as the "here's how to fix it" lever.
         if contextTokens >= SessionCoach.heavyContextTokens, (sessionUtil ?? 0) >= 1 {

@@ -27,11 +27,14 @@ struct ClaudeDataReader {
     /// figures cover that real window (reset − 5h → now) instead of a rolling
     /// now − 5h, which mixes in turns from the previous window and skews every
     /// per-model share mapped onto the live utilization.
-    func load(now: Date = Date(), includeSessionLogs: Bool = true, sessionResetsAt: Date? = nil) -> UsageSnapshot {
+    /// `weeklyResetsAt`: likewise for the weekly window, used for the per-project
+    /// share of the weekly %.
+    func load(now: Date = Date(), includeSessionLogs: Bool = true,
+              sessionResetsAt: Date? = nil, weeklyResetsAt: Date? = nil) -> UsageSnapshot {
         var snap = UsageSnapshot(generatedAt: now)
         applyStatsCache(to: &snap, now: now)
         if includeSessionLogs {
-            applySessionLogs(to: &snap, now: now, sessionResetsAt: sessionResetsAt)
+            applySessionLogs(to: &snap, now: now, sessionResetsAt: sessionResetsAt, weeklyResetsAt: weeklyResetsAt)
             snap.sessionLogsScannedAt = now
         }
         return snap
@@ -86,16 +89,20 @@ struct ClaudeDataReader {
 
     // MARK: - session *.jsonl logs
 
-    private func applySessionLogs(to snap: inout UsageSnapshot, now: Date, sessionResetsAt: Date? = nil) {
+    private func applySessionLogs(to snap: inout UsageSnapshot, now: Date,
+                                  sessionResetsAt: Date? = nil, weeklyResetsAt: Date? = nil) {
         // Scan the full 7-day range once (not just the 36h the window/today figures
         // need) so the per-project weekly breakdown below can piggyback on the same
         // pass — the per-file parse cache means this costs nothing extra on repeat
         // refreshes (only genuinely new/changed files get re-parsed).
         let records = recentRecords(now: now, since: 7 * 24 * 3600)
-        let liveStart = sessionResetsAt.flatMap { reset -> Date? in
-            let start = reset.addingTimeInterval(-Self.windowDuration)
+        func liveWindowStart(_ reset: Date?, length: TimeInterval) -> Date? {
+            guard let reset else { return nil }
+            let start = reset.addingTimeInterval(-length)
             return reset > now && start <= now ? start : nil
         }
+        let liveStart = liveWindowStart(sessionResetsAt, length: Self.windowDuration)
+        let weeklyStart = liveWindowStart(weeklyResetsAt, length: 7 * 24 * 3600)
         let windowStart = liveStart ?? now.addingTimeInterval(-Self.windowDuration)
         let todayStart = Calendar.current.startOfDay(for: now)
         // recentRecords selects FILES by mtime (touched in the last 7d), but a file
@@ -136,11 +143,12 @@ struct ClaudeDataReader {
 
         // Per-project totals across the full 7-day scan (independent of the 5h/today
         // filters below) — "which project is eating the weekly limit?"
-        struct ProjAcc { var tokens = 0; var cost = 0.0 }
+        struct ProjAcc { var tokens = 0; var cost = 0.0; var limitWindowCost = 0.0 }
         var byProject: [String: ProjAcc] = [:]
         // Token totals across the same full 7-day scan (fresh vs re-read), for the
         // weekly recap notification's cache-efficiency read.
         var weeklyTokens = TokenCounts()
+        var unpriced = Set<String>()
 
         for r in records {
             let isToday = r.timestamp >= todayStart
@@ -180,8 +188,10 @@ struct ClaudeDataReader {
                     bySession[r.sessionId] = acc
                 }
                 var pAcc = byProject[proj] ?? ProjAcc()
+                if tokens.total > 0, r.model != "<synthetic>", !Pricing.isKnown(r.model) { unpriced.insert(r.model) }
                 pAcc.tokens += tokens.total
                 pAcc.cost += cost
+                if let weeklyStart, r.timestamp >= weeklyStart { pAcc.limitWindowCost += cost }
                 byProject[proj] = pAcc
                 weeklyTokens += tokens
             }
@@ -220,10 +230,14 @@ struct ClaudeDataReader {
         .filter { $0.cost > 0 }
         .sorted { $0.cost > $1.cost }
 
-        snap.weeklyProjectUsage = byProject.map { ProjectWeeklyUsage(project: $0.key, tokens: $0.value.tokens, cost: $0.value.cost) }
+        snap.weeklyProjectUsage = byProject.map {
+            ProjectWeeklyUsage(project: $0.key, tokens: $0.value.tokens, cost: $0.value.cost,
+                               limitWindowCost: weeklyStart != nil ? $0.value.limitWindowCost : nil)
+        }
             .filter { $0.cost > 0 }
             .sorted { $0.cost > $1.cost }
         snap.weeklyTokens = weeklyTokens
+        snap.unpricedModels = unpriced.sorted()
 
         snap.windowTokens = windowTokens
         snap.windowCost = windowCost

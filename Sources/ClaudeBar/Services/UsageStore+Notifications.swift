@@ -61,7 +61,7 @@ extension UsageStore {
         let savingPct = Int(((v.downshiftSaving ?? 0) * 100).rounded())
         Notifier.notify(
             title: "\(v.model) 대신 \(to) 정도면 충분해 보여요",
-            body: "최근 턴 출력이 가벼운 편이에요 — 모델을 \(to) 쪽으로 바꾸면 이 창에서 비용 \(savingPct)% 절감돼요 (한도 소모량은 동일).",
+            body: "최근 턴 출력이 가벼운 편이에요 — 모델을 \(to) 쪽으로 바꾸면 \(v.model)로 쓴 몫의 비용과 한도 소모가 약 \(savingPct)% 줄어요.",
             id: "model-downshift-\(v.model)", urgency: .nudge, category: .limit)
     }
 

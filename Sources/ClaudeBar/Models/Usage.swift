@@ -46,7 +46,10 @@ struct ProjectWeeklyUsage: Identifiable {
     var id: String { project }
     let project: String
     let tokens: Int
-    let cost: Double
+    let cost: Double                    // trailing 7 days
+    /// Cost inside the plan's live weekly window (reset − 7d → now) — what the
+    /// weekly % actually measures. nil when that window isn't known.
+    var limitWindowCost: Double? = nil
 }
 
 /// One recent conversation's usage, for the per-session model breakdown.
@@ -72,6 +75,9 @@ struct UsageSnapshot {
     /// actually scanned — `generatedAt` advances on every cheap refresh too, but
     /// the session-log fields may have been carried over from an older scan.
     var sessionLogsScannedAt: Date?
+    /// Model ids seen in the last 7 days that the price table doesn't know —
+    /// their cost (and every per-model share) is a fallback guess.
+    var unpricedModels: [String] = []
 
     // Rolling 5-hour window (Claude's session-limit window).
     var windowTokens = TokenCounts()
@@ -146,6 +152,7 @@ struct UsageSnapshot {
         s.todayTokens = o.todayTokens; s.todayCost = o.todayCost; s.todayByModel = o.todayByModel
         s.todayRequests = o.todayRequests; s.todaySessions = o.todaySessions; s.todayToolCalls = o.todayToolCalls
         s.sessionLogsScannedAt = o.sessionLogsScannedAt
+        s.unpricedModels = o.unpricedModels
         return s
     }
 }

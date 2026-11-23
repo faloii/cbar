@@ -76,6 +76,7 @@ extension UsageStore {
         let previous = snapshot
         let now = Date()
         let sessionResetsAt = liveSession?.resetsAt
+        let weeklyResetsAt = liveWeekly?.resetsAt
         let lastScan = previous.sessionLogsScannedAt
         let scanStale = lastScan.map {
             now.timeIntervalSince($0) >= Self.maxSessionScanAge
@@ -92,7 +93,8 @@ extension UsageStore {
             // in this Task may block `isRefreshing` from resetting indefinitely.
             if let loaded = await withTimeout(seconds: 20, operation: {
                 await Task.detached(priority: .utility) {
-                    reader.load(includeSessionLogs: full, sessionResetsAt: sessionResetsAt)
+                    reader.load(includeSessionLogs: full, sessionResetsAt: sessionResetsAt,
+                                weeklyResetsAt: weeklyResetsAt)
                 }.value
             }) {
                 var snap = loaded
@@ -128,6 +130,7 @@ extension UsageStore {
             self.processAdviceFollowThrough()
             self.processCacheExpiry()
             self.maybeWeeklySummary()
+            if full { self.recordLimitCalibration() }
             self.reloadDiskReadings()   // after the alert passes above may have logged a notification
             // If the risk level changed, re-arm the timer at the matching cadence.
             if self.isAtLimitRisk != self.lastUrgent {

@@ -45,11 +45,13 @@ Plus an **optional live fetch** of your real plan limits (see
 - **5-hour window** — tokens used in the rolling 5h session window, an estimated cost,
   a usage meter against a configurable soft budget, and a countdown to when the window
   first starts to free up.
-- **Per-model burn** (5h) — compares each model by share, per-turn weight, a burn
-  multiplier vs the lightest model, and "~N turns left if you used only this model."
-  Switch the basis in Settings between **total tokens** (rate-limit pressure; default),
-  **fresh tokens** (new work, no cache reads), or **cost** — total tokens makes models
-  look similar (cache reads dominate), while cost exposes the real gap (e.g. Opus ~2.8×).
+- **Per-model burn** (live 5h session window) — compares each model by share, per-turn
+  weight, a burn multiplier vs the lightest model, and the share of the session limit one
+  turn takes. Switch the basis in Settings between **cost** (default — list-price cost is
+  what tracks plan utilization; see [Pricing](#pricing)), **total tokens**, or **fresh
+  tokens** (new work, no cache reads). Below the rows: "1% ≈ $X" read off the live window,
+  how many turns of each top model the remaining limit covers, and a warning when that
+  ratio drifts far from its usual value or a model isn't in the price table.
 - **Today** — tokens, estimated cost, request count, sessions, and tool calls (computed
   live from the session logs).
 - **14-day trend** — a sparkline of daily token totals plus a **daily cost** bar chart
@@ -63,9 +65,9 @@ Plus an **optional live fetch** of your real plan limits (see
 - **Per-session /compact hints** — flags which conversation is heavy (big context +
   mostly re-reading old turns) and, opt-in, nudges you once when the conversation you're
   *currently* in crosses that line.
-- **Model downshift nudge** (opt-in) — when Opus is doing light work in the current 5h
-  window, suggests Sonnet would likely be enough — a cost lever, not a limit lever (token
-  usage against your session cap is identical either way).
+- **Model downshift nudge** (opt-in) — when Fable or Opus is doing light work in the
+  current 5h window, suggests the next tier down (Fable → Opus 5.5 → Sonnet 5.5). Each step
+  roughly halves the price — and the limit drawn per turn, since utilization tracks cost.
 - **Quiet coach delivery** — only real limit danger makes a sound; coaching nudges are
   silent banners, and the weekly recap goes straight to Notification Center. Notification
   actions ("2시간 조용히" / "지금 이어가기") let you snooze or resume without opening the
@@ -228,19 +230,29 @@ another machine, that usage isn't included in those numbers.
 
 ## Pricing
 
-Cost figures use built-in public list prices per model family (Opus / Sonnet / Haiku /
-Fable). To override, create `~/.claudebar/pricing.json` with USD-per-1M-token rates:
+Cost figures use built-in public list prices per model version (e.g. Fable 5.2 $8/$40,
+Opus 5.5 $4/$20, Sonnet 5.5 $2/$10 per 1M input/output tokens, as of 2026-11). Cache writes
+are 1.25× input for the 5-minute TTL and 2× for the 1-hour TTL.
+
+These prices also drive the limit estimates. Fitting four weeks of weekly-utilization
+history against the logs, list-price cost explained utilization far better (R² 0.91)
+than raw tokens (0.71): models and cache reads draw on the limit at very different rates
+per token. That's a measurement on one machine, not a published rule.
+
+To override, create `~/.claudebar/pricing.json` with USD-per-1M-token rates:
 
 ```json
 {
-  "opus":   { "input": 15, "output": 75, "cacheWrite": 18.75, "cacheRead": 1.5 },
-  "sonnet": { "input": 3,  "output": 15, "cacheWrite": 3.75,  "cacheRead": 0.3 },
-  "default":{ "input": 5,  "output": 20, "cacheWrite": 6.25,  "cacheRead": 0.5 }
+  "claude-fable-6": { "input": 8, "output": 40, "cacheWrite": 10, "cacheRead": 0.2 },
+  "opus":           { "input": 4, "output": 20, "cacheWrite": 5,  "cacheRead": 0.2 },
+  "default":        { "input": 5, "output": 20, "cacheWrite": 6.25, "cacheRead": 0.5 }
 }
 ```
 
-Keys are matched as a substring of the model id (`opus` matches `claude-opus-4-8`);
-`default` is the fallback for unmatched models.
+Keys are matched as a substring of the model id, longest key first (`opus` matches
+`claude-opus-4-8`); an override also works for a model the built-in table doesn't know
+yet. `default` is the fallback for unmatched models. Models with no price show a warning
+in the per-model card.
 
 ## Notes on the "5-hour window"
 
@@ -264,11 +276,11 @@ Sources/ClaudeBar/
     DailyAllowance.swift, CacheEfficiency.swift, ModelBurn.swift, ModelRecap.swift
     ModelDownshiftSuggestion.swift, CompactSuggestion.swift, WeeklyResetRecap.swift
     WeeklyReview.swift, NotificationLog.swift, SessionCoach.swift, Advice.swift
-    Budget.swift, ModelTier.swift
+    Budget.swift, ModelTier.swift, LimitCalibration.swift
   Services/                # stateful orchestration / I/O
     ClaudeDataReader.swift, OAuthUsageClient.swift, UsageStore.swift
     UsageHistory.swift, WeeklyHistory.swift, Notifier.swift, LoginItem.swift
-    CommandRunner.swift, PowerAssertion.swift
+    CommandRunner.swift, LimitCalibrationHistory.swift
   Views/    MenuContentView.swift, SettingsView.swift, Components.swift
   Util/     Formatters.swift, SettingsOpener.swift
 Tests/ClaudeBarTests/   unit tests (Models/ logic + the /api/oauth/usage parser)

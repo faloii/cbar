@@ -97,4 +97,19 @@ enum ModelBurn {
         }
         .sorted { $0.shareFraction > $1.shareFraction }
     }
+
+    /// Turns of each model the remaining session limit would cover, for the top
+    /// `limit` models with enough turns (≥ `minRequests`) to have a stable per-turn
+    /// cost. Each figure is "if every remaining turn were this model" — a scale
+    /// for comparing models, not a forecast of the actual mix.
+    static func turnsLeft(rows: [ModelBurnRow], sessionUtil: Double,
+                          limit: Int = 2, minRequests: Int = 3) -> [(model: String, turns: Int)] {
+        let left = 100 - sessionUtil
+        guard left > 0 else { return [] }
+        return rows
+            .filter { $0.requests >= minRequests && ($0.limitSharePerTurn ?? 0) > 0 }
+            .sorted { $0.cost > $1.cost }
+            .prefix(limit)
+            .map { ($0.model, Int((left / $0.limitSharePerTurn!).rounded(.down))) }
+    }
 }

@@ -178,7 +178,9 @@ struct OAuthUsageClient: Sendable {
 
         snap.session5h  = window(["five_hour"])
         snap.weekly7d   = window(["seven_day"])
-        snap.weeklyOpus = window(["seven_day_opus", "seven_day_oauth_apps"])
+        // Only the Opus-specific cap: `seven_day_oauth_apps` is a different quota
+        // (third-party OAuth apps) and used to be shown under the "Opus" label.
+        snap.weeklyOpus = window(["seven_day_opus"])
         if !snap.hasData { snap.error = FetchError.badResponse.errorDescription }
         return snap
     }

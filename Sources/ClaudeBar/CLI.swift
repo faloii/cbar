@@ -19,7 +19,8 @@ enum CLI {
 
     static func printSnapshot(json: Bool) {
         let limits = CommandLine.arguments.contains("--no-limits") ? nil : fetchLimitsBlocking()
-        let snap = ClaudeDataReader().load(sessionResetsAt: limits?.session5h?.resetsAt)
+        let snap = ClaudeDataReader().load(sessionResetsAt: limits?.session5h?.resetsAt,
+                                           weeklyResetsAt: limits?.weekly7d?.resetsAt)
         if json {
             printJSON(snap, limits)
         } else {
@@ -184,7 +185,12 @@ enum CLI {
                 ]
             },
             "burnBasis": savedBurnBasis().rawValue,
+            "unpricedModels": s.unpricedModels,
         ]
+        if let u = limits?.session5h?.utilization,
+           let d = LimitCalibration.dollarsPerPercent(windowCost: s.windowCost, util: u) {
+            obj["sessionDollarsPerPercent"] = d
+        }
         if let l = limits {
             obj["planLimits"] = [
                 "fetchedAt": ISO8601DateFormatter().string(from: l.fetchedAt),

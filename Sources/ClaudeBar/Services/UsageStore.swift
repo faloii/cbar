@@ -11,6 +11,7 @@ struct DiskReadings {
     var cacheEfficiencyTrend: CacheEfficiencyTrend.Verdict?
     var typicalHourRate: Double?
     var recentNotifications: [NotificationLogEntry] = []
+    var limitCalibrationHistory: [LimitCalibration.Sample] = []
 }
 
 enum PanelSection: String, CaseIterable, Identifiable {

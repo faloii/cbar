@@ -45,6 +45,7 @@ final class ClaudeDataReaderTests: XCTestCase {
             assistant(-3600, "claude-opus-4-8", in: 100, out: 200, cacheRead: 1000),   // 1h ago, in window
             assistant(-7200, "claude-sonnet-4-6", in: 50, out: 50, cacheRead: 500),    // 2h ago, in window
             assistant(-20 * 3600, "claude-opus-4-8", in: 9_000_000, out: 0, cacheRead: 0), // 20h ago, OUT of window
+            assistant(-3 * 86400, "claude-gizmo-9", in: 10, out: 10, cacheRead: 0),        // 3d ago, unknown price
         ]
         let userObj: [String: Any] = ["type": "user", "timestamp": ts(-3600), "sessionId": "s1"]
         lines.append(try! JSONSerialization.data(withJSONObject: userObj))
@@ -83,6 +84,11 @@ final class ClaudeDataReaderTests: XCTestCase {
         // An already-passed reset is stale → fall back to the rolling window.
         let stale = ClaudeDataReader().load(now: now, sessionResetsAt: now.addingTimeInterval(-60))
         XCTAssertEqual(stale.windowTokens.total, 1900)
+    }
+
+    func testUnpricedModelsAreReported() {
+        let snap = ClaudeDataReader().load(now: now)
+        XCTAssertEqual(snap.unpricedModels, ["claude-gizmo-9"])
     }
 
     func testStatsCacheParsed() {

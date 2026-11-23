@@ -98,6 +98,12 @@ final class PricingTests: XCTestCase {
         XCTAssertEqual(Pricing.price(for: "claude-haiku-5-5").input, 0.10)
     }
 
+    func testUnknownModelIsFlagged() {
+        XCTAssertTrue(Pricing.isKnown("claude-fable-5-2"))
+        XCTAssertTrue(Pricing.isKnown("claude-haiku-4-5-20251001"))
+        XCTAssertFalse(Pricing.isKnown("claude-gizmo-9"))
+    }
+
     func testHourCacheWriteBillsDoubleInput() {
         // Fable 5.2: 5-minute write $10/M (1.25×), 1-hour write $16/M (2×).
         let w = TokenCounts(input: 0, output: 0, cacheWrite: 1_000_000, cacheRead: 0)
@@ -589,6 +595,19 @@ final class ModelBurnTests: XCTestCase {
         XCTAssertEqual(haiku.limitSharePerTurn ?? 0, 2.5, accuracy: 0.01)
     }
 
+    func testTurnsLeftScalesRemainingLimitByPerTurnShare() {
+        // util 50 over a $10 window → $0.2/%. Opus $1/turn = 5%/turn → 50% left = 10 turns;
+        // Fable $0.5/turn = 2.5%/turn → 20 turns. Ordered by cost; 2-turn model skipped.
+        let window = [model("Opus", total: 800_000, requests: 8, cost: 8),
+                      model("Fable", total: 200_000, requests: 4, cost: 2),
+                      model("Haiku", total: 10, requests: 2, cost: 0.001)]
+        let rows = ModelBurn.rows(window: window, sessionUtil: 50, basis: .cost)
+        let left = ModelBurn.turnsLeft(rows: rows, sessionUtil: 50)
+        XCTAssertEqual(left.map(\.model), ["Opus", "Fable"])
+        XCTAssertEqual(left.map(\.turns), [10, 20])
+        XCTAssertTrue(ModelBurn.turnsLeft(rows: rows, sessionUtil: 100).isEmpty)
+    }
+
     func testFreshTokenBasisExcludesCacheReads() {
         let m = ModelWindowUsage(model: "Opus",
                                  tokens: TokenCounts(input: 10, output: 20, cacheWrite: 30, cacheRead: 940),
@@ -605,6 +624,33 @@ final class ModelBurnTests: XCTestCase {
 
     func testEmptyWindow() {
         XCTAssertTrue(ModelBurn.rows(window: [], sessionUtil: 50, basis: .totalTokens).isEmpty)
+    }
+}
+
+final class LimitCalibrationTests: XCTestCase {
+    private let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+    private func sample(_ h: Double, _ d: Double) -> LimitCalibration.Sample {
+        LimitCalibration.Sample(resetsAt: t0.addingTimeInterval(h * 3600), dollarsPerPercent: d)
+    }
+
+    func testRatioNeedsEnoughUtilization() {
+        XCTAssertEqual(LimitCalibration.dollarsPerPercent(windowCost: 30, util: 60) ?? 0, 0.5, accuracy: 1e-9)
+        XCTAssertNil(LimitCalibration.dollarsPerPercent(windowCost: 3, util: 6))   // rounding-dominated
+        XCTAssertNil(LimitCalibration.dollarsPerPercent(windowCost: 0, util: 60))
+    }
+
+    func testTypicalIsMedianOfOtherWindows() {
+        let hist = [sample(0, 0.4), sample(5, 0.5), sample(10, 0.6), sample(15, 0.5), sample(20, 0.45),
+                    sample(25, 5.0)]   // the current window — excluded even with a 60s jitter
+        let current = t0.addingTimeInterval(25 * 3600 + 60)
+        XCTAssertEqual(LimitCalibration.typical(hist, excluding: current) ?? 0, 0.5, accuracy: 1e-9)
+        XCTAssertNil(LimitCalibration.typical(Array(hist.prefix(4)), excluding: current))  // too little history
+    }
+
+    func testDriftIsSymmetric() {
+        XCTAssertTrue(LimitCalibration.isDrifted(current: 1.0, typical: 0.5))
+        XCTAssertTrue(LimitCalibration.isDrifted(current: 0.25, typical: 0.5))
+        XCTAssertFalse(LimitCalibration.isDrifted(current: 0.7, typical: 0.5))
     }
 }
 
@@ -1222,9 +1268,22 @@ final class ModelRecapTests: XCTestCase {
             ModelWindowUsage(model: "claude-opus-5-5", tokens: tokens, cost: opusCost, requests: 5)
         ])
         XCTAssertEqual(v?.intensity, .light)
-        XCTAssertEqual(v?.downshiftTo, "Sonnet")
+        XCTAssertEqual(v?.downshiftTo, "Sonnet 5.5")
         XCTAssertEqual(v?.downshiftSaving ?? 0, 0.5, accuracy: 0.001)  // Sonnet 5.5 = 1/2 of Opus 5.5
         XCTAssertEqual(v?.outputPerTurn, 80)
+    }
+
+    func testLightFableSuggestsOpusDownshift() {
+        // Fable 5.2 is the priciest tier now — its step down is Opus 5.5, not "none".
+        // Same light turns: Fable $0.016 out + $0.020 read = $0.036; Opus 5.5 $0.008 + $0.020.
+        let tokens = TokenCounts(input: 0, output: 400, cacheWrite: 0, cacheRead: 100_000)
+        let fableCost = Pricing.cost(for: tokens, model: "claude-fable-5-2")
+        let v = ModelRecap.verdict(window: [
+            ModelWindowUsage(model: "Fable 5.2", tokens: tokens, cost: fableCost, requests: 5)
+        ])
+        XCTAssertEqual(v?.isTopTier, true)
+        XCTAssertEqual(v?.downshiftTo, "Opus 5.5")
+        XCTAssertEqual(v?.downshiftSaving ?? 0, 0.008 / 0.036, accuracy: 0.001)
     }
 
     func testHeavyOpusIsJustifiedNoDownshift() {
@@ -1249,7 +1308,7 @@ final class ModelRecapTests: XCTestCase {
             ModelWindowUsage(model: "claude-opus-4-8", tokens: tokens, cost: Pricing.cost(for: tokens, model: "opus"), requests: 5)
         ])
         XCTAssertEqual(v?.intensity, .moderate)
-        XCTAssertEqual(v?.downshiftTo, "Sonnet")
+        XCTAssertEqual(v?.downshiftTo, "Sonnet 5.5")
     }
 
     func testPicksDominantModelByCost() {
@@ -1783,15 +1842,27 @@ final class HourlyBurnHistoryTests: XCTestCase {
 }
 
 final class ProjectWeeklyForecastTests: XCTestCase {
-    func testUsedAndProjectedShareByTokens() {
-        // 100 total tokens = 20% weekly util → 5 tokens/percent.
-        // Project A: 60 tokens used (12%P), 60/7=8.57 tokens/day × 3.5 days remaining ≈ 30 tokens ≈ 6%P.
-        let projects = [ProjectWeeklyUsage(project: "A", tokens: 60, cost: 6),
-                        ProjectWeeklyUsage(project: "B", tokens: 40, cost: 4)]
+    func testUsedAndProjectedShareByCost() {
+        // $10 total = 20% weekly util → $0.5/percent.
+        // Project A: $6 used (12%P), $6/7=$0.857/day × 3.5 days remaining = $3 = 6%P.
+        // Tokens are deliberately inverted (B has more) — they must not matter.
+        let projects = [ProjectWeeklyUsage(project: "A", tokens: 40, cost: 6),
+                        ProjectWeeklyUsage(project: "B", tokens: 60, cost: 4)]
         let out = ProjectWeeklyForecast.forecast(projects: projects, weeklyUtilPct: 20, daysRemaining: 3.5)
         let a = out.first { $0.project == "A" }
         XCTAssertEqual(a?.usedPct ?? 0, 12, accuracy: 0.01)
         XCTAssertEqual(a?.projectedAdditionalPct ?? 0, 6, accuracy: 0.05)
+    }
+
+    func testUsedShareComesFromTheLiveWeeklyWindow() {
+        // Trailing-7d cost $10 each, but only A's $8 / B's $2 fall inside the live
+        // weekly window that the 20% measures → A used 16%P, not 10%P.
+        let projects = [ProjectWeeklyUsage(project: "A", tokens: 1, cost: 10, limitWindowCost: 8),
+                        ProjectWeeklyUsage(project: "B", tokens: 1, cost: 10, limitWindowCost: 2)]
+        let out = ProjectWeeklyForecast.forecast(projects: projects, weeklyUtilPct: 20, daysRemaining: 1)
+        XCTAssertEqual(out.first { $0.project == "A" }?.usedPct ?? 0, 16, accuracy: 0.01)
+        // Pace stays the trailing-7d rate: $10/7 per day ÷ $0.5/% = 2.86%P/day.
+        XCTAssertEqual(out.first { $0.project == "A" }?.projectedAdditionalPct ?? 0, 10.0 / 7 / 0.5, accuracy: 0.01)
     }
 
     func testSortedByTotalProjectedDescending() {

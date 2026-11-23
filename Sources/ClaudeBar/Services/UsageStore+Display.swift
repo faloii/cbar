@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Derived read-only stats for the popover and menu-bar label: efficiency/work-budget
 /// readings, the bar text/color, and the simple booleans (blocked/over-threshold/at-risk)
-/// several other pieces (refresh cadence, keep-awake, alerts) key off of.
+/// several other pieces (refresh cadence, alerts) key off of.
 extension UsageStore {
     /// Working-time budget for the current session window — drives the menu-bar
     /// "block in N" warning and the in-popover coach.
@@ -142,6 +142,36 @@ extension UsageStore {
                        basis: burnBasis)
     }
 
+    /// Live list-price $ per 1% of the session limit, and its usual value across
+    /// past windows (nil until there's enough history) — see `LimitCalibration`.
+    /// Only when the snapshot's window IS the live window: a rolling fallback
+    /// window would divide the wrong cost by the live %.
+    var limitCalibration: (current: Double, typical: Double?)? {
+        guard let w = liveSession, let reset = w.resetsAt,
+              let snapReset = snapshot.windowResetAt, LimitCalibration.sameWindow(reset, snapReset),
+              let cur = LimitCalibration.dollarsPerPercent(windowCost: snapshot.windowCost, util: w.utilization)
+        else { return nil }
+        return (cur, LimitCalibration.typical(diskReadings.limitCalibrationHistory, excluding: reset))
+    }
+
+    /// The live ratio drifted far from its usual value — the price table (or the
+    /// window's device mix) no longer matches what the plan is counting.
+    var limitCalibrationDrifted: Bool {
+        guard let c = limitCalibration, let t = c.typical else { return false }
+        return LimitCalibration.isDrifted(current: c.current, typical: t)
+    }
+
+    func recordLimitCalibration() {
+        guard let reset = liveSession?.resetsAt, let c = limitCalibration else { return }
+        LimitCalibrationHistory.record(LimitCalibration.Sample(resetsAt: reset, dollarsPerPercent: c.current))
+    }
+
+    /// "남은 N% ≈ 모델 X 약 M턴" for the top models in the window.
+    var modelTurnsLeft: [(model: String, turns: Int)] {
+        guard let u = liveSession?.utilization else { return [] }
+        return ModelBurn.turnsLeft(rows: modelBurnRows, sessionUtil: u)
+    }
+
     /// Highest of the live session/weekly utilizations, or nil if unavailable.
     /// Expired windows (reset boundary passed) don't count — see `liveSession`.
     var maxLimitUtilization: Double? {
@@ -156,8 +186,7 @@ extension UsageStore {
     }
 
     /// True when you're currently rate-limited: a `rejected` status or a window at
-    /// 100%. Drives the menu-bar "blocked" glyph, red tint, and the keep-awake
-    /// assertion. A cached `rejected` is only trusted while NO window from that same
+    /// 100%. Drives the menu-bar "blocked" glyph and red tint. A cached `rejected` is only trusted while NO window from that same
     /// fetch has passed its reset — same rule as `LimitAlerts` (one expired window
     /// means the status is stale; a live window at 100% is still caught above).
     var isBlocked: Bool {

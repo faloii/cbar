@@ -17,20 +17,22 @@ enum ProjectWeeklyForecast {
 
     /// `weeklyUtilPct`: current weekly utilization (0...100) from the live limits.
     /// `daysRemaining`: days until the weekly reset (see `DailyAllowance`).
-    /// The tokens→%P conversion factor is derived empirically from the live
-    /// numbers (total tokens across all projects ÷ weekly %) rather than a
-    /// hardcoded/unknown token cap, so it stays correct across plans.
+    /// The $→%P factor is derived empirically from the live numbers (cost inside
+    /// the weekly window ÷ weekly %) rather than an unknown cap, so it stays correct
+    /// across plans. Cost, not tokens: utilization tracks list-price cost far
+    /// better than raw tokens (see `Pricing.defaults`) — a cache-heavy project
+    /// isn't eating the limit in proportion to its token count.
     static func forecast(projects: [ProjectWeeklyUsage], weeklyUtilPct: Double,
                          daysRemaining: Double) -> [Item] {
         guard weeklyUtilPct > 0, daysRemaining > 0 else { return [] }
-        let totalTokens = projects.reduce(0) { $0 + $1.tokens }
-        guard totalTokens > 0 else { return [] }
-        let tokensPerPercent = Double(totalTokens) / weeklyUtilPct
-        return projects.map { p in
-            let usedPct = Double(p.tokens) / tokensPerPercent
-            let dailyRate = Double(p.tokens) / 7.0   // p.tokens is already a trailing-7-day total
-            let additional = (dailyRate * daysRemaining) / tokensPerPercent
-            return Item(project: p.project, usedPct: usedPct, projectedAdditionalPct: additional)
+        let inWindow = projects.map { $0.limitWindowCost ?? $0.cost }
+        let windowCost = inWindow.reduce(0, +)
+        guard windowCost > 0 else { return [] }
+        let costPerPercent = windowCost / weeklyUtilPct
+        return zip(projects, inWindow).map { p, used in
+            let dailyRate = p.cost / 7.0   // p.cost is a trailing-7-day total
+            let additional = (dailyRate * daysRemaining) / costPerPercent
+            return Item(project: p.project, usedPct: used / costPerPercent, projectedAdditionalPct: additional)
         }
         .sorted { ($0.usedPct + $0.projectedAdditionalPct) > ($1.usedPct + $1.projectedAdditionalPct) }
     }

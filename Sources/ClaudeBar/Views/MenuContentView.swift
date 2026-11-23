@@ -651,6 +651,25 @@ struct MenuContentView: View {
         Text("× = 턴당 \(store.burnBasis.shortLabel) (최저 모델 대비) · 한도 %/턴 = 한 번 쓸 때 세션 한도를 먹는 비중")
             .font(.caption2).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+        if let c = store.limitCalibration {
+            let turns = store.modelTurnsLeft.map { "\($0.model) 약 \($0.turns)턴" }.joined(separator: " · ")
+            Text("세션 1% ≈ \(Fmt.usd(c.current))" + (turns.isEmpty ? "" : " · 남은 한도 ≈ \(turns)"))
+                .font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                .fixedSize(horizontal: false, vertical: true)
+                .help("이 Mac 로그의 정가 기준 비용 ÷ 세션 사용률. 턴 수는 남은 한도를 전부 그 모델로 쓴다고 가정한 비교용 값이에요.")
+            if store.limitCalibrationDrifted, let t = c.typical {
+                Label("평소엔 1%당 \(Fmt.usd(t))였어요 — 단가표가 실제와 어긋났거나 다른 기기 사용이 섞였을 수 있어요.",
+                      systemImage: "exclamationmark.triangle")
+                    .font(.caption2).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        if !snap.unpricedModels.isEmpty {
+            Label("단가표에 없는 모델: \(snap.unpricedModels.joined(separator: ", ")) — 비용·한도 추정이 부정확해요. ~/.claudebar/pricing.json에 단가를 넣을 수 있어요.",
+                  systemImage: "exclamationmark.triangle")
+                .font(.caption2).foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     // Recommended model per kind of work + your real per-turn cost for each model
@@ -673,7 +692,7 @@ struct MenuContentView: View {
                 }
             }
         }
-        Text("작업 난이도는 CBar가 알 수 없어요 — 권장 용도는 참고용입니다. 가벼운 작업을 더 싼 모델로 옮기면 비용이 크게 줄고, 한도(토큰)엔 거의 영향이 없습니다.")
+        Text("작업 난이도는 CBar가 알 수 없어요 — 권장 용도는 참고용입니다. 가벼운 작업을 더 싼 모델로 옮기면 비용과 한도 소모가 함께 줄어요.")
             .font(.caption2).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }

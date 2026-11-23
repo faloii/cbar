@@ -140,7 +140,8 @@ extension UsageStore {
             typicalHourRate: HourlyBurnHistory.typicalRate(
                 forHour: Calendar.current.component(.hour, from: snapshot.generatedAt),
                 in: HourlyBurnHistory.load()),
-            recentNotifications: NotificationLog.compacted(NotificationLog.load()).reversed())
+            recentNotifications: NotificationLog.compacted(NotificationLog.load()).reversed(),
+            limitCalibrationHistory: LimitCalibrationHistory.load())
     }
 
     private static func loadCacheEfficiencyTrend() -> CacheEfficiencyTrend.Verdict? {

@@ -1,9 +1,9 @@
 import Foundation
 
-/// Turns `ModelRecap`'s in-app "you could downshift" read into a one-shot
-/// notification — model choice is a cost lever, not a limit lever (see
-/// `ModelRecap`'s doc comment), so this is worth surfacing proactively rather
-/// than only when the user happens to open the popover.
+/// Turns `ModelRecap`'s "you could downshift" read into a one-shot notification —
+/// model choice moves both the bill and the limit (see `ModelRecap`'s doc
+/// comment), so this is worth surfacing proactively rather than only when the
+/// user happens to open the popover.
 enum ModelDownshiftSuggestion {
     /// Rising-edge state so the notification fires once per "episode" of the same
     /// dominant model being downshift-worthy, not every refresh tick. Re-arms when

@@ -20,10 +20,26 @@ enum Fmt {
         v >= 100 ? String(format: "$%.0f", v) : String(format: "$%.2f", v)
     }
 
+    // Formatters are costly to build and these run on every popover render;
+    // built once here (thread-safe for formatting on macOS).
+    private static let decimal: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; return f
+    }()
+    private static let mediumDate: DateFormatter = {
+        let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .none; return f
+    }()
+    private static let shortTime: DateFormatter = {
+        let f = DateFormatter(); f.dateStyle = .none; f.timeStyle = .short; return f
+    }()
+    private static let hourMinute: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
+    }()
+    private static let monthSlashDay: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "M/d"; return f
+    }()
+
     static func int(_ n: Int) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        return f.string(from: NSNumber(value: n)) ?? "\(n)"
+        decimal.string(from: NSNumber(value: n)) ?? "\(n)"
     }
 
     /// "2h 13m" style countdown from now until `date`.
@@ -73,34 +89,16 @@ enum Fmt {
         return "\(h / 24)일 전"
     }
 
-    static func shortDate(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateStyle = .medium
-        f.timeStyle = .none
-        return f.string(from: date)
-    }
+    static func shortDate(_ date: Date) -> String { mediumDate.string(from: date) }
 
-    static func time(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateStyle = .none
-        f.timeStyle = .short
-        return f.string(from: date)
-    }
+    static func time(_ date: Date) -> String { shortTime.string(from: date) }
 
     /// Compact 24-hour wall-clock "15:30" — for tight UI (the gauge reset line) where
     /// the locale-short "오후 3:30" would be too wide.
-    static func clock(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm"
-        return f.string(from: date)
-    }
+    static func clock(_ date: Date) -> String { hourMinute.string(from: date) }
 
     /// Compact "9/15" — pairs with a multi-day countdown ("4d") so "언제" has an
     /// actual calendar date, not just a relative offset you'd have to do the
     /// math on yourself.
-    static func monthDay(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "M/d"
-        return f.string(from: date)
-    }
+    static func monthDay(_ date: Date) -> String { monthSlashDay.string(from: date) }
 }

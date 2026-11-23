@@ -51,15 +51,29 @@ enum Pricing {
     /// Fallback when no family matches.
     static let fallback = ModelPrice(input: 5, output: 20, cacheWrite: 6.25, cacheRead: 0.50)
 
-    /// User overrides loaded from disk, keyed by family match string.
+    /// User overrides loaded from disk, keyed by a model-id substring
+    /// ("opus", "claude-fable-6", …).
     private static let overrides: [String: ModelPrice] = loadOverrides()
 
     static func price(for model: String) -> ModelPrice {
         let m = model.lowercased()
-        for (match, price) in defaults where m.contains(match) {
-            return overrides[match] ?? price
+        // A user override wins, most specific key first — including one for a model
+        // newer than this table (it used to apply only to keys the table already had).
+        if let hit = overrides.filter({ $0.key != "default" && m.contains($0.key) })
+            .max(by: { $0.key.count < $1.key.count }) {
+            return hit.value
         }
+        for (match, price) in defaults where m.contains(match) { return price }
         return overrides["default"] ?? fallback
+    }
+
+    /// False when neither the table nor an override names this model, so its cost
+    /// is the `fallback` guess — surfaced in the UI so a new model can't silently
+    /// skew every estimate (stale prices are how per-model burn drifted before).
+    static func isKnown(_ model: String) -> Bool {
+        let m = model.lowercased()
+        return defaults.contains { m.contains($0.match) }
+            || overrides.keys.contains { $0 != "default" && m.contains($0) }
     }
 
     static func cost(for tokens: TokenCounts, model: String, hourCache: Bool = false) -> Double {
