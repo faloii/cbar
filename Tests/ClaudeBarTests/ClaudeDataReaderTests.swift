@@ -70,6 +70,21 @@ final class ClaudeDataReaderTests: XCTestCase {
         XCTAssertGreaterThan(snap.windowCost, 0)
     }
 
+    func testLiveSessionResetBoundsTheWindow() {
+        // Live window reset in 3.5h → started 1.5h ago: the 1h-ago Opus turn is in,
+        // the 2h-ago Sonnet turn belongs to the PREVIOUS window and must drop out
+        // (the rolling now−5h window would have kept it).
+        let reset = now.addingTimeInterval(3.5 * 3600)
+        let snap = ClaudeDataReader().load(now: now, sessionResetsAt: reset)
+        XCTAssertEqual(snap.windowTokens.total, 1300)
+        XCTAssertEqual(snap.windowByModel.map(\.model), ["Opus 4.8"])
+        XCTAssertEqual(snap.windowResetAt, reset)
+
+        // An already-passed reset is stale → fall back to the rolling window.
+        let stale = ClaudeDataReader().load(now: now, sessionResetsAt: now.addingTimeInterval(-60))
+        XCTAssertEqual(stale.windowTokens.total, 1900)
+    }
+
     func testStatsCacheParsed() {
         let snap = ClaudeDataReader().load(now: now)
         XCTAssertEqual(snap.totalSessions, 42)
@@ -80,8 +95,8 @@ final class ClaudeDataReaderTests: XCTestCase {
     func testDailyCostEstimated() {
         let snap = ClaudeDataReader().load(now: now)
         XCTAssertEqual(snap.dailyCostHistory.count, 1)
-        // 1M opus tokens at the blended lifetime rate ($75 / 1M output) ≈ $75.
+        // 1M Opus 4.8 tokens at the blended lifetime rate ($25 / 1M output) ≈ $25.
         XCTAssertEqual(snap.dailyCostHistory.first?.tokens, 1_000_000)
-        XCTAssertEqual(snap.dailyCostHistory.first?.cost ?? 0, 75, accuracy: 0.5)
+        XCTAssertEqual(snap.dailyCostHistory.first?.cost ?? 0, 25, accuracy: 0.5)
     }
 }

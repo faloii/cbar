@@ -2,17 +2,17 @@ import Foundation
 
 /// What "burn" is measured in for the per-model comparison.
 enum BurnBasis: String, CaseIterable, Identifiable {
-    case totalTokens   // includes cache reads — proxy for rate-limit pressure
+    case totalTokens   // includes cache reads — context size, not limit pressure
     case freshTokens   // input+output+cacheWrite — "new work" volume
-    case cost          // estimated USD — money burn
+    case cost          // list-price USD — best measured proxy for limit pressure
 
     var id: String { rawValue }
 
     var label: String {
         switch self {
-        case .totalTokens: return "총 토큰 (한도)"
+        case .totalTokens: return "총 토큰 (캐시 읽기 포함)"
         case .freshTokens: return "신규 토큰 (캐시 제외)"
-        case .cost:        return "비용"
+        case .cost:        return "비용 가중 (한도)"
         }
     }
 
@@ -71,18 +71,19 @@ enum ModelBurn {
         let perTurnWeights = window.compactMap { $0.requests > 0 ? basis.weight($0) / Double($0.requests) : nil }
         let lightest = perTurnWeights.filter { $0 > 0 }.min() ?? 1
 
-        // "Limit share per turn" is always limit-based (total tokens), independent of
-        // the display basis: what fraction of the session limit one turn of this model
-        // eats. `util%` corresponds to `totalTokensSum`, so one turn's tokens map to
-        // `tokensPerTurn * util / totalTokensSum` percent of the full limit.
-        let totalTokensSum = max(1, window.map { $0.tokens.total }.reduce(0, +))
-        let util = (sessionUtil.map { $0 > 1 } ?? false) ? sessionUtil : nil
+        // "Limit share per turn" is always cost-weighted, independent of the display
+        // basis: list-price cost tracks plan utilization far better than raw tokens
+        // (see `Pricing.defaults`) — a token of Fable output and a cache-read token
+        // of Haiku draw very different amounts of limit. `util%` corresponds to the
+        // window's total cost, so one turn maps to `costPerTurn * util / totalCost`.
+        let totalCost = window.map(\.cost).reduce(0, +)
+        let util = (sessionUtil.map { $0 > 1 } ?? false) && totalCost > 0 ? sessionUtil : nil
 
         return window.map { m -> ModelBurnRow in
             let perTurn = m.requests > 0 ? basis.weight(m) / Double(m.requests) : 0
-            let tokensPerTurn = m.requests > 0 ? Double(m.tokens.total) / Double(m.requests) : 0
-            let share: Double? = (util != nil && tokensPerTurn > 0)
-                ? tokensPerTurn * util! / Double(totalTokensSum) : nil
+            let costPerTurn = m.requests > 0 ? m.cost / Double(m.requests) : 0
+            let share: Double? = (util != nil && costPerTurn > 0)
+                ? costPerTurn * util! / totalCost : nil
             return ModelBurnRow(
                 model: m.model,
                 tokens: m.tokens.total,

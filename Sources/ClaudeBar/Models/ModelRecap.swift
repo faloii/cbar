@@ -47,10 +47,10 @@ enum ModelRecap {
         let isOpus = m.model.lowercased().contains("opus")
 
         var dsTo: String?; var dsFrac: Double?; var dsUSD: Double?
-        // Only Opus carries a worthwhile, defensible downshift (≈5× cheaper at Sonnet),
+        // Only Opus carries a worthwhile, defensible downshift (≈2× cheaper at Sonnet 5.5),
         // and only suggest it when the turns didn't look like they needed the top tier.
         if isOpus, intens != .heavy, m.cost > 0 {
-            let sonnetCost = Pricing.price(for: "sonnet").cost(for: m.tokens)
+            let sonnetCost = Pricing.price(for: "claude-sonnet-5-5").cost(for: m.tokens)
             let saving = m.cost - sonnetCost
             if saving > 0 { dsTo = "Sonnet"; dsFrac = saving / m.cost; dsUSD = saving }
         }

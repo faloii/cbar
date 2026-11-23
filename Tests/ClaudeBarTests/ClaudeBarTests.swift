@@ -81,19 +81,38 @@ final class ModelNameTests: XCTestCase {
 
 final class PricingTests: XCTestCase {
     func testFamilyMatching() {
-        XCTAssertEqual(Pricing.price(for: "claude-opus-4-8").input, 15)
+        XCTAssertEqual(Pricing.price(for: "claude-opus-4-8").input, 5)
         XCTAssertEqual(Pricing.price(for: "claude-sonnet-4-6").output, 15)
         XCTAssertEqual(Pricing.price(for: "claude-haiku-4-5").input, 1)
     }
 
-    func testCostComputation() {
-        // 1M input tokens of Opus = $15 exactly.
-        let opus = TokenCounts(input: 1_000_000, output: 0, cacheWrite: 0, cacheRead: 0)
-        XCTAssertEqual(Pricing.cost(for: opus, model: "claude-opus-4-8"), 15, accuracy: 0.0001)
+    func testVersionSpecificPricesBeatFamilyCatchAll() {
+        // Real ids from the logs: each version must hit its own row, not the
+        // family default that sorts after it.
+        XCTAssertEqual(Pricing.price(for: "claude-opus-5-5").input, 4)
+        XCTAssertEqual(Pricing.price(for: "claude-fable-5-2").input, 8)
+        XCTAssertEqual(Pricing.price(for: "claude-fable-5-1").cacheRead, 0.25)
+        XCTAssertEqual(Pricing.price(for: "claude-fable-5").cacheRead, 1.00)
+        XCTAssertEqual(Pricing.price(for: "claude-sonnet-5-5").cacheRead, 0.10)
+        XCTAssertEqual(Pricing.price(for: "claude-sonnet-5").cacheRead, 0.20)
+        XCTAssertEqual(Pricing.price(for: "claude-haiku-5-5").input, 0.10)
+    }
 
-        // 1M output of Opus = $75.
+    func testHourCacheWriteBillsDoubleInput() {
+        // Fable 5.2: 5-minute write $10/M (1.25×), 1-hour write $16/M (2×).
+        let w = TokenCounts(input: 0, output: 0, cacheWrite: 1_000_000, cacheRead: 0)
+        XCTAssertEqual(Pricing.cost(for: w, model: "claude-fable-5-2"), 10, accuracy: 0.0001)
+        XCTAssertEqual(Pricing.cost(for: w, model: "claude-fable-5-2", hourCache: true), 16, accuracy: 0.0001)
+    }
+
+    func testCostComputation() {
+        // 1M input tokens of Opus 4.8 = $5 exactly.
+        let opus = TokenCounts(input: 1_000_000, output: 0, cacheWrite: 0, cacheRead: 0)
+        XCTAssertEqual(Pricing.cost(for: opus, model: "claude-opus-4-8"), 5, accuracy: 0.0001)
+
+        // 1M output of Opus 4.8 = $25.
         let out = TokenCounts(input: 0, output: 1_000_000, cacheWrite: 0, cacheRead: 0)
-        XCTAssertEqual(Pricing.cost(for: out, model: "claude-opus-4-8"), 75, accuracy: 0.0001)
+        XCTAssertEqual(Pricing.cost(for: out, model: "claude-opus-4-8"), 25, accuracy: 0.0001)
 
         // Unknown model uses the fallback (input $5/M).
         let unknown = TokenCounts(input: 1_000_000, output: 0, cacheWrite: 0, cacheRead: 0)
@@ -525,8 +544,9 @@ final class ModelBurnTests: XCTestCase {
 
     func testTotalTokenBasis() {
         // Opus 800k/8 = 100k/turn; Fable 200k/4 = 50k/turn → Opus is 2× the lightest.
-        let window = [model("Opus", total: 800_000, requests: 8),
-                      model("Fable", total: 200_000, requests: 4)]
+        // Costs scale with tokens here so the (cost-weighted) limit share lines up.
+        let window = [model("Opus", total: 800_000, requests: 8, cost: 8),
+                      model("Fable", total: 200_000, requests: 4, cost: 2)]
         let rows = ModelBurn.rows(window: window, sessionUtil: 50, basis: .totalTokens)
 
         let opus = rows.first { $0.model == "Opus" }!
@@ -538,7 +558,7 @@ final class ModelBurnTests: XCTestCase {
         XCTAssertEqual(opus.burnMultiplier, 2.0, accuracy: 0.001)
         XCTAssertEqual(fable.burnMultiplier, 1.0, accuracy: 0.001)
 
-        // util 50% maps to the 1M total → Opus 100k/turn = 5% of limit/turn; Fable 2.5%.
+        // util 50% maps to the $10 total → Opus $1/turn = 5% of limit/turn; Fable 2.5%.
         XCTAssertEqual(opus.limitSharePerTurn ?? 0, 5.0, accuracy: 0.05)
         XCTAssertEqual(fable.limitSharePerTurn ?? 0, 2.5, accuracy: 0.05)
     }
@@ -555,6 +575,18 @@ final class ModelBurnTests: XCTestCase {
         XCTAssertEqual(opus.shareFraction, 300.0 / 360.0, accuracy: 0.001)
         XCTAssertEqual(opus.perTurnWeight, 60, accuracy: 0.001)   // $300 / 5 turns
         XCTAssertEqual(opus.burnMultiplier, 5.0, accuracy: 0.001) // $60/turn vs $12/turn
+    }
+
+    func testLimitShareIsCostWeightedNotTokenWeighted() {
+        // Same tokens per turn, but Fable turns cost 4× → 4× the limit share, whatever
+        // the display basis. Raw tokens would claim the two draw the limit equally.
+        let window = [model("Fable", total: 400_000, requests: 4, cost: 40),
+                      model("Haiku", total: 400_000, requests: 4, cost: 10)]
+        let rows = ModelBurn.rows(window: window, sessionUtil: 50, basis: .totalTokens)
+        let fable = rows.first { $0.model == "Fable" }!
+        let haiku = rows.first { $0.model == "Haiku" }!
+        XCTAssertEqual(fable.limitSharePerTurn ?? 0, 10.0, accuracy: 0.01)  // $10/turn of $50 = 50%
+        XCTAssertEqual(haiku.limitSharePerTurn ?? 0, 2.5, accuracy: 0.01)
     }
 
     func testFreshTokenBasisExcludesCacheReads() {
@@ -578,11 +610,11 @@ final class ModelBurnTests: XCTestCase {
 
 final class CostEstimatorTests: XCTestCase {
     func testBlendedRateMatchesPricing() {
-        // 1M Opus output → $75 → blended $75/1M = 0.000075 $/token.
+        // 1M Opus 4.8 output → $25 → blended $25/1M = 0.000025 $/token.
         let usage = ["claude-opus-4-8": TokenCounts(output: 1_000_000)]
         let (rates, fallback) = CostEstimator.blendedRates(usage)
-        XCTAssertEqual(rates["claude-opus-4-8"] ?? 0, 75.0 / 1_000_000, accuracy: 1e-12)
-        XCTAssertEqual(fallback, 75.0 / 1_000_000, accuracy: 1e-12)
+        XCTAssertEqual(rates["claude-opus-4-8"] ?? 0, 25.0 / 1_000_000, accuracy: 1e-12)
+        XCTAssertEqual(fallback, 25.0 / 1_000_000, accuracy: 1e-12)
     }
 
     func testDailyCostUsesPerModelRatesAndFallback() {
@@ -1181,16 +1213,17 @@ final class ModelRecapTests: XCTestCase {
     }
 
     func testLightOpusSuggestsSonnetDownshift() {
-        // 400 output / 5 turns = 80/turn → light. Price the tokens at Opus so the saving
-        // is the real Opus→Sonnet delta (Sonnet is exactly 1/5 across the board).
+        // 400 output / 5 turns = 80/turn → light. Price the tokens at Opus 5.5 so the
+        // saving is the real Opus 5.5→Sonnet 5.5 delta (output and cache read are both
+        // exactly 1/2).
         let tokens = TokenCounts(input: 0, output: 400, cacheWrite: 0, cacheRead: 100_000)
-        let opusCost = Pricing.cost(for: tokens, model: "opus")
+        let opusCost = Pricing.cost(for: tokens, model: "claude-opus-5-5")
         let v = ModelRecap.verdict(window: [
-            ModelWindowUsage(model: "claude-opus-4-8", tokens: tokens, cost: opusCost, requests: 5)
+            ModelWindowUsage(model: "claude-opus-5-5", tokens: tokens, cost: opusCost, requests: 5)
         ])
         XCTAssertEqual(v?.intensity, .light)
         XCTAssertEqual(v?.downshiftTo, "Sonnet")
-        XCTAssertEqual(v?.downshiftSaving ?? 0, 0.8, accuracy: 0.001)  // Sonnet = 1/5 of Opus
+        XCTAssertEqual(v?.downshiftSaving ?? 0, 0.5, accuracy: 0.001)  // Sonnet 5.5 = 1/2 of Opus 5.5
         XCTAssertEqual(v?.outputPerTurn, 80)
     }
 

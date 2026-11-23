@@ -18,8 +18,8 @@ enum CLI {
     }
 
     static func printSnapshot(json: Bool) {
-        let snap = ClaudeDataReader().load()
         let limits = CommandLine.arguments.contains("--no-limits") ? nil : fetchLimitsBlocking()
+        let snap = ClaudeDataReader().load(sessionResetsAt: limits?.session5h?.resetsAt)
         if json {
             printJSON(snap, limits)
         } else {
@@ -43,7 +43,7 @@ enum CLI {
 
     /// The per-model burn basis saved by the GUI (defaults to total tokens).
     private static func savedBurnBasis() -> BurnBasis {
-        BurnBasis(rawValue: UserDefaults.standard.string(forKey: "burnBasis") ?? "") ?? .totalTokens
+        BurnBasis(rawValue: UserDefaults.standard.string(forKey: "burnBasis") ?? "") ?? .cost
     }
 
     /// Short human-readable burn-rate note for the CLI, or nil to print nothing.

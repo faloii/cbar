@@ -75,6 +75,7 @@ extension UsageStore {
         // the parse cache reads only what was appended since.)
         let previous = snapshot
         let now = Date()
+        let sessionResetsAt = liveSession?.resetsAt
         let lastScan = previous.sessionLogsScannedAt
         let scanStale = lastScan.map {
             now.timeIntervalSince($0) >= Self.maxSessionScanAge
@@ -90,7 +91,9 @@ extension UsageStore {
             // assumed about the Keychain call before finding out otherwise — nothing
             // in this Task may block `isRefreshing` from resetting indefinitely.
             if let loaded = await withTimeout(seconds: 20, operation: {
-                await Task.detached(priority: .utility) { reader.load(includeSessionLogs: full) }.value
+                await Task.detached(priority: .utility) {
+                    reader.load(includeSessionLogs: full, sessionResetsAt: sessionResetsAt)
+                }.value
             }) {
                 var snap = loaded
                 if !full { snap = snap.mergingSession(from: previous) }

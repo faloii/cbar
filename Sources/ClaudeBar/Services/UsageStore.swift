@@ -125,11 +125,11 @@ final class UsageStore: ObservableObject {
     @AppStorage("enableLiveLimits") var enableLiveLimits: Bool = true {
         didSet { refresh(force: true) }
     }
-    @AppStorage("burnBasis") private var burnBasisRaw: String = BurnBasis.totalTokens.rawValue {
+    @AppStorage("burnBasis") private var burnBasisRaw: String = BurnBasis.cost.rawValue {
         didSet { objectWillChange.send() }
     }
     var burnBasis: BurnBasis {
-        get { BurnBasis(rawValue: burnBasisRaw) ?? .totalTokens }
+        get { BurnBasis(rawValue: burnBasisRaw) ?? .cost }
         set { burnBasisRaw = newValue.rawValue }
     }
     @AppStorage("warnThreshold") var warnThreshold: Int = 80 {

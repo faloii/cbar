@@ -23,11 +23,15 @@ struct ClaudeDataReader {
     /// `includeSessionLogs: false` parses only the cheap stats cache (totals, daily
     /// cost, weekly review) and skips the expensive session-log scan — used in the
     /// background so the weekly summary stays available without the heavy work.
-    func load(now: Date = Date(), includeSessionLogs: Bool = true) -> UsageSnapshot {
+    /// `sessionResetsAt`: the plan's live 5h-window reset. When known, the "window"
+    /// figures cover that real window (reset − 5h → now) instead of a rolling
+    /// now − 5h, which mixes in turns from the previous window and skews every
+    /// per-model share mapped onto the live utilization.
+    func load(now: Date = Date(), includeSessionLogs: Bool = true, sessionResetsAt: Date? = nil) -> UsageSnapshot {
         var snap = UsageSnapshot(generatedAt: now)
         applyStatsCache(to: &snap, now: now)
         if includeSessionLogs {
-            applySessionLogs(to: &snap, now: now)
+            applySessionLogs(to: &snap, now: now, sessionResetsAt: sessionResetsAt)
             snap.sessionLogsScannedAt = now
         }
         return snap
@@ -82,13 +86,17 @@ struct ClaudeDataReader {
 
     // MARK: - session *.jsonl logs
 
-    private func applySessionLogs(to snap: inout UsageSnapshot, now: Date) {
+    private func applySessionLogs(to snap: inout UsageSnapshot, now: Date, sessionResetsAt: Date? = nil) {
         // Scan the full 7-day range once (not just the 36h the window/today figures
         // need) so the per-project weekly breakdown below can piggyback on the same
         // pass — the per-file parse cache means this costs nothing extra on repeat
         // refreshes (only genuinely new/changed files get re-parsed).
         let records = recentRecords(now: now, since: 7 * 24 * 3600)
-        let windowStart = now.addingTimeInterval(-Self.windowDuration)
+        let liveStart = sessionResetsAt.flatMap { reset -> Date? in
+            let start = reset.addingTimeInterval(-Self.windowDuration)
+            return reset > now && start <= now ? start : nil
+        }
+        let windowStart = liveStart ?? now.addingTimeInterval(-Self.windowDuration)
         let todayStart = Calendar.current.startOfDay(for: now)
         // recentRecords selects FILES by mtime (touched in the last 7d), but a file
         // can contain records with much older timestamps: resuming a >7-day-old
@@ -143,7 +151,7 @@ struct ClaudeDataReader {
 
             // Only assistant turns carry token usage / cost.
             guard let tokens = r.tokens, r.type == "assistant" else { continue }
-            let cost = Pricing.cost(for: tokens, model: r.model)
+            let cost = Pricing.cost(for: tokens, model: r.model, hourCache: r.hourCache == true)
             let key = ModelName.display(r.model)
 
             if let h = r.hourCache, !r.isSidechain, !r.sessionId.isEmpty { cacheTTLBySession[r.sessionId] = h }
@@ -219,7 +227,8 @@ struct ClaudeDataReader {
 
         snap.windowTokens = windowTokens
         snap.windowCost = windowCost
-        snap.windowResetAt = oldestInWindow.map { $0.addingTimeInterval(Self.windowDuration) }
+        snap.windowResetAt = liveStart != nil ? sessionResetsAt
+            : oldestInWindow.map { $0.addingTimeInterval(Self.windowDuration) }
         snap.windowByModel = winByModel.values
             .filter { $0.tokens.total > 0 }
             .sorted { $0.tokens.total > $1.tokens.total }
