@@ -7,8 +7,12 @@ getting blocked by limits, without waste, and honestly about what it can and can
 
 By default it reads **local data** (no network) for token/cost stats:
 
-- `~/.claude/stats-cache.json` — all-time sessions/messages + daily token history
-- `~/.claude/projects/**/*.jsonl` — per-request token usage with timestamps
+- `~/.claude/projects/**/*.jsonl` — per-request token usage with timestamps; everything
+  below is computed from these. Complete days are kept in `~/.claudebar/daily-usage.json`
+  (seeded once from every log still on disk), so weekly history survives log cleanup.
+- `~/.claude/stats-cache.json` — all-time sessions/messages for the CLI only. Claude Code
+  stopped updating this file (its last day is 2026-06-10 here), so the CLI prints its
+  as-of date; the per-day history it used to feed now comes from the logs.
 
 Plus an **optional live fetch** of your real plan limits (see
 [Live plan limits](#live-plan-limits)). Honors `CLAUDE_CONFIG_DIR`.
@@ -42,9 +46,8 @@ Plus an **optional live fetch** of your real plan limits (see
   hit the cap *before* the window resets: `▲ 22%/h · full in 1h32m — 2h22m before reset`
   when you're on track to run dry, or `▲ 8%/h · lasts past reset` when you're fine. Lets
   you slow down or switch to a lighter model before getting blocked.
-- **5-hour window** — tokens used in the rolling 5h session window, an estimated cost,
-  a usage meter against a configurable soft budget, and a countdown to when the window
-  first starts to free up.
+- **5-hour window** — tokens and estimated cost in the live session window (from the
+  plan's reset time when live limits are on, else the trailing 5 hours).
 - **Per-model burn** (live 5h session window) — compares each model by share, per-turn
   weight, a burn multiplier vs the lightest model, and the share of the session limit one
   turn takes. Switch the basis in Settings between **cost** (default — list-price cost is
@@ -54,9 +57,6 @@ Plus an **optional live fetch** of your real plan limits (see
   ratio drifts far from its usual value or a model isn't in the price table.
 - **Today** — tokens, estimated cost, request count, sessions, and tool calls (computed
   live from the session logs).
-- **14-day trend** — a sparkline of daily token totals plus a **daily cost** bar chart
-  (estimated, with a 14-day total and daily average; per-bar tooltips).
-- **All time** — total sessions, total messages, and your first-session date.
 - **Menu-bar mini gauge** — when safely under your warning threshold, the idle icon is a
   tiny ring showing the worse of session/weekly utilization instead of a static glyph.
 - **Daily allowance / weekly recap** — "how much can I safely use *today*" turns the
@@ -80,8 +80,10 @@ Plus an **optional live fetch** of your real plan limits (see
   user's normal day doesn't trip it and a light user's normal day never does either.
 - **Per-project weekly forecast** — extends the per-project weekly-share view with a
   forward-looking read: each project's trailing-7-day pace extrapolated to the reset,
-  in points of the weekly limit (derived from your live tokens÷utilization%, not a
-  hardcoded cap).
+  in points of the weekly limit (derived from cost in the live weekly window ÷ the weekly
+  %, not a hardcoded cap).
+- **Weekly review + habit goal** — this week vs last week and the 4-week average, plus an
+  opt-in goal for the share of cost on the top tiers (Fable·Opus).
 - **4-week baseline + plan-fit signal** — "이번 주" is compared against the last 4 weeks'
   average, not just a single (possibly unusual) last week; and when every one of the
   last 3-4 completed weeks peaked consistently ≥90% or ≤30%, a one-line note suggests
@@ -256,11 +258,12 @@ in the per-model card.
 
 ## Notes on the "5-hour window"
 
-Claude's plans use a rolling ~5-hour session limit, but Anthropic doesn't publish an
-exact token cap and it isn't stored locally. CBar therefore sums the tokens from
-the trailing 5 hours of your session logs and shows them against a **soft budget you
-set** in Settings — so the meter reflects *your* sense of "a lot," not a hard limit.
-The token totals and the reset countdown are exact; the meter percentage is relative.
+Anthropic doesn't publish the session limit's size, and it isn't stored locally. With
+live limits on, CBar takes the window from the plan's reset time (reset − 5h → now) and
+sums this Mac's logged turns inside it; the utilization % comes from the plan. Without
+live limits it falls back to the trailing 5 hours. Usage from other devices counts toward
+the plan's % but not toward the local sums, so per-model shares and "1% ≈ $X" read high
+or low when you also work elsewhere.
 
 ## Project layout
 
@@ -271,16 +274,16 @@ Sources/ClaudeBar/
   ClaudeBarApp.swift       # MenuBarExtra + accessory app + notification delegate
   CLI.swift                # --print / --json reporter
   Models/                  # pure, unit-tested logic — no I/O
-    Usage.swift, Limits.swift, Projection.swift, Pricing.swift, CostEstimator.swift
+    Usage.swift, Limits.swift, Projection.swift, Pricing.swift
     LimitAlerts.swift, NotificationBundler.swift, QuietHours.swift, UpcomingResets.swift
     DailyAllowance.swift, CacheEfficiency.swift, ModelBurn.swift, ModelRecap.swift
     ModelDownshiftSuggestion.swift, CompactSuggestion.swift, WeeklyResetRecap.swift
     WeeklyReview.swift, NotificationLog.swift, SessionCoach.swift, Advice.swift
-    Budget.swift, ModelTier.swift, LimitCalibration.swift
+    ModelTier.swift, LimitCalibration.swift, DailyUsage.swift
   Services/                # stateful orchestration / I/O
     ClaudeDataReader.swift, OAuthUsageClient.swift, UsageStore.swift
     UsageHistory.swift, WeeklyHistory.swift, Notifier.swift, LoginItem.swift
-    CommandRunner.swift, LimitCalibrationHistory.swift
+    CommandRunner.swift, LimitCalibrationHistory.swift, DailyUsageHistory.swift
   Views/    MenuContentView.swift, SettingsView.swift, Components.swift
   Util/     Formatters.swift, SettingsOpener.swift
 Tests/ClaudeBarTests/   unit tests (Models/ logic + the /api/oauth/usage parser)

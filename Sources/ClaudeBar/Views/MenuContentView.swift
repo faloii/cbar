@@ -248,7 +248,7 @@ struct MenuContentView: View {
         case .weeklyReview:
             if let r = snap.weeklyReview { Card { weeklyReviewSection(r) } }
         case .goals:
-            if store.opusShareTarget > 0, !snap.weeklyOpusShares.isEmpty { Card { goalsSection } }
+            if store.topTierShareTarget > 0, !snap.weeklyTopTierShares.isEmpty { Card { goalsSection } }
         case .notificationLog:
             if !store.recentNotifications.isEmpty { Card { notificationLogSection } }
         }
@@ -526,15 +526,15 @@ struct MenuContentView: View {
     }
 
     @ViewBuilder private var goalsSection: some View {
-        let shares = snap.weeklyOpusShares
-        let current = shares.first?.opusShare ?? 0
+        let shares = snap.weeklyTopTierShares
+        let current = shares.first?.topTierShare ?? 0
         let used = shares.filter { $0.hasUsage }
-        let compliant = used.filter { $0.opusShare * 100 <= Double(store.opusShareTarget) }.count
+        let compliant = used.filter { $0.topTierShare * 100 <= Double(store.topTierShareTarget) }.count
         let hasUsageThisWeek = shares.first?.hasUsage ?? false
-        let over = hasUsageThisWeek && current * 100 > Double(store.opusShareTarget)
+        let over = hasUsageThisWeek && current * 100 > Double(store.topTierShareTarget)
         CardHeader(icon: "target", title: "습관 목표")
         HStack(alignment: .firstTextBaseline) {
-            Text("Opus 비중 ≤ \(store.opusShareTarget)%").font(.callout.weight(.medium))
+            Text("상위 모델(Fable·Opus) 비중 ≤ \(store.topTierShareTarget)%").font(.callout.weight(.medium))
             Spacer()
             Text("이번 주 \(Int((current * 100).rounded()))%").font(.callout).monospacedDigit()
             // Don't claim "준수" (compliant) before any usage this week — there's
@@ -555,8 +555,8 @@ struct MenuContentView: View {
         CardHeader(icon: "calendar.badge.clock", title: "주간 리뷰")
         VStack(spacing: 5) {
             StatRow(label: "비용", value: "~\(Fmt.usd(r.thisCost))", secondary: deltaText(r.costDeltaPct))
-            StatRow(label: "Opus 비중", value: "\(Int((r.opusShareThis * 100).rounded()))%",
-                    secondary: opusDeltaText(r.opusShareDeltaPts))
+            StatRow(label: "상위 모델 비중", value: "\(Int((r.topTierShareThis * 100).rounded()))%",
+                    secondary: shareDeltaText(r.topTierShareDeltaPts))
         }
         // Last week alone can be misleadingly quiet or heavy — the 4-week average
         // is a steadier read on whether THIS week is actually unusual.
@@ -620,7 +620,7 @@ struct MenuContentView: View {
             return "최근 \(fit.weeksObserved)주 연속 주간 한도를 여유 있게 썼어요(평균 최고 \(avg)%) — 지금보다 낮은 플랜도 충분할 수 있어요."
         }
     }
-    private func opusDeltaText(_ pts: Double) -> String? {
+    private func shareDeltaText(_ pts: Double) -> String? {
         if abs(pts) < 1 { return nil }
         return pts > 0 ? "▲\(Int(pts.rounded()))%p" : "▼\(Int(abs(pts).rounded()))%p"
     }
@@ -658,7 +658,7 @@ struct MenuContentView: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .help("이 Mac 로그의 정가 기준 비용 ÷ 세션 사용률. 턴 수는 남은 한도를 전부 그 모델로 쓴다고 가정한 비교용 값이에요.")
             if store.limitCalibrationDrifted, let t = c.typical {
-                Label("평소엔 1%당 \(Fmt.usd(t))였어요 — 단가표가 실제와 어긋났거나 다른 기기 사용이 섞였을 수 있어요.",
+                Label("평소엔 1%당 \(Fmt.usd(t))였어요 — 단가표가 실제와 어긋났거나, 플랜이 바뀌었거나, 다른 기기 사용이 섞였을 수 있어요.",
                       systemImage: "exclamationmark.triangle")
                     .font(.caption2).foregroundStyle(.orange)
                     .fixedSize(horizontal: false, vertical: true)

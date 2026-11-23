@@ -98,11 +98,26 @@ final class ClaudeDataReaderTests: XCTestCase {
         XCTAssertNotNil(snap.firstSessionDate)
     }
 
-    func testDailyCostEstimated() {
+    func testDailyHistoryComesFromLogsNotStatsCache() {
+        // The fixture's stats cache has one 2026-06-10 day (Claude Code stopped
+        // updating it); the daily history must come from the logs instead.
         let snap = ClaudeDataReader().load(now: now)
-        XCTAssertEqual(snap.dailyCostHistory.count, 1)
-        // 1M Opus 4.8 tokens at the blended lifetime rate ($25 / 1M output) ≈ $25.
-        XCTAssertEqual(snap.dailyCostHistory.first?.tokens, 1_000_000)
-        XCTAssertEqual(snap.dailyCostHistory.first?.cost ?? 0, 25, accuracy: 0.5)
+        XCTAssertFalse(snap.dailyCostHistory.contains { $0.date == "2026-06-10" })
+        XCTAssertEqual(snap.dailyUsage.reduce(0) { $0 + $1.turns }, 4)
+        XCTAssertEqual(snap.dailyCostHistory.reduce(0) { $0 + $1.tokens },
+                       (100 + 200 + 1000) + (50 + 50 + 500) + 9_000_000 + (10 + 10))
+        XCTAssertNotNil(snap.weeklyReview)
+    }
+
+    func testStoredDaysOutsideTheScanSurvive() {
+        let old = DailyUsage(date: "2023-10-01", byModel: ["Opus 4.8": .init(tokens: 5, cost: 1)],
+                             sessions: 1, turns: 1)
+        let snap = ClaudeDataReader().load(now: now, storedDaily: [old])
+        XCTAssertEqual(snap.dailyUsage.first, old)
+    }
+
+    func testStatsCacheDateIsExposed() {
+        let snap = ClaudeDataReader().load(now: now)
+        XCTAssertNil(snap.statsCacheAsOf)   // fixture has no lastComputedDate
     }
 }

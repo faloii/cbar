@@ -19,8 +19,10 @@ enum CLI {
 
     static func printSnapshot(json: Bool) {
         let limits = CommandLine.arguments.contains("--no-limits") ? nil : fetchLimitsBlocking()
+        // Read-only: the stored daily history is used but only the app persists it.
         let snap = ClaudeDataReader().load(sessionResetsAt: limits?.session5h?.resetsAt,
-                                           weeklyResetsAt: limits?.weekly7d?.resetsAt)
+                                           weeklyResetsAt: limits?.weekly7d?.resetsAt,
+                                           storedDaily: DailyUsageHistory.load().days)
         if json {
             printJSON(snap, limits)
         } else {
@@ -133,7 +135,7 @@ enum CLI {
             line("total", "~" + Fmt.usd(total))
         }
 
-        print("\nAll time:")
+        print("\nAll time" + (s.statsCacheAsOf.map { " (Claude stats cache, as of \($0))" } ?? "") + ":")
         line("Sessions", Fmt.int(s.totalSessions))
         line("Messages", Fmt.int(s.totalMessages))
         if let first = s.firstSessionDate { line("Since", Fmt.shortDate(first)) }
@@ -169,6 +171,7 @@ enum CLI {
             "allTime": [
                 "sessions": s.totalSessions,
                 "messages": s.totalMessages,
+                "asOf": s.statsCacheAsOf as Any,
             ],
             "dailyCost": s.dailyCostHistory.map { ["date": $0.date, "tokens": $0.tokens, "costEstimate": $0.cost] },
             "perModelBurn": ModelBurn.rows(window: s.windowByModel,

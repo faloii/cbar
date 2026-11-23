@@ -67,13 +67,20 @@ enum Advice {
                     hourNote = " 이 시간대엔 원래 이 정도 속도예요."
                 }
             }
+            // Model lever: utilization tracks list-price cost, so moving light turns
+            // off a top-tier model cuts the limit drawn per turn, not just the bill.
+            var modelLever = ""
+            if let v = ModelRecap.verdict(window: models), let to = v.downshiftTo,
+               let saving = v.downshiftSaving, saving >= 0.2 {
+                modelLever = " 가벼운 작업이면 \(v.model) 대신 \(to)로 바꿔도 돼요(그 몫의 한도 소모 약 \(Int((saving * 100).rounded()))%↓)."
+            }
             if (s.blockedBy ?? 0) < 600 {   // barely blocked → don't over-alarm
                 tips.append(AdviceTip(kind: .sessionPacing, level: .warn, icon: "speedometer",
                     text: "이 속도면 약 \(dur(s.timeToFull))\(turnPart) 뒤 한도가 차요. "
                         + "리셋이 가까워 \(dur(s.blockedBy)) 정도만 막히니 크게 걱정은 마세요.\(hourNote)"))
             } else {
                 tips.append(AdviceTip(kind: .sessionPacing, level: .critical, icon: "exclamationmark.triangle.fill",
-                    text: "이 속도면 약 \(dur(s.timeToFull))\(turnPart) 뒤 한도가 차고 \(dur(s.blockedBy)) 동안 막혀요.\(lever)\(hourNote)"))
+                    text: "이 속도면 약 \(dur(s.timeToFull))\(turnPart) 뒤 한도가 차고 \(dur(s.blockedBy)) 동안 막혀요.\(lever)\(modelLever)\(hourNote)"))
             }
         }
 

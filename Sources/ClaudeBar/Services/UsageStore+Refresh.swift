@@ -94,12 +94,16 @@ extension UsageStore {
             if let loaded = await withTimeout(seconds: 20, operation: {
                 await Task.detached(priority: .utility) {
                     reader.load(includeSessionLogs: full, sessionResetsAt: sessionResetsAt,
-                                weeklyResetsAt: weeklyResetsAt)
+                                weeklyResetsAt: weeklyResetsAt,
+                                storedDaily: DailyUsageHistory.load().days)
                 }.value
             }) {
                 var snap = loaded
                 if !full { snap = snap.mergingSession(from: previous) }
                 self.snapshot = snap
+                if full, let from = snap.dailyFreshFrom {
+                    DailyUsageHistory.update { $0.days = DailyUsage.merge(stored: $0.days, fresh: snap.dailyFresh, fullFrom: from) }
+                }
                 // Feeds CacheEfficiencyTrend's multi-week "재읽기 비율이 늘고 있어요"
                 // read — a single 5h-window snapshot in isolation can't show a trend.
                 // Fresh scans only: a carried-over window re-logged under a new
@@ -131,6 +135,15 @@ extension UsageStore {
             self.processCacheExpiry()
             self.maybeWeeklySummary()
             if full { self.recordLimitCalibration() }
+            // The scan above ran before these windows were known (first refresh after
+            // launch, or right after a reset), so its window figures used the rolling
+            // fallback. Rescan once against the live windows; the rerun passes them in,
+            // so this can't repeat.
+            if full, (sessionResetsAt == nil && self.liveSession?.resetsAt != nil)
+                || (weeklyResetsAt == nil && self.liveWeekly?.resetsAt != nil) {
+                self.pendingSessionScan = true
+                self.pendingRefresh = true
+            }
             self.reloadDiskReadings()   // after the alert passes above may have logged a notification
             // If the risk level changed, re-arm the timer at the matching cadence.
             if self.isAtLimitRisk != self.lastUrgent {
@@ -209,6 +222,23 @@ extension UsageStore {
         popoverVisible = visible
         if visible { refresh() }
         restartTimer()
+    }
+
+    /// One-time seed of `DailyUsageHistory` from every session log still on disk, so
+    /// the weekly review and burn baseline have weeks of history on day one instead
+    /// of filling in a week at a time. Detached and low priority: it reads every log.
+    func backfillDailyHistoryIfNeeded() {
+        guard !DailyUsageHistory.load().backfilled else { return }
+        let reader = self.reader
+        Task {
+            let days = await Task.detached(priority: .background) { reader.allDailyUsage() }.value
+            DailyUsageHistory.update { file in
+                // Days a regular scan already saved are at least as current — keep them.
+                file.days = DailyUsage.merge(stored: days, fresh: file.days, fullFrom: "")
+                file.backfilled = true
+            }
+            self.refresh()
+        }
     }
 
     func restartTimer() {

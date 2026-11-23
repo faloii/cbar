@@ -121,10 +121,12 @@ struct UsageSnapshot {
     var todaySessions = 0
     var todayToolCalls = 0
 
-    // All-time counts from Claude's own aggregated stats cache.
+    // All-time counts from Claude's own aggregated stats cache — which Claude Code
+    // stopped updating, so they're only as fresh as `statsCacheAsOf`.
     var totalSessions = 0
     var totalMessages = 0
     var firstSessionDate: Date?
+    var statsCacheAsOf: String?             // its "lastComputedDate", yyyy-MM-dd
 
     /// Per-day tokens + estimated cost (oldest → newest), up to ~30 days.
     var dailyCostHistory: [DailyCost] = []
@@ -132,8 +134,14 @@ struct UsageSnapshot {
     /// This-week vs last-week habit comparison.
     var weeklyReview: WeeklyReview?
 
-    /// Opus cost share for the last few weeks (index 0 = current week) — habit goal.
-    var weeklyOpusShares: [WeekShare] = []
+    /// Fable/Opus cost share for the last few weeks (index 0 = current week) — habit goal.
+    var weeklyTopTierShares: [WeekShare] = []
+
+    /// Per-day usage from this scan (days on or after `dailyFreshFrom` are complete)
+    /// and the stored history merged with it — the caller persists `dailyFresh`.
+    var dailyFresh: [DailyUsage] = []
+    var dailyFreshFrom: String?
+    var dailyUsage: [DailyUsage] = []
 
     static let empty = UsageSnapshot()
 

@@ -150,8 +150,9 @@ final class UsageStore: ObservableObject {
     }
     static let snoozeDuration: TimeInterval = 2 * 3600
 
-    /// Habit goal: keep Opus cost share at or below this %; 0 = off.
-    @AppStorage("opusShareTarget") var opusShareTarget: Int = 0 {
+    /// Habit goal: keep the top-tier (Fable·Opus) cost share at or below this %;
+    /// 0 = off. The storage key predates Fable being the priciest tier.
+    @AppStorage("opusShareTarget") var topTierShareTarget: Int = 0 {
         didSet { objectWillChange.send() }
     }
     /// Progressive disclosure for the 플랜 한도 card: collapsed by default shows
@@ -273,6 +274,7 @@ final class UsageStore: ObservableObject {
         if notifyOnWarning { Notifier.requestAuthorizationIfNeeded() }
         reloadDiskReadings()   // so the notification log etc. show before the first refresh completes
         ClaudeCredentials.removeLegacyTokenFile()   // no longer used; held a refresh token
+        backfillDailyHistoryIfNeeded()
         // A plain Timer doesn't fire while the Mac sleeps, so the first tick after
         // lid-open could be minutes away — refresh immediately on wake instead.
         // NOT `force: true`: after any real sleep the cache TTL (60-180s) has long

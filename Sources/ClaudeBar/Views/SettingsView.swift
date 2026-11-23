@@ -83,20 +83,20 @@ struct SettingsView: View {
                     set: { store.burnBasis = $0 })) {
                     ForEach(BurnBasis.allCases) { Text($0.label).tag($0) }
                 }
-                Text("총 토큰 ≈ 한도 압박(캐시 읽기가 지배적이라 모델이 비슷해 보임). 비용은 모델 간 실제 격차를 드러냄. 신규 토큰은 새 작업량만.")
+                Text("비용(기본)이 한도 소모에 가장 가까워요 — 실측상 사용률은 정가 기준 비용에 비례했어요. 총 토큰은 캐시 읽기까지 포함한 양, 신규 토큰은 새 작업량만.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
             Section("습관 목표") {
                 HStack {
-                    Text("Opus 비중 ≤")
+                    Text("상위 모델 비중 ≤")
                     Slider(value: Binding(
-                        get: { Double(store.opusShareTarget) },
-                        set: { store.opusShareTarget = Int($0) }), in: 0...100, step: 5)
-                    Text(store.opusShareTarget <= 0 ? "끔" : "\(store.opusShareTarget)%")
+                        get: { Double(store.topTierShareTarget) },
+                        set: { store.topTierShareTarget = Int($0) }), in: 0...100, step: 5)
+                    Text(store.topTierShareTarget <= 0 ? "끔" : "\(store.topTierShareTarget)%")
                         .monospacedDigit().frame(width: 44, alignment: .trailing)
                 }
-                Text("이번 주 Opus 비용 비중을 목표와 비교하고, 최근 몇 주 준수율을 보여줍니다. 0이면 끕니다.")
+                Text("이번 주 비용 중 상위 모델(Fable·Opus) 비중을 목표와 비교하고, 최근 몇 주 준수율을 보여줍니다. 0이면 끕니다.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -125,16 +125,16 @@ struct SettingsView: View {
                 Text("지금 속도면 한도에 막힐 시점이 이 시간 안으로 들어오면 ‘곧 막힘 · ~N분 후’ 알림을 한 번 보냅니다. 메뉴바 라벨도 ‘막힘 50m’처럼 남은 시간으로 바뀝니다.")
                     .font(.caption).foregroundStyle(.secondary)
                 Toggle("주간 사용 요약 알림", isOn: $store.weeklySummaryEnabled)
-                Text("주간 한도가 실제로 리셋되는 시점에 맞춰(라이브 한도가 꺼져 있으면 대략 7일마다) 지난 7일 비용·Opus 비중·재읽기 비율·가장 많이 쓴 프로젝트와 코칭을 한 번에 요약해 보냅니다.")
+                Text("주간 한도가 실제로 리셋되는 시점에 맞춰(라이브 한도가 꺼져 있으면 대략 7일마다) 지난 7일 비용·상위 모델 비중·재읽기 비율·가장 많이 쓴 프로젝트와 코칭을 한 번에 요약해 보냅니다.")
                     .font(.caption).foregroundStyle(.secondary)
 
                 Toggle("큰 대화의 캐시가 곧 만료되면 알림", isOn: $store.notifyCacheExpiry)
                 Text("20만 토큰 넘는 대화를 1시간(일부는 5분) 넘게 쉬면 캐시가 만료돼, 이어갈 때 대화 전체를 다시 캐시에 씁니다. 만료 10분 전에 한 번 알려줘요 — 곧 돌아올 거면 한 마디 보내 두면 유지되고, 오래 비울 거면 새 대화가 낫습니다.")
                     .font(.caption).foregroundStyle(.secondary)
 
-                Toggle("가벼운 대화인데 Opus면 모델 전환 제안", isOn: $store.notifyModelDownshift)
+                Toggle("가벼운 대화인데 상위 모델이면 모델 전환 제안", isOn: $store.notifyModelDownshift)
                     .disabled(!store.enableLiveLimits)
-                Text("5시간 창의 주력 모델이 Opus인데 최근 턴들의 출력이 가벼워 보이면, Sonnet으로 바꿔도 될 것 같다고 한 번 알려줍니다. 한도 소모량은 그대로고 비용만 바뀝니다 — 모델 선택은 비용을 줄이는 수단이지 한도를 늘리는 수단은 아니에요. 기본은 꺼져 있습니다.")
+                Text("5시간 창의 주력 모델이 Fable이나 Opus인데 최근 턴들의 출력이 가벼워 보이면, 한 단계 낮은 모델(Fable → Opus 5.5 → Sonnet 5.5)로 바꿔도 될 것 같다고 한 번 알려줍니다. 사용률은 정가 비용에 비례하므로 비용과 한도 소모가 함께 줄어요. 기본은 꺼져 있습니다.")
                     .font(.caption).foregroundStyle(.secondary)
 
                 Text("한도 위험 알림만 소리가 나요. 코칭성 알림(모델 제안)은 소리 없는 배너로, 주간 리캡은 알림 센터에만 조용히 쌓여요. 한도 관련 알림은 배너에서 바로 '2시간 조용히'를, '한도 풀렸어요' 알림은 '지금 이어가기'를 눌러 팝오버를 안 열어도 대응할 수 있어요.")

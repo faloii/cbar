@@ -32,6 +32,12 @@ enum ModelRecap {
         ("opus", "Sonnet 5.5", "claude-sonnet-5-5"),
     ]
 
+    /// Fable or Opus — a tier with a cheaper step down.
+    static func isTopTier(_ model: String) -> Bool {
+        let m = model.lowercased()
+        return downshifts.contains { m.contains($0.match) }
+    }
+
     struct Verdict: Equatable {
         let model: String            // dominant model id (most expensive in the window)
         let isTopTier: Bool          // fable/opus — a tier with a cheaper step down

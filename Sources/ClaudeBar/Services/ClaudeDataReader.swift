@@ -20,9 +20,12 @@ struct ClaudeDataReader {
     }
 
     /// Build a fresh snapshot. Safe to call off the main thread.
-    /// `includeSessionLogs: false` parses only the cheap stats cache (totals, daily
-    /// cost, weekly review) and skips the expensive session-log scan — used in the
-    /// background so the weekly summary stays available without the heavy work.
+    /// `includeSessionLogs: false` skips the expensive session-log scan — used in the
+    /// background so the weekly summary stays available (from `storedDaily`) without
+    /// the heavy work.
+    /// `storedDaily`: persisted per-day history (`DailyUsageHistory`); this scan's
+    /// complete days are laid over it for the daily cost, weekly review and habit
+    /// goal. Persisting the result is the caller's job (see `dailyFresh`).
     /// `sessionResetsAt`: the plan's live 5h-window reset. When known, the "window"
     /// figures cover that real window (reset − 5h → now) instead of a rolling
     /// now − 5h, which mixes in turns from the previous window and skews every
@@ -30,14 +33,26 @@ struct ClaudeDataReader {
     /// `weeklyResetsAt`: likewise for the weekly window, used for the per-project
     /// share of the weekly %.
     func load(now: Date = Date(), includeSessionLogs: Bool = true,
-              sessionResetsAt: Date? = nil, weeklyResetsAt: Date? = nil) -> UsageSnapshot {
+              sessionResetsAt: Date? = nil, weeklyResetsAt: Date? = nil,
+              storedDaily: [DailyUsage] = []) -> UsageSnapshot {
         var snap = UsageSnapshot(generatedAt: now)
         applyStatsCache(to: &snap, now: now)
         if includeSessionLogs {
             applySessionLogs(to: &snap, now: now, sessionResetsAt: sessionResetsAt, weeklyResetsAt: weeklyResetsAt)
             snap.sessionLogsScannedAt = now
         }
+        let daily = DailyUsage.merge(stored: storedDaily, fresh: snap.dailyFresh,
+                                     fullFrom: snap.dailyFreshFrom ?? "")
+        applyDailyHistory(daily, to: &snap, now: now)
         return snap
+    }
+
+    private func applyDailyHistory(_ days: [DailyUsage], to snap: inout UsageSnapshot, now: Date) {
+        snap.dailyUsage = days
+        snap.dailyCostHistory = days.suffix(30).map { DailyCost(date: $0.date, tokens: $0.tokens, cost: $0.cost) }
+        let entries = WeeklyReview.entries(from: days)
+        snap.weeklyReview = WeeklyReview.compute(entries: entries, now: now)
+        snap.weeklyTopTierShares = WeeklyReview.topTierShares(entries: entries, now: now, weeks: 4)
     }
 
     // MARK: - stats-cache.json
@@ -54,37 +69,7 @@ struct ClaudeDataReader {
             snap.firstSessionDate = DateParse.iso(first)
         }
 
-        // Per-model lifetime blended rates (for daily cost estimation).
-        var modelUsage: [String: TokenCounts] = [:]
-        if let mu = root["modelUsage"] as? [String: [String: Any]] {
-            for (model, v) in mu {
-                modelUsage[model] = TokenCounts(
-                    input: v["inputTokens"] as? Int ?? 0,
-                    output: v["outputTokens"] as? Int ?? 0,
-                    cacheWrite: v["cacheCreationInputTokens"] as? Int ?? 0,
-                    cacheRead: v["cacheReadInputTokens"] as? Int ?? 0
-                )
-            }
-        }
-        let (rates, fallback) = CostEstimator.blendedRates(modelUsage)
-
-        // Per-day token totals + estimated cost (for the trend chart) and the
-        // this-week-vs-last-week review.
-        if let daily = root["dailyModelTokens"] as? [[String: Any]] {
-            var history: [DailyCost] = []
-            var entries: [(date: Date, byModel: [String: Int])] = []
-            for entry in daily {
-                guard let dateStr = entry["date"] as? String,
-                      let byModel = entry["tokensByModel"] as? [String: Int] else { continue }
-                history.append(DailyCost(date: dateStr,
-                                         tokens: byModel.values.reduce(0, +),
-                                         cost: CostEstimator.dailyCost(tokensByModel: byModel, rates: rates, fallback: fallback)))
-                if let d = DateParse.day(dateStr) { entries.append((d, byModel)) }
-            }
-            snap.dailyCostHistory = Array(history.suffix(30))
-            snap.weeklyReview = WeeklyReview.compute(entries: entries, rates: rates, fallback: fallback, now: now)
-            snap.weeklyOpusShares = WeeklyReview.opusShares(entries: entries, rates: rates, fallback: fallback, now: now, weeks: 4)
-        }
+        snap.statsCacheAsOf = root["lastComputedDate"] as? String
     }
 
     // MARK: - session *.jsonl logs
@@ -149,6 +134,7 @@ struct ClaudeDataReader {
         // weekly recap notification's cache-efficiency read.
         var weeklyTokens = TokenCounts()
         var unpriced = Set<String>()
+        var days = DayAccumulator()
 
         for r in records {
             let isToday = r.timestamp >= todayStart
@@ -159,7 +145,7 @@ struct ClaudeDataReader {
 
             // Only assistant turns carry token usage / cost.
             guard let tokens = r.tokens, r.type == "assistant" else { continue }
-            let cost = Pricing.cost(for: tokens, model: r.model, hourCache: r.hourCache == true)
+            let cost = Pricing.turnCost(for: tokens, model: r.model, hourCache: r.hourCache == true)
             let key = ModelName.display(r.model)
 
             if let h = r.hourCache, !r.isSidechain, !r.sessionId.isEmpty { cacheTTLBySession[r.sessionId] = h }
@@ -189,6 +175,7 @@ struct ClaudeDataReader {
                 }
                 var pAcc = byProject[proj] ?? ProjAcc()
                 if tokens.total > 0, r.model != "<synthetic>", !Pricing.isKnown(r.model) { unpriced.insert(r.model) }
+                days.add(r, model: key, tokens: tokens, cost: cost)
                 pAcc.tokens += tokens.total
                 pAcc.cost += cost
                 if let weeklyStart, r.timestamp >= weeklyStart { pAcc.limitWindowCost += cost }
@@ -238,6 +225,11 @@ struct ClaudeDataReader {
             .sorted { $0.cost > $1.cost }
         snap.weeklyTokens = weeklyTokens
         snap.unpricedModels = unpriced.sorted()
+        snap.dailyFresh = days.days()
+        // The scan starts mid-day `weekFloor`; only the days after it are complete.
+        snap.dailyFreshFrom = Calendar.current.date(byAdding: .day, value: 1,
+                                                    to: Calendar.current.startOfDay(for: weekFloor))
+            .map(DateParse.dayString)
 
         snap.windowTokens = windowTokens
         snap.windowCost = windowCost
@@ -358,6 +350,55 @@ struct ClaudeDataReader {
             }
         }
         return nil
+    }
+
+    /// Folds deduped assistant turns into `DailyUsage` per local day.
+    private struct DayAccumulator {
+        private var byDay: [Date: (usage: DailyUsage, sessions: Set<String>)] = [:]
+
+        mutating func add(_ r: LogRecord, model: String, tokens: TokenCounts, cost: Double) {
+            // Claude Code's placeholder turns, not API calls.
+            guard r.model != "<synthetic>" else { return }
+            let day = Calendar.current.startOfDay(for: r.timestamp)
+            var e = byDay[day] ?? (DailyUsage(date: DateParse.dayString(day)), [])
+            e.usage.byModel[model, default: .init()].tokens += tokens.total
+            e.usage.byModel[model, default: .init()].cost += cost
+            e.usage.turns += 1
+            if !r.sessionId.isEmpty { e.sessions.insert(r.sessionId) }
+            byDay[day] = e
+        }
+
+        func days() -> [DailyUsage] {
+            byDay.values.map { e in
+                var u = e.usage; u.sessions = e.sessions.count; return u
+            }
+            .sorted { $0.date < $1.date }
+        }
+    }
+
+    /// Every day the session logs on disk still cover — the one-time seed for
+    /// `DailyUsageHistory`. Reads every log file without touching the parse cache
+    /// (which would then pin months of records in memory); slow-ish, run detached.
+    func allDailyUsage() -> [DailyUsage] {
+        let projects = Self.configDir.appendingPathComponent("projects", isDirectory: true)
+        guard let walker = FileManager.default.enumerator(at: projects, includingPropertiesForKeys: nil,
+                                                          options: [.skipsHiddenFiles]) else { return [] }
+        let files = walker.compactMap { $0 as? URL }.filter { $0.pathExtension == "jsonl" }
+        var results = [[LogRecord]](repeating: [], count: files.count)
+        results.withUnsafeMutableBufferPointer { slots in
+            DispatchQueue.concurrentPerform(iterations: files.count) { i in
+                slots[i] = self.parse(fileAt: files[i]).records
+            }
+        }
+        var days = DayAccumulator()
+        for r in Self.dedupe(results.flatMap { $0 }) {
+            guard let tokens = r.tokens else { continue }
+            let cost = Pricing.turnCost(for: tokens, model: r.model, hourCache: r.hourCache == true)
+            days.add(r, model: ModelName.display(r.model), tokens: tokens, cost: cost)
+        }
+        // Today is still in progress; the next regular scan supplies it.
+        let today = DateParse.dayString(Date())
+        return days.days().filter { $0.date != today }
     }
 
     private func recentRecords(now: Date, since: TimeInterval = 7 * 24 * 3600) -> [LogRecord] {

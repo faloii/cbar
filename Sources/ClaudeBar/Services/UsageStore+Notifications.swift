@@ -33,7 +33,7 @@ extension UsageStore {
         if let d = r.costDeltaPct {
             body += d >= 0 ? " · 전주 ▲\(Int(d.rounded()))%" : " · 전주 ▼\(Int(abs(d).rounded()))%"
         }
-        body += " · Opus 비중 \(Int((r.opusShareThis * 100).rounded()))%"
+        body += " · 상위 모델 비중 \(Int((r.topTierShareThis * 100).rounded()))%"
         if let ce = CacheEfficiency.verdict(snapshot.weeklyTokens) {
             body += " · 재읽기 \(Int((ce.cacheReadShare * 100).rounded()))%"
         }

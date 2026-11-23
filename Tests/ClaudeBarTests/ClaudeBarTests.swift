@@ -104,6 +104,19 @@ final class PricingTests: XCTestCase {
         XCTAssertFalse(Pricing.isKnown("claude-gizmo-9"))
     }
 
+    func testHaikuLongPromptTierAppliesPerRequest() {
+        // Haiku 5.5: a prompt over 100K tokens (cache reads count) pays $0.50/$2.50.
+        let short = TokenCounts(input: 1_000, output: 1_000_000, cacheWrite: 0, cacheRead: 90_000)
+        let long  = TokenCounts(input: 1_000, output: 1_000_000, cacheWrite: 0, cacheRead: 100_000)
+        XCTAssertEqual(Pricing.turnCost(for: short, model: "claude-haiku-5-5"),
+                       (1_000 * 0.10 + 1_000_000 * 0.50 + 90_000 * 0.01) / 1e6, accuracy: 1e-9)
+        XCTAssertEqual(Pricing.turnCost(for: long, model: "claude-haiku-5-5"),
+                       (1_000 * 0.50 + 1_000_000 * 2.50 + 100_000 * 0.05) / 1e6, accuracy: 1e-9)
+        // Summed tokens can't be tiered: plain `cost` stays on the base rates.
+        XCTAssertEqual(Pricing.cost(for: long, model: "claude-haiku-5-5"),
+                       (1_000 * 0.10 + 1_000_000 * 0.50 + 100_000 * 0.01) / 1e6, accuracy: 1e-9)
+    }
+
     func testHourCacheWriteBillsDoubleInput() {
         // Fable 5.2: 5-minute write $10/M (1.25×), 1-hour write $16/M (2×).
         let w = TokenCounts(input: 0, output: 0, cacheWrite: 1_000_000, cacheRead: 0)
@@ -654,114 +667,125 @@ final class LimitCalibrationTests: XCTestCase {
     }
 }
 
-final class CostEstimatorTests: XCTestCase {
-    func testBlendedRateMatchesPricing() {
-        // 1M Opus 4.8 output → $25 → blended $25/1M = 0.000025 $/token.
-        let usage = ["claude-opus-4-8": TokenCounts(output: 1_000_000)]
-        let (rates, fallback) = CostEstimator.blendedRates(usage)
-        XCTAssertEqual(rates["claude-opus-4-8"] ?? 0, 25.0 / 1_000_000, accuracy: 1e-12)
-        XCTAssertEqual(fallback, 25.0 / 1_000_000, accuracy: 1e-12)
-    }
-
-    func testDailyCostUsesPerModelRatesAndFallback() {
-        let rates = ["claude-opus-4-8": 0.00007, "claude-sonnet-4-6": 0.00001]
-        // Opus 1M*0.00007=70 + Sonnet 2M*0.00001=20 + unknown 1M*fallback(0.0001)=100 → 190.
-        let day = ["claude-opus-4-8": 1_000_000, "claude-sonnet-4-6": 2_000_000, "mystery": 1_000_000]
-        let cost = CostEstimator.dailyCost(tokensByModel: day, rates: rates, fallback: 0.0001)
-        XCTAssertEqual(cost, 190, accuracy: 1e-6)
-    }
-
-    func testEmptyUsageGivesZeroFallback() {
-        let (rates, fallback) = CostEstimator.blendedRates([:])
-        XCTAssertTrue(rates.isEmpty)
-        XCTAssertEqual(fallback, 0)
-    }
-}
-
-
 final class WeeklyReviewTests: XCTestCase {
-    private func review(this: Double, last: Double, opusThis: Double, opusLast: Double) -> WeeklyReview {
-        WeeklyReview(thisCost: this, lastCost: last, opusShareThis: opusThis,
-                     opusShareLast: opusLast, avgPast4WeeksCost: nil)
+    private func review(this: Double, last: Double, topThis: Double, topLast: Double) -> WeeklyReview {
+        WeeklyReview(thisCost: this, lastCost: last, topTierShareThis: topThis,
+                     topTierShareLast: topLast, avgPast4WeeksCost: nil)
     }
 
     func testCoachingBranches() {
-        // Opus share high AND rising ≥5pt → the Opus-trim coaching.
-        XCTAssertEqual(review(this: 100, last: 100, opusThis: 0.7, opusLast: 0.6).coaching,
-                       "Opus 비중이 늘었어요 — 루틴 작업은 더 가벼운 모델로 옮겨보세요.")
-        // Cost up ≥25% (and Opus not the trigger) → the pace-check coaching.
-        XCTAssertEqual(review(this: 130, last: 100, opusThis: 0.2, opusLast: 0.2).coaching,
+        // Top-tier share high AND rising ≥5pt → the step-down coaching.
+        XCTAssertEqual(review(this: 100, last: 100, topThis: 0.7, topLast: 0.6).coaching,
+                       "상위 모델(Fable·Opus) 비중이 늘었어요 — 루틴 작업은 한 단계 낮은 모델로 옮겨보세요.")
+        // Cost up ≥25% (and the share not the trigger) → the pace-check coaching.
+        XCTAssertEqual(review(this: 130, last: 100, topThis: 0.2, topLast: 0.2).coaching,
                        "지난주보다 비용이 늘었어요. 페이스를 점검해 보세요.")
         // Cost down ≥20% → the saved-money coaching.
-        XCTAssertEqual(review(this: 70, last: 100, opusThis: 0.2, opusLast: 0.2).coaching,
+        XCTAssertEqual(review(this: 70, last: 100, topThis: 0.2, topLast: 0.2).coaching,
                        "지난주보다 절약했어요 👍")
         // Nothing notable → nil.
-        XCTAssertNil(review(this: 105, last: 100, opusThis: 0.2, opusLast: 0.2).coaching)
+        XCTAssertNil(review(this: 105, last: 100, topThis: 0.2, topLast: 0.2).coaching)
     }
 
     func testThisVsLastWeek() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let entries: [(date: Date, byModel: [String: Int])] = [
-            (now.addingTimeInterval(-1 * 86400), ["claude-opus-4-8": 1_000_000]),    // this week
-            (now.addingTimeInterval(-8 * 86400), ["claude-sonnet-4-6": 1_000_000]),  // last week
+        let entries: [WeeklyReview.Entry] = [
+            (now.addingTimeInterval(-1 * 86400), ["Opus 4.8": 100]),     // this week
+            (now.addingTimeInterval(-8 * 86400), ["Sonnet 4.6": 10]),    // last week
         ]
-        let rates = ["claude-opus-4-8": 0.0001, "claude-sonnet-4-6": 0.00001]
-        let r = WeeklyReview.compute(entries: entries, rates: rates, fallback: 0, now: now)!
+        let r = WeeklyReview.compute(entries: entries, now: now)!
         XCTAssertEqual(r.thisCost, 100, accuracy: 0.001)
         XCTAssertEqual(r.lastCost, 10, accuracy: 0.001)
-        XCTAssertEqual(r.opusShareThis, 1.0, accuracy: 0.001)   // this week was all Opus
-        XCTAssertEqual(r.opusShareLast, 0.0, accuracy: 0.001)
+        XCTAssertEqual(r.topTierShareThis, 1.0, accuracy: 0.001)   // this week was all Opus
+        XCTAssertEqual(r.topTierShareLast, 0.0, accuracy: 0.001)
         XCTAssertEqual(r.costDeltaPct ?? 0, 900, accuracy: 0.1)
     }
 
-    func testOpusSharesPerWeek() {
+    func testTopTierCountsFableAndOpus() {
+        // Fable is the priciest tier now — it counts toward the share alongside Opus.
         let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let rates = ["claude-opus-4-8": 0.0001, "claude-sonnet-4-6": 0.0001]
-        let entries: [(date: Date, byModel: [String: Int])] = [
-            // this week (w0): 80% Opus
-            (now.addingTimeInterval(-1 * 86400), ["claude-opus-4-8": 800_000, "claude-sonnet-4-6": 200_000]),
-            // last week (w1): 20% Opus
-            (now.addingTimeInterval(-8 * 86400), ["claude-opus-4-8": 200_000, "claude-sonnet-4-6": 800_000]),
+        let entries: [WeeklyReview.Entry] = [
+            (now.addingTimeInterval(-1 * 86400), ["Fable 5.2": 50, "Opus 5.5": 30, "Sonnet 5.5": 20]),
         ]
-        let shares = WeeklyReview.opusShares(entries: entries, rates: rates, fallback: 0, now: now, weeks: 4)
+        XCTAssertEqual(WeeklyReview.compute(entries: entries, now: now)?.topTierShareThis ?? 0, 0.8, accuracy: 0.001)
+    }
+
+    func testTopTierSharesPerWeek() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let entries: [WeeklyReview.Entry] = [
+            // this week (w0): 80% top tier
+            (now.addingTimeInterval(-1 * 86400), ["Opus 4.8": 80, "Sonnet 4.6": 20]),
+            // last week (w1): 20% top tier
+            (now.addingTimeInterval(-8 * 86400), ["Fable 5.2": 20, "Sonnet 4.6": 80]),
+        ]
+        let shares = WeeklyReview.topTierShares(entries: entries, now: now, weeks: 4)
         XCTAssertEqual(shares.count, 4)
-        XCTAssertEqual(shares[0].opusShare, 0.8, accuracy: 0.001)
+        XCTAssertEqual(shares[0].topTierShare, 0.8, accuracy: 0.001)
         XCTAssertTrue(shares[0].hasUsage)
-        XCTAssertEqual(shares[1].opusShare, 0.2, accuracy: 0.001)
+        XCTAssertEqual(shares[1].topTierShare, 0.2, accuracy: 0.001)
         XCTAssertFalse(shares[2].hasUsage)   // no data 2-3 weeks ago
         XCTAssertFalse(shares[3].hasUsage)
     }
 
     func testNilWhenNoRecentData() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let entries: [(date: Date, byModel: [String: Int])] = [
-            (now.addingTimeInterval(-40 * 86400), ["claude-opus-4-8": 1_000_000]),   // too old
+        let entries: [WeeklyReview.Entry] = [
+            (now.addingTimeInterval(-40 * 86400), ["Opus 4.8": 100]),   // too old
         ]
-        XCTAssertNil(WeeklyReview.compute(entries: entries, rates: [:], fallback: 0.0001, now: now))
+        XCTAssertNil(WeeklyReview.compute(entries: entries, now: now))
     }
 
     func testAvgPast4WeeksExcludesCurrentAndZeroWeeks() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let rates = ["m": 0.0001]
-        let entries: [(date: Date, byModel: [String: Int])] = [
-            (now.addingTimeInterval(-1 * 86400), ["m": 1_000_000]),    // this week: $100 — excluded from the avg
-            (now.addingTimeInterval(-8 * 86400), ["m": 500_000]),      // last week (bucket 0): $50
-            (now.addingTimeInterval(-22 * 86400), ["m": 300_000]),     // 3 weeks ago (bucket 2): $30
+        let entries: [WeeklyReview.Entry] = [
+            (now.addingTimeInterval(-1 * 86400), ["m": 100]),    // this week: $100 — excluded from the avg
+            (now.addingTimeInterval(-8 * 86400), ["m": 50]),     // last week (bucket 0): $50
+            (now.addingTimeInterval(-22 * 86400), ["m": 30]),    // 3 weeks ago (bucket 2): $30
             // bucket 1 (2 weeks ago) and bucket 3 (4 weeks ago): no usage, excluded from the average
         ]
-        let r = WeeklyReview.compute(entries: entries, rates: rates, fallback: 0, now: now)!
+        let r = WeeklyReview.compute(entries: entries, now: now)!
         XCTAssertEqual(r.avgPast4WeeksCost ?? 0, 40, accuracy: 0.001)   // (50 + 30) / 2
         XCTAssertEqual(r.costDeltaVsAvgPct ?? 0, 150, accuracy: 0.1)    // 100 vs 40 avg
     }
 
     func testNilAvgWhenNoPastWeekHasUsage() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
-        let entries: [(date: Date, byModel: [String: Int])] = [
-            (now.addingTimeInterval(-1 * 86400), ["m": 1_000_000]),   // only this week
+        let entries: [WeeklyReview.Entry] = [
+            (now.addingTimeInterval(-1 * 86400), ["m": 100]),   // only this week
         ]
-        let r = WeeklyReview.compute(entries: entries, rates: ["m": 0.0001], fallback: 0, now: now)!
+        let r = WeeklyReview.compute(entries: entries, now: now)!
         XCTAssertNil(r.avgPast4WeeksCost)
         XCTAssertNil(r.costDeltaVsAvgPct)
+    }
+
+    func testEntriesFromDailyUsageUseCost() {
+        let day = DailyUsage(date: "2023-11-13", byModel: ["Opus 4.8": .init(tokens: 9, cost: 2.5)], sessions: 1, turns: 3)
+        let e = WeeklyReview.entries(from: [day])
+        XCTAssertEqual(e.count, 1)
+        XCTAssertEqual(e.first?.costByModel["Opus 4.8"] ?? 0, 2.5, accuracy: 1e-9)
+    }
+}
+
+final class DailyUsageTests: XCTestCase {
+    private func day(_ date: String, cost: Double) -> DailyUsage {
+        DailyUsage(date: date, byModel: ["Opus 5.5": .init(tokens: 1, cost: cost)], sessions: 1, turns: 1)
+    }
+
+    func testFreshCompleteDaysReplaceStoredOnesAndPartialDaysDoNot() {
+        let stored = [day("2026-11-10", cost: 1), day("2026-11-15", cost: 2), day("2026-11-20", cost: 3)]
+        let fresh  = [day("2026-11-15", cost: 9),    // partial first day of the scan → ignored
+                      day("2026-11-20", cost: 7),    // complete → replaces stored
+                      day("2026-11-21", cost: 5)]    // new
+        let merged = DailyUsage.merge(stored: stored, fresh: fresh, fullFrom: "2026-11-16")
+        XCTAssertEqual(merged.map(\.date), ["2026-11-10", "2026-11-15", "2026-11-20", "2026-11-21"])
+        XCTAssertEqual(merged.map(\.cost), [1, 2, 7, 5])
+    }
+
+    func testTotalsSumAcrossModels() {
+        let d = DailyUsage(date: "2026-11-20", byModel: ["Fable 5.2": .init(tokens: 10, cost: 3),
+                                                         "Opus 5.5": .init(tokens: 5, cost: 1)])
+        XCTAssertEqual(d.cost, 4, accuracy: 1e-9)
+        XCTAssertEqual(d.tokens, 15)
     }
 }
 
@@ -825,6 +849,27 @@ final class AdviceTests: XCTestCase {
         XCTAssertEqual(pacing?.level, .critical)
         XCTAssertTrue(pacing?.text.contains("턴") ?? false)        // turn estimate present
         XCTAssertTrue(pacing?.text.contains("시간당") ?? false)    // concrete target-rate lever
+    }
+
+    func testPacingTipOffersModelLeverForLightTopTierTurns() {
+        // Light Fable 5.2 turns (80 output/turn) → the at-risk tip names the step
+        // down, since a cheaper model draws less limit per turn.
+        let p = Projection(ratePerHour: 40, timeToFull: 1800, secondsToReset: 7200, verdict: .atRisk)
+        let tokens = TokenCounts(input: 0, output: 400, cacheWrite: 0, cacheRead: 10_000)
+        let fable = ModelWindowUsage(model: "Fable 5.2", tokens: tokens,
+                                     cost: Pricing.cost(for: tokens, model: "claude-fable-5-2"), requests: 5)
+        let tips = Advice.compute(session: p, weekly: nil, sessionUtil: 80, weeklyUtil: nil,
+                                  models: [fable], warnThreshold: 80, now: now)
+        let text = tips.first { $0.kind == .sessionPacing }?.text ?? ""
+        XCTAssertTrue(text.contains("Fable 5.2 대신 Opus 5.5로"), text)
+
+        // Heavy turns justify the tier → no model lever.
+        let heavy = ModelWindowUsage(model: "Fable 5.2", tokens: TokenCounts(output: 10_000),
+                                     cost: 1, requests: 5)
+        let heavyText = Advice.compute(session: p, weekly: nil, sessionUtil: 80, weeklyUtil: nil,
+                                       models: [heavy], warnThreshold: 80, now: now)
+            .first { $0.kind == .sessionPacing }?.text ?? ""
+        XCTAssertFalse(heavyText.contains("대신"))
     }
 
     func testNearMissPacingIsCalmer() {
