@@ -188,6 +188,12 @@ extension UsageStore {
         (limits?.scopedWeekly ?? []).filter { !$0.window.expired(asOf: Date()) }
     }
 
+    /// Live per-model caps with their pace, and whether each runs out before the
+    /// weekly limit — see `ScopedCapStatus`.
+    var scopedCapStatus: [ScopedCapStatus] {
+        ScopedCapStatus.evaluate(scoped: limits?.scopedWeekly ?? [], weekly: liveWeekly, now: Date())
+    }
+
     /// "남은 주간 N% ≈ 모델 X 약 M턴", priced per model under the plan's per-model
     /// weekly caps — see `WeeklyModelTurns`. Per-turn cost over the weekly window
     /// is steadier than the 5h window's.

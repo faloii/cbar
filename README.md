@@ -42,8 +42,11 @@ Plus an **optional live fetch** of your real plan limits (see
 - **Plan limits** (live) — your real **Session (5h)** and **Weekly (7d)** usage as
   percentages with reset countdowns, exactly like Claude Code's `/usage`, plus any
   **per-model weekly cap** the plan reports (Fable on Max/Ultra: up to 50% of the weekly
-  limit) as its own ring, with how much of the weekly limit that model has used. Falls
-  back to a cached value (flagged) if a refresh fails.
+  limit) as its own ring, with how much of the weekly limit that model has used. When
+  that cap will run out before the weekly limit, it gets its own pace line, counts toward
+  the status headline, and raises its own tips and notifications (75/90/100% of the cap,
+  plus "곧 소진" when the pace will empty it within two days) pointing at the other
+  models, which keep working. Falls back to a cached value (flagged) if a refresh fails.
 - **Burn-rate projection** — tracks your usage over time and tells you whether you'll
   hit the cap *before* the window resets: `▲ 22%/h · full in 1h32m — 2h22m before reset`
   when you're on track to run dry, or `▲ 8%/h · lasts past reset` when you're fine. Lets
@@ -93,6 +96,8 @@ Plus an **optional live fetch** of your real plan limits (see
   average, not just a single (possibly unusual) last week; and when every one of the
   last 3-4 completed weeks peaked consistently ≥90% or ≤30%, a one-line note suggests
   the plan tier might not fit well (never naming a specific plan — no way to know pricing).
+  Weeks end on the real weekly reset, and a week the plan rescaled mid-window counts only
+  its readings after the rescale.
 - **Settings → 진단 (diagnostics)** — last refresh attempt/success, whether a refresh
   timed out (the "a system call is hung" signature vs. an ordinary failure), backoff
   status, the actual last error, and a "clear cached credentials & retry" button — so a

@@ -2,7 +2,7 @@ import Foundation
 
 /// One piece of dynamic, situational guidance shown in the popover.
 struct AdviceTip: Identifiable, Equatable {
-    enum Kind { case sessionPacing, resetImminent, headroom, contextHeavy, sessionImbalance, weeklyDefer, costModel, watch, healthy, burnAnomaly, cacheEfficiencyTrend, adviceWorked }
+    enum Kind { case sessionPacing, resetImminent, headroom, contextHeavy, sessionImbalance, weeklyDefer, costModel, watch, healthy, burnAnomaly, cacheEfficiencyTrend, adviceWorked, modelCap }
     enum Level { case good, info, warn, critical }
 
     let kind: Kind
@@ -26,7 +26,8 @@ enum Advice {
                         warnThreshold: Int, now: Date,
                         typicalHourRate: Double? = nil,
                         topWeeklyProject: (name: String, sharePct: Double)? = nil,
-                        recentSessionRecaps: [SessionCoach.Recap] = []) -> [AdviceTip] {
+                        recentSessionRecaps: [SessionCoach.Recap] = [],
+                        scopedCaps: [ScopedCapStatus] = []) -> [AdviceTip] {
         var tips: [AdviceTip] = []
         let t = Double(warnThreshold)
         func dur(_ s: TimeInterval?) -> String {
@@ -119,6 +120,29 @@ enum Advice {
                 text: (very ? "이번 대화가 매우 큼(~\(k)k토큰) — 주고받을 때마다 이만큼을 다시 읽어요. "
                             : "이번 대화 컨텍스트가 큼(~\(k)k토큰) — 턴마다 한도를 많이 먹어요. ")
                     + "/compact 하거나 새 대화로 시작하면 같은 한도로 더 오래 갈 수 있어요."))
+        }
+
+        // 3.7) A per-model cap that runs out before the weekly limit (Fable on
+        //      Max/Ultra): that model stops first while the others keep going, so
+        //      the lever is switching model, not waiting. Ahead of the weekly tip
+        //      so it keeps its seat under the `prefix(3)` cap.
+        if let c = scopedCaps.first(where: { c in
+            c.bindsFirst && (c.cap.window.utilization >= 75 || c.projection.verdict == .atRisk)
+        }) {
+            let m = c.cap.model
+            let u = c.cap.window.utilization
+            if u >= 100 {
+                tips.append(AdviceTip(kind: .modelCap, level: .critical, icon: "nosign",
+                    text: "\(m) 전용 한도를 다 썼어요. 리셋(\(longDur(c.projection.secondsToReset)) 뒤)까지 \(m) 모델은 못 써요. "
+                        + "다른 모델은 주간 한도 안에서 계속 쓸 수 있어요."))
+            } else {
+                let atRisk = c.projection.verdict == .atRisk
+                var text = "\(m) 전용 한도 \(Int(u.rounded()))% — 주간 한도보다 먼저 차요."
+                if atRisk { text += " 이 페이스면 약 \(longDur(c.projection.timeToFull)) 뒤 \(m) 모델만 막혀요." }
+                text += " \(m)가 꼭 필요하지 않은 작업은 다른 모델로 돌리세요."
+                tips.append(AdviceTip(kind: .modelCap, level: u >= 90 || atRisk ? .warn : .info,
+                    icon: "square.stack.3d.up.slash", text: text))
+            }
         }
 
         // 4) Weekly — defer big work; sharper when the pace will blow the week.

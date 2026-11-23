@@ -34,23 +34,33 @@ enum PlanFitSignal {
         return nil
     }
 
-    /// Buckets weekly-utilization samples into ~7-day-wide "weeks ago from now"
-    /// windows and takes each week's peak — a rolling approximation (not aligned
-    /// to Anthropic's actual billing-cycle boundary, which isn't stored
-    /// historically), honest about being "the last few weeks" rather than exact
-    /// billing periods. Excludes week 0 (the current, in-progress week).
-    static func weeklyPeaks(samples: [UsageSample], now: Date, weeks: Int) -> [Double] {
-        var peaks = Array(repeating: 0.0, count: weeks)
-        var seen = Array(repeating: false, count: weeks)
-        for s in samples {
-            guard let u = s.weekly else { continue }
-            let daysAgo = now.timeIntervalSince(s.at) / 86400
-            guard daysAgo >= 0 else { continue }
-            let w = Int(daysAgo / 7)
-            guard w < weeks else { continue }
-            if u > peaks[w] { peaks[w] = u }
-            seen[w] = true
+    /// A drop this large between two readings inside one bucket isn't usage going
+    /// down — utilization only falls at a reset. It's the plan rescaling the week
+    /// mid-window (seen: 82% → 36% with `resetsAt` unchanged), or a reset landing a
+    /// little off the bucket edge. Either way, readings before it are on another
+    /// scale, so the week's peak restarts from there.
+    static let rescaleDrop = 20.0
+
+    /// Buckets weekly-utilization samples into 7-day weeks and takes each week's
+    /// peak. With the live `resetsAt`, the buckets end on the real reset boundaries
+    /// (the weekly window is a fixed 7-day bucket, so past boundaries are that
+    /// minus whole weeks); without it they fall back to "weeks ago from now".
+    /// Excludes week 0 (the current, in-progress week).
+    static func weeklyPeaks(samples: [UsageSample], now: Date, weeks: Int, resetsAt: Date? = nil) -> [Double] {
+        let anchor = resetsAt.flatMap { $0 > now ? $0 : nil } ?? now
+        var peaks = [Double?](repeating: nil, count: weeks)
+        var last = [Double?](repeating: nil, count: weeks)
+        for s in samples.sorted(by: { $0.at < $1.at }) {
+            guard let u = s.weekly, s.at <= now else { continue }
+            let w = Int(anchor.timeIntervalSince(s.at) / (7 * 86400))
+            guard w >= 0, w < weeks else { continue }
+            if let prev = last[w], prev - u >= rescaleDrop {
+                peaks[w] = u
+            } else {
+                peaks[w] = max(peaks[w] ?? 0, u)
+            }
+            last[w] = u
         }
-        return (1..<weeks).compactMap { seen[$0] ? peaks[$0] : nil }
+        return (1..<weeks).compactMap { peaks[$0] }
     }
 }

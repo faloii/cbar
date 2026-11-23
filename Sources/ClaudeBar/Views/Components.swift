@@ -192,9 +192,10 @@ struct StatRow: View {
 struct PlanStatusBadge: View {
     let session: WindowRisk?
     let weekly: WindowRisk?
+    var caps: [(String, WindowRisk)] = []
 
     var body: some View {
-        let h = PlanStatus.headline(session: session, weekly: weekly)
+        let h = PlanStatus.headline(session: session, weekly: weekly, caps: caps)
         let icon: String
         switch h.tier {
         case .safe:    icon = "checkmark.circle.fill"

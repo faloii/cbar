@@ -23,7 +23,8 @@ extension UsageStore {
                        now: snapshot.generatedAt,
                        typicalHourRate: typicalHourRate,
                        topWeeklyProject: topWeeklyProject,
-                       recentSessionRecaps: sessionRecapsToday)
+                       recentSessionRecaps: sessionRecapsToday,
+                       scopedCaps: scopedCapStatus)
 
         // A rare, positive one-off: reinforce that a past nudge (context/compact)
         // actually helped, rather than only ever warning. See `processAdviceFollowThrough`.
@@ -93,7 +94,8 @@ extension UsageStore {
     /// several completed weeks of live-limit history, so this stays nil for a
     /// while after a fresh install (nothing dishonest to say yet).
     var planFitSignal: PlanFitSignal.Result? {
-        let peaks = PlanFitSignal.weeklyPeaks(samples: weeklyTrend, now: Date(), weeks: 5)
+        let peaks = PlanFitSignal.weeklyPeaks(samples: weeklyTrend, now: Date(), weeks: 5,
+                                              resetsAt: liveWeekly?.resetsAt)
         return PlanFitSignal.evaluate(weeklyPeaks: peaks)
     }
 

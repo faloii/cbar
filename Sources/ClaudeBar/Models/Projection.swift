@@ -84,8 +84,12 @@ struct WindowRisk: Equatable {
 
 /// The 플랜 한도 card's one-line headline, built from the session/weekly risks.
 enum PlanStatus {
-    static func headline(session: WindowRisk?, weekly: WindowRisk?) -> (tier: RiskTier, text: String) {
+    /// `caps`: per-model caps that run out before the weekly limit ("Fable 전용") —
+    /// without them the badge said "이번 주 안 막혀요" while Fable was about to stop.
+    static func headline(session: WindowRisk?, weekly: WindowRisk?,
+                         caps: [(String, WindowRisk)] = []) -> (tier: RiskTier, text: String) {
         let named: [(String, WindowRisk)] = [("세션", session), ("주간", weekly)].compactMap { n, r in r.map { (n, $0) } }
+            + caps
         let tier = named.map(\.1.tier).max() ?? .safe
         guard tier != .safe else { return (.safe, "지금 페이스면 오늘·이번 주 안 막혀요") }
         let worst = named.filter { $0.1.tier == tier }

@@ -141,6 +141,7 @@ extension UsageStore {
             sessionProjection: sessionProjection, weeklyProjection: weeklyProjection,
             status: limits?.status, warnThreshold: warnThreshold,
             blockWarnLeadMinutes: blockWarnLeadMinutes,
+            scopedCaps: scopedCapStatus,
             state: &alertState, now: now)
 
         let toPost = notifyOnWarning ? alerts : []

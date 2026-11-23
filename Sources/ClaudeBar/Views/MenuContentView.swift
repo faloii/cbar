@@ -347,7 +347,9 @@ struct MenuContentView: View {
             // would contradict the bar's "—" with the same stale data.
             let session = store.liveSession
             let weekly = store.liveWeekly
-            PlanStatusBadge(session: store.sessionRisk, weekly: store.weeklyRisk)
+            let caps = store.scopedCapStatus
+            PlanStatusBadge(session: store.sessionRisk, weekly: store.weeklyRisk,
+                            caps: caps.filter(\.bindsFirst).map { ("\($0.cap.model) 전용", $0.risk) })
                 .padding(.top, 2)
             HStack(alignment: .top, spacing: 10) {
                 if let w = session {
@@ -365,10 +367,11 @@ struct MenuContentView: View {
                 }
                 // Per-model weekly caps (Fable on Max/Ultra): % of that model's own
                 // allowance, on the same weekly clock as the all-model ring.
-                ForEach(store.liveScopedWeekly) { s in
-                    RingGauge(title: s.model, window: s.window, now: snap.generatedAt,
+                ForEach(caps) { c in
+                    RingGauge(title: c.cap.model, window: c.cap.window, now: snap.generatedAt,
                               paceFraction: Pace.elapsedFraction(windowSeconds: 7 * 24 * 3600,
-                                                                 secondsToReset: s.window.resetsAt?.timeIntervalSince(snap.generatedAt)))
+                                                                 secondsToReset: c.cap.window.resetsAt?.timeIntervalSince(snap.generatedAt)),
+                              projection: c.bindsFirst ? c.projection : nil, imminentWindow: 24 * 3600)
                 }
             }
             .padding(.top, 2)
@@ -416,6 +419,11 @@ struct MenuContentView: View {
                         ProjectionLine(tag: "주간", window: w, projection: store.weeklyProjection, now: snap.generatedAt)
                         if let budget = store.weeklyAllowance {
                             WeeklyAllowanceLine(budget: budget)
+                        }
+                        // A cap that runs out first gets its own pace verdict.
+                        ForEach(caps.filter(\.bindsFirst)) { c in
+                            ProjectionLine(tag: "\(c.cap.model) 전용", window: c.cap.window,
+                                           projection: c.projection, now: snap.generatedAt)
                         }
                         ForEach(store.liveScopedWeekly) { s in
                             if let a = s.allowancePctOfWeekly {

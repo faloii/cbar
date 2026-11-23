@@ -1220,6 +1220,86 @@ final class OAuthUsageParseTests: XCTestCase {
         XCTAssertEqual(noUsed.remainingPctOfWeekly(weeklyUtil: 40) ?? 0, 44, accuracy: 0.001)
     }
 
+    private func fableCap(util: Double, used: Double, resetsAt: Date?) -> ScopedWeeklyLimit {
+        ScopedWeeklyLimit(model: "Fable", window: LimitWindow(utilization: util, resetsAt: resetsAt),
+                          allowancePctOfWeekly: 50, usedPctOfWeekly: used)
+    }
+
+    func testScopedCapBindsFirstOnlyWhenItsShareIsTighter() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(2 * 86400)
+        // Weekly 40% (60 left) vs Fable 45 of its 50 (5 left) → Fable stops first.
+        let tight = ScopedCapStatus.evaluate(scoped: [fableCap(util: 90, used: 45, resetsAt: reset)],
+                                             weekly: LimitWindow(utilization: 40, resetsAt: reset), now: now)
+        XCTAssertEqual(tight.first?.bindsFirst, true)
+        // Weekly 95% (5 left) vs Fable 6 of 50 → the weekly limit is the tighter one.
+        let loose = ScopedCapStatus.evaluate(scoped: [fableCap(util: 12, used: 6, resetsAt: reset)],
+                                             weekly: LimitWindow(utilization: 95, resetsAt: reset), now: now)
+        XCTAssertEqual(loose.first?.bindsFirst, false)
+        // An expired cap describes last week — dropped.
+        XCTAssertTrue(ScopedCapStatus.evaluate(scoped: [fableCap(util: 90, used: 45, resetsAt: now.addingTimeInterval(-1))],
+                                               weekly: nil, now: now).isEmpty)
+    }
+
+    func testCapAlertsFireOnceAndOnlyWhenTheCapBindsFirst() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(2 * 86400)
+        let weekly = LimitWindow(utilization: 40, resetsAt: reset)
+        let caps = ScopedCapStatus.evaluate(scoped: [fableCap(util: 92, used: 46, resetsAt: reset)],
+                                            weekly: weekly, now: now)
+        var state = LimitAlertState()
+        func run(_ c: [ScopedCapStatus]) -> [String] {
+            LimitAlerts.evaluate(session: nil, weekly: weekly, sessionProjection: nil, weeklyProjection: nil,
+                                 status: nil, warnThreshold: 80, scopedCaps: c, state: &state, now: now).map(\.id)
+        }
+        // Crossed 75 and 90 at once → only the higher tier, plus the pace warning.
+        XCTAssertEqual(Set(run(caps)), ["cap-Fable-90", "risk-cap-Fable"])
+        XCTAssertEqual(run(caps), [])   // once per episode
+        // Week rolled over (cap no longer live) → re-armed.
+        _ = run([])
+        XCTAssertNil(state.scopedTier)
+        // Weekly is the tighter limit → silent, but the tier still advances.
+        let loose = ScopedCapStatus.evaluate(scoped: [fableCap(util: 92, used: 46, resetsAt: reset)],
+                                             weekly: LimitWindow(utilization: 97, resetsAt: reset), now: now)
+        XCTAssertEqual(run(loose).filter { $0.contains("cap") }, [])
+        XCTAssertEqual(state.scopedTier?["Fable"], 2)
+    }
+
+    func testBindingCapGetsATipAndTheHeadline() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let reset = now.addingTimeInterval(2 * 86400)
+        let weekly = LimitWindow(utilization: 40, resetsAt: reset)
+        let caps = ScopedCapStatus.evaluate(scoped: [fableCap(util: 92, used: 46, resetsAt: reset)],
+                                            weekly: weekly, now: now)
+        let tips = Advice.compute(session: nil, weekly: nil, sessionUtil: nil, weeklyUtil: 40, models: [],
+                                  warnThreshold: 80, now: now, scopedCaps: caps)
+        let tip = tips.first { $0.kind == .modelCap }
+        XCTAssertEqual(tip?.level, .warn)
+        XCTAssertTrue(tip?.text.contains("Fable 모델만 막혀요") ?? false)
+        // Weekly alone reads safe; the cap makes the badge say otherwise.
+        let h = PlanStatus.headline(session: nil, weekly: WindowRisk(utilization: 40, projection: nil, imminentWindow: 86400),
+                                    caps: caps.map { ("Fable 전용", $0.risk) })
+        XCTAssertNotEqual(h.tier, .safe)
+        XCTAssertTrue(h.text.contains("Fable 전용"))
+    }
+
+    func testWeeklyPeaksFollowResetsAndIgnoreAMidWeekRescale() {
+        let reset = Date(timeIntervalSince1970: 1_800_000_000)
+        let now = reset.addingTimeInterval(-86400)          // a day before this week's reset
+        let day: TimeInterval = 86400
+        func at(_ daysBeforeReset: Double, _ u: Double) -> UsageSample {
+            UsageSample(at: reset.addingTimeInterval(-daysBeforeReset * day), session: nil, weekly: u)
+        }
+        let samples = [
+            // Last week (8–14 days before this reset): rose to 82, rescaled to 36, ended at 55.
+            at(13, 30), at(11, 82), at(10.9, 36), at(8.5, 55),
+            // The week before: peak 70, right up to its reset edge.
+            at(14.5, 70),
+        ]
+        // Reset-aligned: the 14.5-day reading is the week before, not last week.
+        XCTAssertEqual(PlanFitSignal.weeklyPeaks(samples: samples, now: now, weeks: 3, resetsAt: reset), [55, 70])
+    }
+
     func testFractionClampsAtFull() {
         let w = LimitWindow(utilization: 130, resetsAt: nil)
         XCTAssertEqual(w.fraction, 1.0, accuracy: 0.0001)

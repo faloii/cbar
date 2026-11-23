@@ -30,6 +30,10 @@ struct LimitAlertState: Equatable, Codable {
     var blockImminent = false // session block within the lead time notified
     var weeklyTier = 0        // highest weekly severity tier notified (0 = none)
     var prevSessionUtil: Double?
+    /// Per-model cap tier notified (model → 0…3) and projected-to-exhaust flags.
+    /// Optional so a state saved before caps existed still decodes.
+    var scopedTier: [String: Int]?
+    var scopedRisk: [String]?
     /// When each cooled-down alert id last fired (see `LimitAlerts.cooldowns`).
     var lastFired: [String: Date] = [:]
 
@@ -73,6 +77,11 @@ enum LimitAlerts {
         "risk-weekly": 6 * 3600,
         "risk-session": 3600,
     ]
+    static func cooldown(for id: String) -> TimeInterval? {
+        cooldowns[id] ?? (id.hasPrefix("risk-cap-") ? 6 * 3600 : nil)
+    }
+    /// Per-model cap tiers, on the cap's own %.
+    static let capTiers: [Double] = [75, 90, 100]
 
     /// Which window is doing the blocking, and when it frees up. A full window's
     /// reset is the real wait — the session resetting first doesn't help while the
@@ -93,6 +102,7 @@ enum LimitAlerts {
                          sessionProjection: Projection?, weeklyProjection: Projection?,
                          status: String?, warnThreshold: Int,
                          blockWarnLeadMinutes: Int = 30,
+                         scopedCaps: [ScopedCapStatus] = [],
                          state: inout LimitAlertState, now: Date) -> [LimitAlert] {
         var out: [LimitAlert] = []
         let t = Double(warnThreshold)
@@ -191,6 +201,53 @@ enum LimitAlerts {
             state.weeklyTier = 0
         }
 
+        // 2c) Per-model weekly caps (Fable on Max/Ultra). Hitting one stops only
+        //     that model, so name it and point at the others. Silent while the
+        //     weekly limit is the tighter one — its own alerts already cover it —
+        //     but the tier still advances so a cap that later binds first doesn't
+        //     replay a level crossed earlier. Only the highest newly crossed tier
+        //     fires: lower ones add nothing once you're past them.
+        var capTier = state.scopedTier ?? [:]
+        var capRisk = Set(state.scopedRisk ?? [])
+        for c in scopedCaps {
+            let m = c.cap.model
+            let u = c.cap.window.utilization
+            let crossed = capTiers.lastIndex(where: { u >= $0 }).map { $0 + 1 } ?? 0
+            if crossed > (capTier[m] ?? 0), c.bindsFirst {
+                switch crossed {
+                case 1:
+                    out.append(LimitAlert(id: "cap-\(m)-75", title: "\(m) 전용 한도 75%",
+                        body: "\(m) 몫의 3/4을 썼어요. 주간 한도보다 \(m) 한도가 먼저 차요. 가벼운 작업은 다른 모델로 옮기세요.",
+                        urgency: .nudge))
+                case 2:
+                    out.append(LimitAlert(id: "cap-\(m)-90", title: "\(m) 전용 한도 90% — 곧 \(m)만 막혀요",
+                        body: "주간 한도가 남아도 \(m) 모델은 곧 못 써요. 남은 작업은 다른 모델로 돌리세요."))
+                default:
+                    let when = c.cap.window.resetsAt.map { "\(Fmt.mediumCountdown(to: $0, from: now)) 뒤 리셋까지" } ?? "리셋까지"
+                    out.append(LimitAlert(id: "cap-\(m)-100", title: "\(m) 전용 한도 도달",
+                        body: "\(when) \(m) 모델은 못 써요. 다른 모델은 주간 한도 안에서 계속 쓸 수 있어요."))
+                }
+            }
+            capTier[m] = crossed
+            // Trajectory, like the weekly one: only once exhaustion is near.
+            let p = c.projection
+            if c.bindsFirst, crossed < capTiers.count, p.verdict == .atRisk,
+               let ttf = p.timeToFull, ttf <= weeklyRiskHorizon, !capRisk.contains(m) {
+                capRisk.insert(m)
+                out.append(LimitAlert(id: "risk-cap-\(m)", title: "\(m) 전용 한도 곧 소진",
+                    body: "이 페이스면 약 \(countdown(ttf)) 뒤 \(m) 모델만 막혀요. 주간 한도는 남으니 남은 작업은 다른 모델로 나눠 쓰세요.",
+                    urgency: .nudge))
+            } else if clearlySafe(p) {
+                capRisk.remove(m)
+            }
+        }
+        // A cap no longer reported live (its week rolled over) re-arms.
+        let live = Set(scopedCaps.map(\.cap.model))
+        capTier = capTier.filter { live.contains($0.key) }
+        capRisk.formIntersection(live)
+        state.scopedTier = capTier.isEmpty ? nil : capTier
+        state.scopedRisk = capRisk.isEmpty ? nil : capRisk.sorted()
+
         // 3) Actually blocked right now. A cached `rejected` came from the SAME fetch
         //    as the windows — once ANY of them has passed its reset, that status is
         //    stale. (Requiring ALL to expire let a still-live weekly window keep a
@@ -277,10 +334,10 @@ enum LimitAlerts {
 
         // Cooldowns: drop a repeat of the same id inside its minimum gap.
         out.removeAll { a in
-            guard let gap = cooldowns[a.id], let last = state.lastFired[a.id] else { return false }
+            guard let gap = cooldown(for: a.id), let last = state.lastFired[a.id] else { return false }
             return now.timeIntervalSince(last) < gap
         }
-        for a in out where cooldowns[a.id] != nil { state.lastFired[a.id] = now }
+        for a in out where cooldown(for: a.id) != nil { state.lastFired[a.id] = now }
 
         // nil while expired, so the eventual fresh low reading doesn't look like a
         // "sharp drop" and re-fire the reset alerts a second time.
