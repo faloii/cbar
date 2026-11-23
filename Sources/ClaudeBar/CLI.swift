@@ -84,7 +84,13 @@ enum CLI {
                                                            windowSeconds: 7 * 24 * 3600, now: now) }
                 limit("Session 5h", l.session5h, sp)
                 limit("Weekly 7d", l.weekly7d, wp)
-                limit("Weekly Opus", l.weeklyOpus, nil)
+                for sc in l.scopedWeekly {
+                    limit("Weekly \(sc.model)", sc.window, nil)
+                    if let a = sc.allowancePctOfWeekly {
+                        line("", "cap: \(Int(a.rounded()))% of weekly"
+                             + (sc.usedPctOfWeekly.map { ", used \(Int($0.rounded()))% of weekly" } ?? ""))
+                    }
+                }
             } else {
                 line("(unavailable)", l.error ?? "no data")
             }
@@ -198,6 +204,10 @@ enum CLI {
            LimitCalibration.sameWindow(reset, snapReset),
            let d = LimitCalibration.dollarsPerPercent(windowCost: s.weeklyWindowCost, util: w.utilization) {
             obj["weeklyDollarsPerPercent"] = d
+            let scoped = (limits?.scopedWeekly ?? []).filter { !$0.window.expired(asOf: s.generatedAt) }
+            obj["weeklyTurnsLeft"] = WeeklyModelTurns.compute(window: s.weeklyWindowByModel,
+                                                              weeklyUtil: w.utilization, scoped: scoped)
+                .map { ["model": $0.model, "turns": $0.turns, "capped": $0.capped] as [String: Any] }
         }
         if let l = limits {
             obj["planLimits"] = [
@@ -206,7 +216,11 @@ enum CLI {
                 "error": l.error as Any,
                 "session5h": windowObj(l.session5h),
                 "weekly7d": windowObj(l.weekly7d),
-                "weeklyOpus": windowObj(l.weeklyOpus),
+                "weeklyScoped": l.scopedWeekly.map { sc -> [String: Any] in
+                    ["model": sc.model, "window": windowObj(sc.window),
+                     "allowancePctOfWeekly": sc.allowancePctOfWeekly as Any,
+                     "usedPctOfWeekly": sc.usedPctOfWeekly as Any]
+                },
             ]
         }
         if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys]),

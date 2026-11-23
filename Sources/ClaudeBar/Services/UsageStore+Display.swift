@@ -183,12 +183,18 @@ extension UsageStore {
         return LimitCalibration.dollarsPerPercent(windowCost: snapshot.weeklyWindowCost, util: w.utilization)
     }
 
-    /// "남은 주간 N% ≈ 모델 X 약 M턴" — per-turn cost over the weekly window, which
+    /// Per-model weekly caps whose window is still live (Fable on Max/Ultra).
+    var liveScopedWeekly: [ScopedWeeklyLimit] {
+        (limits?.scopedWeekly ?? []).filter { !$0.window.expired(asOf: Date()) }
+    }
+
+    /// "남은 주간 N% ≈ 모델 X 약 M턴", priced per model under the plan's per-model
+    /// weekly caps — see `WeeklyModelTurns`. Per-turn cost over the weekly window
     /// is steadier than the 5h window's.
-    var weeklyModelTurnsLeft: [(model: String, turns: Int)] {
+    var weeklyModelTurnsLeft: [WeeklyModelTurns.Row] {
         guard let u = liveWeekly?.utilization, weeklyDollarsPerPercent != nil else { return [] }
-        let rows = ModelBurn.rows(window: snapshot.weeklyWindowByModel, sessionUtil: u, basis: .cost)
-        return ModelBurn.turnsLeft(rows: rows, sessionUtil: u)
+        return WeeklyModelTurns.compute(window: snapshot.weeklyWindowByModel, weeklyUtil: u,
+                                        scoped: liveScopedWeekly)
     }
 
     /// Highest of the live session/weekly utilizations, or nil if unavailable.

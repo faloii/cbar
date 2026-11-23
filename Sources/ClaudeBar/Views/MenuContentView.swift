@@ -363,8 +363,12 @@ struct MenuContentView: View {
                                                                  secondsToReset: w.resetsAt?.timeIntervalSince(snap.generatedAt)),
                               projection: store.weeklyProjection, imminentWindow: 24 * 3600)
                 }
-                if let w = l.weeklyOpus, !w.expired(asOf: snap.generatedAt) {
-                    RingGauge(title: "Opus", window: w, now: snap.generatedAt)
+                // Per-model weekly caps (Fable on Max/Ultra): % of that model's own
+                // allowance, on the same weekly clock as the all-model ring.
+                ForEach(store.liveScopedWeekly) { s in
+                    RingGauge(title: s.model, window: s.window, now: snap.generatedAt,
+                              paceFraction: Pace.elapsedFraction(windowSeconds: 7 * 24 * 3600,
+                                                                 secondsToReset: s.window.resetsAt?.timeIntervalSince(snap.generatedAt)))
                 }
             }
             .padding(.top, 2)
@@ -412,6 +416,15 @@ struct MenuContentView: View {
                         ProjectionLine(tag: "주간", window: w, projection: store.weeklyProjection, now: snap.generatedAt)
                         if let budget = store.weeklyAllowance {
                             WeeklyAllowanceLine(budget: budget)
+                        }
+                        ForEach(store.liveScopedWeekly) { s in
+                            if let a = s.allowancePctOfWeekly {
+                                let used = s.usedPctOfWeekly.map { "(주간의 \(Int($0.rounded()))%)" } ?? ""
+                                Text("\(s.model) 전용 한도: 주간 한도의 \(Int(a.rounded()))%까지 · 그중 \(Int(s.window.utilization.rounded()))% 사용\(used)")
+                                    .font(.caption2).foregroundStyle(.secondary).monospacedDigit()
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .help("\(s.model) 사용량은 이 전용 한도와 주간 전체 한도에서 함께 빠져요. 둘 중 하나가 차면 \(s.model)는 멈추고, 다른 모델은 주간 전체 한도 안에서 계속 쓸 수 있어요.")
+                            }
                         }
                     }
                     .padding(.top, 6)
@@ -665,7 +678,9 @@ struct MenuContentView: View {
             }
         }
         if let d = store.weeklyDollarsPerPercent {
-            let turns = store.weeklyModelTurnsLeft.map { "\($0.model) 약 \($0.turns)턴" }.joined(separator: " · ")
+            let turns = store.weeklyModelTurnsLeft
+                .map { "\($0.model) 약 \($0.turns)턴" + ($0.capped ? "(전용 한도 기준)" : "") }
+                .joined(separator: " · ")
             Text("주간 1% ≈ \(Fmt.usd(d))" + (turns.isEmpty ? "" : " · 남은 주간 한도 ≈ \(turns)"))
                 .font(.caption2).foregroundStyle(.secondary).monospacedDigit()
                 .fixedSize(horizontal: false, vertical: true)

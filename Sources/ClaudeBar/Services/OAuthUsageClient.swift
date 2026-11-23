@@ -162,27 +162,58 @@ struct OAuthUsageClient: Sendable {
         }
         snap.status = root["status"] as? String ?? root["unified_status"] as? String
 
+        func number(_ any: Any?) -> Double? { (any as? Double) ?? (any as? Int).map(Double.init) }
+        func date(_ any: Any?) -> Date? {
+            if let s = any as? String { return DateParse.iso(s) }
+            return number(any).map { Date(timeIntervalSince1970: $0) }
+        }
         func window(_ keys: [String]) -> LimitWindow? {
             for key in keys {
                 guard let o = root[key] as? [String: Any] else { continue }
-                let utilAny = o["utilization"] ?? o["used_percent"]
-                let util = (utilAny as? Double) ?? Double(utilAny as? Int ?? 0)
-                var reset: Date?
-                if let s = o["resets_at"] as? String { reset = DateParse.iso(s) }
-                else if let n = o["resets_at"] as? Double { reset = Date(timeIntervalSince1970: n) }
-                else if let n = o["resets_at"] as? Int { reset = Date(timeIntervalSince1970: Double(n)) }
-                return LimitWindow(utilization: util, resetsAt: reset)
+                return LimitWindow(utilization: number(o["utilization"] ?? o["used_percent"]) ?? 0,
+                                   resetsAt: date(o["resets_at"]))
             }
             return nil
         }
 
         snap.session5h  = window(["five_hour"])
         snap.weekly7d   = window(["seven_day"])
-        // Only the Opus-specific cap: `seven_day_oauth_apps` is a different quota
-        // (third-party OAuth apps) and used to be shown under the "Opus" label.
-        snap.weeklyOpus = window(["seven_day_opus"])
+        snap.weeklyScoped = Self.scopedWeekly(root, number: number, date: date, window: window)
         if !snap.hasData { snap.error = FetchError.badResponse.errorDescription }
         return snap
+    }
+
+    /// Per-model weekly caps. Current shape: `limits[]` entries of kind
+    /// "weekly_scoped" whose `scope.model` names the family, sized by
+    /// `weekly_scoped_shares[]` (matched on `limit_index`, the entry's index in
+    /// `limits`). Older shape: top-level `seven_day_opus` / `seven_day_sonnet`.
+    /// Surface-scoped entries and `seven_day_oauth_apps` (third-party OAuth apps)
+    /// are different quotas, not model caps.
+    private static func scopedWeekly(_ root: [String: Any],
+                                     number: (Any?) -> Double?, date: (Any?) -> Date?,
+                                     window: ([String]) -> LimitWindow?) -> [ScopedWeeklyLimit]? {
+        var shares: [Int: [String: Any]] = [:]
+        for s in root["weekly_scoped_shares"] as? [[String: Any]] ?? [] {
+            if let i = number(s["limit_index"]) { shares[Int(i)] = s }
+        }
+        var out: [ScopedWeeklyLimit] = []
+        for (i, o) in (root["limits"] as? [[String: Any]] ?? []).enumerated()
+        where o["kind"] as? String == "weekly_scoped" {
+            let model = (o["scope"] as? [String: Any])?["model"] as? [String: Any]
+            guard let name = (model?["display_name"] as? String) ?? (model?["id"] as? String), !name.isEmpty,
+                  let pct = number(o["percent"] ?? o["utilization"]) else { continue }
+            out.append(ScopedWeeklyLimit(
+                model: name, window: LimitWindow(utilization: pct, resetsAt: date(o["resets_at"])),
+                allowancePctOfWeekly: number(shares[i]?["allowance_percent_of_weekly"]),
+                usedPctOfWeekly: number(shares[i]?["used_percent_of_weekly"])))
+        }
+        for (key, name) in [("seven_day_opus", "Opus"), ("seven_day_sonnet", "Sonnet")]
+        where !out.contains(where: { $0.covers(name) }) {
+            if let w = window([key]) {
+                out.append(ScopedWeeklyLimit(model: name, window: w, allowancePctOfWeekly: nil, usedPctOfWeekly: nil))
+            }
+        }
+        return out.isEmpty ? nil : out
     }
 
     private func userAgent() -> String {

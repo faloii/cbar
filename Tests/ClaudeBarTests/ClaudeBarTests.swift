@@ -599,6 +599,28 @@ final class ModelBurnTests: XCTestCase {
         XCTAssertEqual(sparse.first { $0.model == "Opus" }!.burnMultiplier, 5.0, accuracy: 0.001)
     }
 
+    func testWeeklyTurnsPriceTheCappedModelFromItsOwnReportedUse() {
+        // Weekly 40%; Fable cost $360 but the plan says Fable used only 6% of weekly
+        // → Fable $60/%, everything else $462/34% ≈ $13.59/%.
+        let fable = ScopedWeeklyLimit(model: "Fable", window: LimitWindow(utilization: 12, resetsAt: nil),
+                                      allowancePctOfWeekly: 50, usedPctOfWeekly: 6)
+        let window = [model("Opus 5.5", total: 1, requests: 462, cost: 462),    // $1/turn
+                      model("Fable 5.2", total: 1, requests: 180, cost: 360)]   // $2/turn
+        let rows = WeeklyModelTurns.compute(window: window, weeklyUtil: 40, scoped: [fable])
+        let byModel = Dictionary(uniqueKeysWithValues: rows.map { ($0.model, $0) })
+        // Fable: its cap has 44% of weekly left × $60/% ÷ $2/turn = 1320 turns.
+        XCTAssertEqual(byModel["Fable 5.2"]?.turns, 1320)
+        XCTAssertEqual(byModel["Fable 5.2"]?.capped, true)
+        // Opus: 60% left × $13.59/% ÷ $1/turn ≈ 815 turns.
+        XCTAssertEqual(byModel["Opus 5.5"]?.turns, 815)
+        XCTAssertEqual(byModel["Opus 5.5"]?.capped, false)
+
+        // No cap reported → one blended rate ($822/40% ≈ $20.55/%) for everyone.
+        let plain = WeeklyModelTurns.compute(window: window, weeklyUtil: 40, scoped: [])
+        XCTAssertEqual(plain.first { $0.model == "Fable 5.2" }?.turns, 616)   // 60 × 20.55 / 2
+        XCTAssertEqual(plain.first { $0.model == "Fable 5.2" }?.capped, false)
+    }
+
     func testCostBasisChangesShareAndMultiplier() {
         // Equal tokens, but Opus costs far more → cost basis reorders & re-weights.
         let window = [model("Opus", total: 500_000, requests: 5, cost: 300),
@@ -1139,7 +1161,34 @@ final class OAuthUsageParseTests: XCTestCase {
         XCTAssertEqual(snap.session5h?.fraction ?? 0, 0.42, accuracy: 0.0001)
         XCTAssertNotNil(snap.session5h?.resetsAt)
         XCTAssertEqual(snap.weekly7d?.utilization ?? 0, 86.5, accuracy: 0.0001)
-        XCTAssertNil(snap.weeklyOpus)
+        XCTAssertTrue(snap.scopedWeekly.isEmpty)
+    }
+
+    func testParsesModelScopedWeeklyCap() {
+        // Current shape: the Fable cap is a `weekly_scoped` entry in `limits`, sized
+        // by `weekly_scoped_shares` (limit_index = its index in `limits`). The
+        // surface-scoped entry is a different quota, not a model cap.
+        let json = """
+        {"five_hour":{"utilization":44,"resets_at":"2026-11-23T07:10:00.300231+00:00"},
+         "seven_day":{"utilization":40,"resets_at":"2026-11-24T11:00:00.300249+00:00"},
+         "seven_day_opus":null,
+         "limits":[
+          {"kind":"session","percent":44,"resets_at":"2026-11-23T07:10:00Z","scope":null},
+          {"kind":"weekly_all","percent":40,"resets_at":"2026-11-24T11:00:00Z","scope":null},
+          {"kind":"weekly_scoped","percent":12,"resets_at":"2026-11-24T11:00:00.300399+00:00",
+           "scope":{"model":{"id":null,"display_name":"Fable"},"surface":null}},
+          {"kind":"weekly_scoped","percent":70,"resets_at":"2026-11-24T11:00:00Z",
+           "scope":{"model":null,"surface":"cowork"}}],
+         "weekly_scoped_shares":[{"limit_index":2,"used_percent_of_weekly":6,"allowance_percent_of_weekly":50}]}
+        """.data(using: .utf8)!
+        let snap = OAuthUsageClient.parse(json)
+        XCTAssertEqual(snap.scopedWeekly.count, 1)
+        let f = snap.scopedWeekly.first
+        XCTAssertEqual(f?.model, "Fable")
+        XCTAssertEqual(f?.window.utilization, 12)
+        XCTAssertNotNil(f?.window.resetsAt)
+        XCTAssertEqual(f?.allowancePctOfWeekly, 50)
+        XCTAssertEqual(f?.usedPctOfWeekly, 6)
     }
 
     func testParsesOpusAndEpochReset() {
@@ -1149,8 +1198,26 @@ final class OAuthUsageParseTests: XCTestCase {
          "seven_day_opus":{"utilization":33,"resets_at":"2026-06-16T10:59:59Z"}}
         """.data(using: .utf8)!
         let snap = OAuthUsageClient.parse(json)
-        XCTAssertEqual(snap.weeklyOpus?.utilization, 33)
+        XCTAssertEqual(snap.scopedWeekly.map(\.model), ["Opus"])   // older shape still read
+        XCTAssertEqual(snap.scopedWeekly.first?.window.utilization, 33)
+        XCTAssertNil(snap.scopedWeekly.first?.allowancePctOfWeekly)
         XCTAssertNotNil(snap.session5h?.resetsAt) // epoch number parsed
+    }
+
+    func testScopedCapCoversItsFamilyAndBoundsWhatsLeft() {
+        let fable = ScopedWeeklyLimit(model: "Fable", window: LimitWindow(utilization: 12, resetsAt: nil),
+                                      allowancePctOfWeekly: 50, usedPctOfWeekly: 6)
+        XCTAssertTrue(fable.covers("Fable 5.2"))
+        XCTAssertTrue(fable.covers("Claude Fable 5"))
+        XCTAssertFalse(fable.covers("Opus 5.5"))
+        // Weekly 40% used: 60% left overall, but Fable's own cap has 50 − 6 = 44% left.
+        XCTAssertEqual(fable.remainingPctOfWeekly(weeklyUtil: 40), 44)
+        // Weekly nearly gone: the weekly limit binds before the cap does.
+        XCTAssertEqual(fable.remainingPctOfWeekly(weeklyUtil: 90), 10)
+        // No `used` reported: derive it from the cap's own % (12% of 50 = 6).
+        let noUsed = ScopedWeeklyLimit(model: "Fable", window: LimitWindow(utilization: 12, resetsAt: nil),
+                                       allowancePctOfWeekly: 50, usedPctOfWeekly: nil)
+        XCTAssertEqual(noUsed.remainingPctOfWeekly(weeklyUtil: 40) ?? 0, 44, accuracy: 0.001)
     }
 
     func testFractionClampsAtFull() {

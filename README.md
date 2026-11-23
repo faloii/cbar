@@ -40,8 +40,10 @@ Plus an **optional live fetch** of your real plan limits (see
   today's tokens/cost. Turns into an orange ⚠︎ when a limit crosses your warning
   threshold, with an optional macOS notification.
 - **Plan limits** (live) — your real **Session (5h)** and **Weekly (7d)** usage as
-  percentages with reset countdowns, exactly like Claude Code's `/usage`. Falls back to
-  a cached value (flagged) if a refresh fails.
+  percentages with reset countdowns, exactly like Claude Code's `/usage`, plus any
+  **per-model weekly cap** the plan reports (Fable on Max/Ultra: up to 50% of the weekly
+  limit) as its own ring, with how much of the weekly limit that model has used. Falls
+  back to a cached value (flagged) if a refresh fails.
 - **Burn-rate projection** — tracks your usage over time and tells you whether you'll
   hit the cap *before* the window resets: `▲ 22%/h · full in 1h32m — 2h22m before reset`
   when you're on track to run dry, or `▲ 8%/h · lasts past reset` when you're fine. Lets
@@ -54,7 +56,8 @@ Plus an **optional live fetch** of your real plan limits (see
   what tracks plan utilization; see [Pricing](#pricing)), **total tokens**, or **fresh
   tokens** (new work, no cache reads). Below the rows: "1% ≈ $X" read off the live window,
   how many turns of each top model the remaining limit covers, the same two figures for the
-  weekly limit (read off the live weekly window), and a warning when the session ratio
+  weekly limit (read off the live weekly window; a capped model is priced from its own
+  reported use and only counts what's left of its cap), and a warning when the session ratio
   drifts far from its usual value or a model isn't in the price table.
 - **Today** — tokens, estimated cost, request count, sessions, and tool calls (computed
   live from the session logs; Claude Code's zero-usage `<synthetic>` placeholder turns
