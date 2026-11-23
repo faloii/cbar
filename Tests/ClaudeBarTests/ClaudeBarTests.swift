@@ -1663,6 +1663,18 @@ final class WeeklyResetRecapTests: XCTestCase {
         XCTAssertFalse(WeeklyResetRecap.justReset(old: t, new: t))
     }
 
+    func testSubSecondJitterIsNotAReset() {
+        // The API's resetsAt carries a fraction that drifts between fetches
+        // ("…00.523", "…00.611"); each upward drift used to re-fire the recap.
+        XCTAssertFalse(WeeklyResetRecap.justReset(old: t, new: t.addingTimeInterval(0.088)))
+        XCTAssertFalse(WeeklyResetRecap.justReset(old: t, new: t.addingTimeInterval(90)))
+    }
+
+    func testStaleOldValueIsNotAReset() {
+        // A value left from months ago (rollovers unrecorded) isn't "just reset".
+        XCTAssertFalse(WeeklyResetRecap.justReset(old: t, new: t.addingTimeInterval(150 * 86400)))
+    }
+
     func testFirstObservationIsNeverAReset() {
         XCTAssertFalse(WeeklyResetRecap.justReset(old: nil, new: t))
         XCTAssertFalse(WeeklyResetRecap.justReset(old: t, new: nil))

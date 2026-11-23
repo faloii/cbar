@@ -13,14 +13,21 @@ extension UsageStore {
     /// when live limits are on (so the recap lands right when last week wraps up),
     /// falling back to a rolling ~7-day timer when they're off (no reset to observe).
     func maybeWeeklySummary() {
-        guard weeklySummaryEnabled, let r = snapshot.weeklyReview else { return }
         let newResetsAt = limits?.weekly7d?.resetsAt
-        if enableLiveLimits, newResetsAt != nil {
+        let live = enableLiveLimits && newResetsAt != nil
+        if live {
             guard WeeklyResetRecap.justReset(old: lastSeenWeeklyResetsAt, new: newResetsAt) else {
                 lastSeenWeeklyResetsAt = newResetsAt
                 return
             }
-        } else {
+        }
+        // Tracked above even with the recap off or nothing to summarize: returning
+        // before it left a months-old value that later read as a fresh reset.
+        guard weeklySummaryEnabled, let r = snapshot.weeklyReview else {
+            if live { lastSeenWeeklyResetsAt = newResetsAt }   // consumed — nothing to send
+            return
+        }
+        if !live {
             guard Date().timeIntervalSince1970 - lastWeeklySummaryAt >= 7 * 86400 else { return }
         }
         // Quiet hours/snooze: leave the reset "unconsumed" so this is retried (not
